@@ -62,19 +62,19 @@ def webhook():
 
     return jsonify({"status": "ok"})
 
-@app.route("/webhook-wompi", methods=["POST"])
-def webhook_wompi():
+@app.route("/webhook", methods=["POST"])
+def webhook():
     data = request.json
-    referencia = data.get("referencia")
 
-    pedidos = leer_pedidos()
-    pedido = next((p for p in pedidos if p["id"] == referencia), None)
+    print("📩 REQUEST RECIBIDO:")
+    print(data)
 
-    if pedido:
-        pedido["estado"] = "pagado"
-        guardar_pedidos(pedidos)
+    numero = data.get("from")
+    texto = data.get("text")
 
-        print(f"\n📲 Enviando a {pedido['numero']}:\n✅ Pago recibido. Tu pedido está en preparación 🍔\n")
+    respuesta = procesar_mensaje(texto, numero)
+
+    print(f"\n📲 Enviando a {numero}:\n{respuesta}\n")
 
     return jsonify({"status": "ok"})
 
