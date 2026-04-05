@@ -4,36 +4,16 @@ import uuid
 import os
 import requests
 
-TOKEN = "EAAUn9pg7tjIBRMgbZBcOwl2YTOC4qDiOxhZAeNzI7mZATdPxZCQdqAEz7T38jZB3JgfLbUMZCDM1MZBE33UYTn4nP0kHH282BMqoO1tWhqLVVv8nLWs8CKi3dZBGwZBfq8xokP1SLIg7bGZC9C78xT18LvbDtRLlKoXWZAC4ee9byLqWoLngwhRN8ZAKeIcYpCYtkC3jz2DmbUxEsZBZCZC3QVeTODvH1kAPIQPQzzS8fXBO8XIv1ZA0jgChK4kQuEq7bJvTmxDSyXkFLFgOm0PDozrTjlZCu3BYZD"
-PHONE_NUMBER_ID = "946960701843409"
-
-def enviar_whatsapp(numero, mensaje):
-
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
-
-    headers = {
-        "Authorization": f"Bearer {TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "messaging_product": "whatsapp",
-        "to": numero,
-        "type": "text",
-        "text": {
-            "body": mensaje
-        }
-    }
-
-    response = requests.post(url, headers=headers, json=data)
-    print("📤 Enviando a WhatsApp:", response.text, flush=True)
-
 app = Flask(__name__)
 
+# Cargar menú
 with open("menu.json") as f:
     menu = json.load(f)
 
+# Funciones para leer y guardar pedidos
 def leer_pedidos():
+    if not os.path.exists("pedidos.json"):
+        return []
     with open("pedidos.json") as f:
         return json.load(f)
 
@@ -41,9 +21,11 @@ def guardar_pedidos(pedidos):
     with open("pedidos.json", "w") as f:
         json.dump(pedidos, f, indent=2)
 
+# Generar link de pago (demo)
 def generar_link_pago(total, referencia):
     return f"https://checkout.wompi.co/l/test_{referencia}_{total}"
 
+# Procesar mensaje de usuario
 def procesar_mensaje(texto, numero):
     texto = texto.lower()
 
@@ -51,7 +33,7 @@ def procesar_mensaje(texto, numero):
         return "🍔 Menú:\n- Hamburguesa ($18k)\n- Pizza ($25k)\n- Gaseosa ($5k)"
 
     for item in menu:
-        if item in texto:
+        if item.lower() in texto:
             total = menu[item]
             pedido_id = str(uuid.uuid4())
 
@@ -76,44 +58,55 @@ Paga aquí 👇
 Te confirmo cuando pagues ✅"""
     return "Hola 👋 escribe 'menu' para ver opciones"
 
+# Función para enviar mensaje a WhatsApp
+def enviar_whatsapp(numero, mensaje):
+    # token = os.environ.get("WHATSAPP_TOKEN")  # Tu token de WhatsApp Cloud
+    # phone_id = os.environ.get("WHATSAPP_PHONE_ID")  # Tu número de WhatsApp ID
+    token = "EAAUn9pg7tjIBRMgbZBcOwl2YTOC4qDiOxhZAeNzI7mZATdPxZCQdqAEz7T38jZB3JgfLbUMZCDM1MZBE33UYTn4nP0kHH282BMqoO1tWhqLVVv8nLWs8CKi3dZBGwZBfq8xokP1SLIg7bGZC9C78xT18LvbDtRLlKoXWZAC4ee9byLqWoLngwhRN8ZAKeIcYpCYtkC3jz2DmbUxEsZBZCZC3QVeTODvH1kAPIQPQzzS8fXBO8XIv1ZA0jgChK4kQuEq7bJvTmxDSyXkFLFgOm0PDozrTjlZCu3BYZD"
+    phone_id = "946960701843409"
+    url = f"https://graph.facebook.com/v15.0/{phone_id}/messages"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    data = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "text": {"body": mensaje}
+    }
+    r = requests.post(url, headers=headers, json=data)
+    print(f"📤 Enviando a {numero}: {mensaje}")
+    print("Status:", r.status_code, r.text)
+
+# Webhook principal
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
-
     if request.method == "GET":
+        # Verificación del token para Meta
         token = "mi_token_123"
         if request.args.get("hub.verify_token") == token:
             return request.args.get("hub.challenge")
-        return "Error"
+        return "Error: token inválido"
 
     if request.method == "POST":
-
         data = request.get_json(force=True)
+        print("\n====================")
+        print("📩 REQUEST RAW:")
+        print(data)
+        print("====================\n")
 
-        print("\n====================", flush=True)
-        print("📩 REQUEST RAW:", flush=True)
-        print(data, flush=True)
-        print("====================\n", flush=True)
-
-        if not data:
-            print("❌ No llegó JSON", flush=True)
-            return "no data"
-
-        numero = data.get("from")
-        texto = data.get("text")
-
-        print(f"👉 numero: {numero}", flush=True)
-        print(f"👉 texto: {texto}", flush=True)
-
-        if not texto:
-            print("❌ texto vacío", flush=True)
+        # Extraer número y texto correctamente
+        try:
+            mensaje = data["entry"][0]["changes"][0]["value"]["messages"][0]
+            numero = mensaje["from"]
+            texto = mensaje["text"]["body"]
+        except (KeyError, IndexError):
+            print("❌ No se pudo extraer número o texto")
             return "no text"
 
-        respuesta = procesar_mensaje(texto, numero)
-        
-        print("\n📲 RESPUESTA:", flush=True)
-        print(respuesta, flush=True)
-        print("====================\n", flush=True)
+        print(f"👉 numero: {numero}")
+        print(f"👉 texto: {texto}")
 
+        respuesta = procesar_mensaje(texto, numero)
+
+        # Enviar respuesta a WhatsApp
         enviar_whatsapp(numero, respuesta)
 
         return "ok"
