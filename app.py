@@ -64,30 +64,30 @@ def webhook():
 
         data = request.get_json(force=True)
 
-        print("\n====================")
-        print("📩 REQUEST RAW:")
-        print(data)
-        print("====================\n")
+        print("\n====================", flush=True)
+        print("📩 REQUEST RAW:", flush=True)
+        print(data, flush=True)
+        print("====================\n", flush=True)
 
         if not data:
-            print("❌ No llegó JSON")
+            print("❌ No llegó JSON", flush=True)
             return "no data"
 
         numero = data.get("from")
         texto = data.get("text")
 
-        print(f"👉 numero: {numero}")
-        print(f"👉 texto: {texto}")
+        print(f"👉 numero: {numero}", flush=True)
+        print(f"👉 texto: {texto}", flush=True)
 
         if not texto:
-            print("❌ texto vacío")
+            print("❌ texto vacío", flush=True)
             return "no text"
 
         respuesta = procesar_mensaje(texto, numero)
 
-        print("\n📲 RESPUESTA:")
-        print(respuesta)
-        print("====================\n")
+        print("\n📲 RESPUESTA:", flush=True)
+        print(respuesta, flush=True)
+        print("====================\n", flush=True)
 
         return "ok"
 
