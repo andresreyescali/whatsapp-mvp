@@ -61,28 +61,33 @@ def webhook():
         return "Error"
 
     if request.method == "POST":
-        data = request.json
+
+        data = request.get_json(force=True)
 
         print("\n====================")
-        print("📩 REQUEST RECIBIDO:")
+        print("📩 REQUEST RAW:")
         print(data)
         print("====================\n")
 
-        try:
-            numero = data.get("from")
-            texto = data.get("text")
+        if not data:
+            print("❌ No llegó JSON")
+            return "no data"
 
-            print(f"👉 numero: {numero}")
-            print(f"👉 texto: {texto}")
+        numero = data.get("from")
+        texto = data.get("text")
 
-            respuesta = procesar_mensaje(texto, numero)
+        print(f"👉 numero: {numero}")
+        print(f"👉 texto: {texto}")
 
-            print("\n📲 RESPUESTA GENERADA:")
-            print(respuesta)
-            print("====================\n")
+        if not texto:
+            print("❌ texto vacío")
+            return "no text"
 
-        except Exception as e:
-            print("❌ ERROR:", str(e))
+        respuesta = procesar_mensaje(texto, numero)
+
+        print("\n📲 RESPUESTA:")
+        print(respuesta)
+        print("====================\n")
 
         return "ok"
 
