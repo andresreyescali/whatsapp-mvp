@@ -2,6 +2,31 @@ from flask import Flask, request, jsonify
 import json
 import uuid
 import os
+import requests
+
+TOKEN = "EAAUn9pg7tjIBRMgbZBcOwl2YTOC4qDiOxhZAeNzI7mZATdPxZCQdqAEz7T38jZB3JgfLbUMZCDM1MZBE33UYTn4nP0kHH282BMqoO1tWhqLVVv8nLWs8CKi3dZBGwZBfq8xokP1SLIg7bGZC9C78xT18LvbDtRLlKoXWZAC4ee9byLqWoLngwhRN8ZAKeIcYpCYtkC3jz2DmbUxEsZBZCZC3QVeTODvH1kAPIQPQzzS8fXBO8XIv1ZA0jgChK4kQuEq7bJvTmxDSyXkFLFgOm0PDozrTjlZCu3BYZD"
+PHONE_NUMBER_ID = "946960701843409"
+
+def enviar_whatsapp(numero, mensaje):
+
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": "text",
+        "text": {
+            "body": mensaje
+        }
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+    print("📤 Enviando a WhatsApp:", response.text, flush=True)
 
 app = Flask(__name__)
 
@@ -84,10 +109,12 @@ def webhook():
             return "no text"
 
         respuesta = procesar_mensaje(texto, numero)
-
+        
         print("\n📲 RESPUESTA:", flush=True)
         print(respuesta, flush=True)
         print("====================\n", flush=True)
+
+        enviar_whatsapp(numero, respuesta)
 
         return "ok"
 
