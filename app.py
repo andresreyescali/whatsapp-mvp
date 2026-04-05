@@ -54,40 +54,35 @@ Te confirmo cuando pagues ✅"""
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
 
-    # 🔐 Verificación de Meta (GET)
     if request.method == "GET":
         token = "mi_token_123"
-
         if request.args.get("hub.verify_token") == token:
             return request.args.get("hub.challenge")
+        return "Error"
 
-        return "Error de verificación"
-
-    # 📩 Mensajes entrantes (POST)
     if request.method == "POST":
         data = request.json
 
+        print("\n====================")
         print("📩 REQUEST RECIBIDO:")
         print(data)
+        print("====================\n")
 
         try:
-            # Para pruebas manuales
-            if "from" in data:
-                numero = data.get("from")
-                texto = data.get("text")
+            numero = data.get("from")
+            texto = data.get("text")
 
-            # Para WhatsApp real (Meta)
-            else:
-                mensaje = data["entry"][0]["changes"][0]["value"]["messages"][0]
-                numero = mensaje["from"]
-                texto = mensaje["text"]["body"]
+            print(f"👉 numero: {numero}")
+            print(f"👉 texto: {texto}")
 
             respuesta = procesar_mensaje(texto, numero)
 
-            print(f"\n📲 Enviando a {numero}:\n{respuesta}\n")
+            print("\n📲 RESPUESTA GENERADA:")
+            print(respuesta)
+            print("====================\n")
 
         except Exception as e:
-            print("❌ Error:", e)
+            print("❌ ERROR:", str(e))
 
         return "ok"
 
