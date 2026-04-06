@@ -35,11 +35,12 @@ def procesar_mensaje(texto, numero):
     if "pague" in texto:
         pedidos = leer_pedidos()
         for p in pedidos:
-                if p["numero"] == numero:
+            if p["numero"] == numero:
                 p["estado"] = "pagado"
-                guardar_pedidos(pedidos)
+
+        guardar_pedidos(pedidos)
         return "Pago confirmado ✅"
-    
+
     for item in menu:
         if item.lower() in texto:
             total = menu[item]
@@ -53,20 +54,19 @@ def procesar_mensaje(texto, numero):
                 "total": total,
                 "estado": "pendiente_pago"
             })
+
             guardar_pedidos(pedidos)
 
             link = generar_link_pago(total, pedido_id)
 
             return f"""Perfecto 👍
-
-🆔 Pedido: {pedido_id}
-Producto: {item}
-Total: ${total}
+{item} - ${total}
 
 Paga aquí 👇
 {link}
 
-Te confirmo cuando pagues ✅"""
+Escribe 'ya pague' cuando completes el pago ✅"""
+
     return "Hola 👋 escribe 'menu' para ver opciones"
 
 # Función para enviar mensaje a WhatsApp
