@@ -32,6 +32,14 @@ def procesar_mensaje(texto, numero):
     if "menu" in texto:
         return "🍔 Menú:\n- Hamburguesa ($18k)\n- Pizza ($25k)\n- Gaseosa ($5k)"
 
+    if "pague" in texto:
+        pedidos = leer_pedidos()
+            for p in pedidos:
+                if p["numero"] == numero:
+                p["estado"] = "pagado"
+                guardar_pedidos(pedidos)
+        return "Pago confirmado ✅"
+    
     for item in menu:
         if item.lower() in texto:
             total = menu[item]
@@ -50,7 +58,10 @@ def procesar_mensaje(texto, numero):
             link = generar_link_pago(total, pedido_id)
 
             return f"""Perfecto 👍
-{item} - ${total}
+
+🆔 Pedido: {pedido_id}
+Producto: {item}
+Total: ${total}
 
 Paga aquí 👇
 {link}
@@ -110,6 +121,10 @@ def webhook():
         enviar_whatsapp(numero, respuesta)
 
         return "ok"
+
+@app.route("/pedidos", methods=["GET"])
+def ver_pedidos():
+    return jsonify(leer_pedidos())
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
