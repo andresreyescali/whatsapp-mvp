@@ -34,12 +34,13 @@ def procesar_mensaje(texto, numero):
 
     if "pague" in texto:
         pedidos = leer_pedidos()
-        for p in pedidos:
-            if p["numero"] == numero:
-                p["estado"] = "pagado"
+    for p in reversed(pedidos):
+        if p["numero"] == numero and p["estado"] == "pendiente_pago":
+            p["estado"] = "pagado"
+            break
 
-        guardar_pedidos(pedidos)
-        return "Pago confirmado! ✅"
+    guardar_pedidos(pedidos)
+    return "Pago confirmado ✅"
 
     for item in menu:
         if item.lower() in texto:
