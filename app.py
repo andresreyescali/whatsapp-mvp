@@ -74,7 +74,7 @@ Escribe 'ya pague' cuando completes el pago ✅"""
 def enviar_whatsapp(numero, mensaje):
     # token = os.environ.get("WHATSAPP_TOKEN")  # Tu token de WhatsApp Cloud
     # phone_id = os.environ.get("WHATSAPP_PHONE_ID")  # Tu número de WhatsApp ID
-    token = "EAAUn9pg7tjIBRKnoH5kKZATWEnsjLrps577KxT8LSEQrZCQODHZC8pHZCh46F12QHZAqAJNR12SiZAN5ZATv7vaobkAfkZAR5110XulH06tAKXLWCPZCGcqGnplZBWPdZBpBLqfITM9MBZBaurx4SVmCZAH9co6AODs9xaZBmVuuNqgLZCRZB2Wf73rSv91UQi82BX6RZCA3hAOv0E4CCO2VsTUpz3NAenbrMOZBVUPNuMBpDsYsQiXRv7A96uJy6ZC96Rxs3RhKFxgUMUOtRKZCQxOwZAcZArZBDQTPQZDZD"
+    token = "EAAUn9pg7tjIBRGX39XzT9ZBP0kSbZAiOdezTtEQADDj5wemCRtpD5FN7nd55DerlgDZB2afE5CZBYajWaf8rQ41yUP5nCeH2XE09MrLvujxjZBM8HP8WTM15MyGPeaWNZCZAQbe8iTSCqSZCzJmO74U37jijklK8jsoDHZBnVSaKVRSiWPSgEx1r7nqiMQdVmPRXMwWvZBl964RgOXuysmXZAp1EAX8ZBZCCVCOzoVmwEdMg808WcNTPy0ZB4jbsaqTX71KDKQZBFz3ZASRUDNZAn4MWHr6j8MQZDZD"
     phone_id = "946960701843409"
     url = f"https://graph.facebook.com/v15.0/{phone_id}/messages"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
