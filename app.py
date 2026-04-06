@@ -34,7 +34,7 @@ def procesar_mensaje(texto, numero):
 
     if "pague" in texto:
         pedidos = leer_pedidos()
-            for p in pedidos:
+        for p in pedidos:
                 if p["numero"] == numero:
                 p["estado"] = "pagado"
                 guardar_pedidos(pedidos)
