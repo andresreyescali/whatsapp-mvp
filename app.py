@@ -39,7 +39,7 @@ def procesar_mensaje(texto, numero):
                 p["estado"] = "pagado"
 
         guardar_pedidos(pedidos)
-        return "Pago confirmado ✅"
+        return "Pago confirmado! ✅"
 
     for item in menu:
         if item.lower() in texto:
