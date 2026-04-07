@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from datetime import datetime
 import json
 import uuid
 import os
@@ -18,7 +19,7 @@ with open("menu.json") as f:
 # ================================
 
 def get_db():
-    conn = sqlite3.connect("pedidos.db")
+    conn = sqlite3.connect("pedidos2.db")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -26,40 +27,67 @@ def init_db():
     conn = get_db()
     cursor = conn.cursor()
 
+    # TABLA NEGOCIOS
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS negocios (
+        id TEXT PRIMARY KEY,
+        nombre TEXT,
+        phone_id TEXT,
+        token TEXT,
+        menu TEXT
+    )
+    """)
+
+    # TABLA PEDIDOS (con negocio_id + fecha)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS pedidos (
         id TEXT PRIMARY KEY,
         numero TEXT,
         item TEXT,
         total INTEGER,
-        estado TEXT
+        estado TEXT,
+        negocio_id TEXT,
+        fecha TEXT
     )
     """)
 
     conn.commit()
     conn.close()
 
-def crear_pedido(pedido_id, numero, item, total):
+def obtener_negocio(phone_id):
     conn = get_db()
     cursor = conn.cursor()
 
+    cursor.execute("SELECT * FROM negocios WHERE phone_id = ?", (phone_id,))
+    row = cursor.fetchone()
+
+    conn.close()
+
+    return dict(row) if row else None
+
+def crear_pedido(pedido_id, numero, item, total, negocio_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     cursor.execute("""
-    INSERT INTO pedidos (id, numero, item, total, estado)
-    VALUES (?, ?, ?, ?, ?)
-    """, (pedido_id, numero, item, total, "pendiente_pago"))
+    INSERT INTO pedidos (id, numero, item, total, estado, negocio_id, fecha)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (pedido_id, numero, item, total, "pendiente_pago", negocio_id, fecha))
 
     conn.commit()
     conn.close()
 
-def marcar_pagado(numero):
+def marcar_pagado(numero, negocio_id):
     conn = get_db()
     cursor = conn.cursor()
 
     cursor.execute("""
     UPDATE pedidos
     SET estado = 'pagado'
-    WHERE numero = ? AND estado = 'pendiente_pago'
-    """, (numero,))
+    WHERE numero = ? AND negocio_id = ? AND estado = 'pendiente_pago'
+    """, (numero, negocio_id))
 
     conn.commit()
     conn.close()
@@ -85,28 +113,36 @@ def generar_link_pago(total, referencia):
 # Lógica de mensajes
 # ================================
 
-def procesar_mensaje(texto, numero):
+def procesar_mensaje(texto, numero, negocio):
     texto = texto.lower()
+    menu = json.loads(negocio["menu"])
 
+    # MENU dinámico
     if "menu" in texto:
-        return "🍔 Menú:\n- Hamburguesa ($18k)\n- Pizza ($25k)\n- Gaseosa ($5k)"
+        respuesta = "🍔 Menú:\n"
+        for item, precio in menu.items():
+            respuesta += f"- {item.capitalize()} (${precio})\n"
+        return respuesta
 
+    # Pago
     if "pague" in texto:
-        marcar_pagado(numero)
+        marcar_pagado(numero, negocio["id"])
         return "Pago confirmado! ✅ Tu pedido va en camino 🚀"
 
+    # Respuestas básicas (puedes mover a DB después)
     if "horario" in texto:
         return "🕒 Abrimos de 12pm a 10pm"
 
     if "ubicacion" in texto or "donde" in texto:
         return "📍 Estamos en Cali"
 
+    # Pedido
     for item in menu:
         if item.lower() in texto:
             total = menu[item]
             pedido_id = str(uuid.uuid4())
 
-            crear_pedido(pedido_id, numero, item, total)
+            crear_pedido(pedido_id, numero, item, total, negocio["id"])
 
             link = generar_link_pago(total, pedido_id)
 
@@ -127,16 +163,16 @@ Puedes escribir:
 📍 ubicación
 🕒 horario
 """
-
 # ================================
 # Enviar mensaje WhatsApp
 # ================================
 
-def enviar_whatsapp(numero, mensaje):
-    token = os.environ.get("WHATSAPP_TOKEN")
-    phone_id = os.environ.get("WHATSAPP_PHONE_ID")
+def enviar_whatsapp(numero, mensaje, negocio):
+    token = negocio["token"]
+    phone_id = negocio["phone_id"]
 
     url = f"https://graph.facebook.com/v15.0/{phone_id}/messages"
+
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
@@ -156,7 +192,6 @@ def enviar_whatsapp(numero, mensaje):
 # ================================
 # Webhook
 # ================================
-
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
@@ -174,15 +209,30 @@ def webhook():
         print("====================\n")
 
         try:
-            mensaje = data["entry"][0]["changes"][0]["value"]["messages"][0]
+            value = data["entry"][0]["changes"][0]["value"]
+
+            phone_id = value["metadata"]["phone_number_id"]
+            mensaje = value["messages"][0]
+
             numero = mensaje["from"]
             texto = mensaje["text"]["body"]
+
         except (KeyError, IndexError):
             print("❌ No se pudo extraer mensaje")
             return "no message"
 
-        respuesta = procesar_mensaje(texto, numero)
-        enviar_whatsapp(numero, respuesta)
+        # 🔥 MULTI-TENANT
+        negocio = obtener_negocio(phone_id)
+
+        if not negocio:
+            print("❌ Negocio no encontrado")
+            return "no negocio"
+
+        # 🔥 PASAR NEGOCIO
+        respuesta = procesar_mensaje(texto, numero, negocio)
+
+        # 🔥 ENVIAR CON TOKEN DEL NEGOCIO
+        enviar_whatsapp(numero, respuesta, negocio)
 
         return "ok"
 
