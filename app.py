@@ -3,29 +3,88 @@ import json
 import uuid
 import os
 import requests
+import sqlite3
 
 app = Flask(__name__)
 
+# ================================
 # Cargar menú
+# ================================
 with open("menu.json") as f:
     menu = json.load(f)
 
-# Funciones para leer y guardar pedidos
-def leer_pedidos():
-    if not os.path.exists("pedidos.json"):
-        return []
-    with open("pedidos.json") as f:
-        return json.load(f)
+# ================================
+# BASE DE DATOS (SQLite)
+# ================================
 
-def guardar_pedidos(pedidos):
-    with open("pedidos.json", "w") as f:
-        json.dump(pedidos, f, indent=2)
+def get_db():
+    conn = sqlite3.connect("pedidos.db")
+    conn.row_factory = sqlite3.Row
+    return conn
 
-# Generar link de pago (demo)
+def init_db():
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pedidos (
+        id TEXT PRIMARY KEY,
+        numero TEXT,
+        item TEXT,
+        total INTEGER,
+        estado TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+def crear_pedido(pedido_id, numero, item, total):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    INSERT INTO pedidos (id, numero, item, total, estado)
+    VALUES (?, ?, ?, ?, ?)
+    """, (pedido_id, numero, item, total, "pendiente_pago"))
+
+    conn.commit()
+    conn.close()
+
+def marcar_pagado(numero):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    UPDATE pedidos
+    SET estado = 'pagado'
+    WHERE numero = ? AND estado = 'pendiente_pago'
+    """, (numero,))
+
+    conn.commit()
+    conn.close()
+
+def obtener_pedidos():
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM pedidos")
+    rows = cursor.fetchall()
+
+    conn.close()
+    return [dict(row) for row in rows]
+
+# ================================
+# Pago (simulado)
+# ================================
+
 def generar_link_pago(total, referencia):
     return f"https://checkout.wompi.co/l/test_{referencia}_{total}"
 
-# Procesar mensaje de usuario
+# ================================
+# Lógica de mensajes
+# ================================
+
 def procesar_mensaje(texto, numero):
     texto = texto.lower()
 
@@ -33,33 +92,27 @@ def procesar_mensaje(texto, numero):
         return "🍔 Menú:\n- Hamburguesa ($18k)\n- Pizza ($25k)\n- Gaseosa ($5k)"
 
     if "pague" in texto:
-        pedidos = leer_pedidos()
-        for p in pedidos:
-            if p["numero"] == numero:
-                p["estado"] = "pagado"
+        marcar_pagado(numero)
+        return "Pago confirmado! ✅ Tu pedido va en camino 🚀"
 
-        guardar_pedidos(pedidos)
-        return "Pago confirmado! ✅"
+    if "horario" in texto:
+        return "🕒 Abrimos de 12pm a 10pm"
+
+    if "ubicacion" in texto or "donde" in texto:
+        return "📍 Estamos en Cali"
 
     for item in menu:
         if item.lower() in texto:
             total = menu[item]
             pedido_id = str(uuid.uuid4())
 
-            pedidos = leer_pedidos()
-            pedidos.append({
-                "id": pedido_id,
-                "numero": numero,
-                "item": item,
-                "total": total,
-                "estado": "pendiente_pago"
-            })
-
-            guardar_pedidos(pedidos)
+            crear_pedido(pedido_id, numero, item, total)
 
             link = generar_link_pago(total, pedido_id)
 
             return f"""Perfecto 👍
+
+🆔 Pedido: {pedido_id}
 {item} - ${total}
 
 Paga aquí 👇
@@ -67,30 +120,46 @@ Paga aquí 👇
 
 Escribe 'ya pague' cuando completes el pago ✅"""
 
-    return "Hola 👋 escribe 'menu' para ver opciones"
+    return """Hola 👋
 
-# Función para enviar mensaje a WhatsApp
+Puedes escribir:
+🍔 menu
+📍 ubicación
+🕒 horario
+"""
+
+# ================================
+# Enviar mensaje WhatsApp
+# ================================
+
 def enviar_whatsapp(numero, mensaje):
-    # token = os.environ.get("WHATSAPP_TOKEN")  # Tu token de WhatsApp Cloud
-    # phone_id = os.environ.get("WHATSAPP_PHONE_ID")  # Tu número de WhatsApp ID
-    token = "EAAUn9pg7tjIBRGX39XzT9ZBP0kSbZAiOdezTtEQADDj5wemCRtpD5FN7nd55DerlgDZB2afE5CZBYajWaf8rQ41yUP5nCeH2XE09MrLvujxjZBM8HP8WTM15MyGPeaWNZCZAQbe8iTSCqSZCzJmO74U37jijklK8jsoDHZBnVSaKVRSiWPSgEx1r7nqiMQdVmPRXMwWvZBl964RgOXuysmXZAp1EAX8ZBZCCVCOzoVmwEdMg808WcNTPy0ZB4jbsaqTX71KDKQZBFz3ZASRUDNZAn4MWHr6j8MQZDZD"
-    phone_id = "946960701843409"
+    token = os.environ.get("WHATSAPP_TOKEN")
+    phone_id = os.environ.get("WHATSAPP_PHONE_ID")
+
     url = f"https://graph.facebook.com/v15.0/{phone_id}/messages"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
     data = {
         "messaging_product": "whatsapp",
         "to": numero,
         "text": {"body": mensaje}
     }
+
     r = requests.post(url, headers=headers, json=data)
+
     print(f"📤 Enviando a {numero}: {mensaje}")
     print("Status:", r.status_code, r.text)
 
-# Webhook principal
+# ================================
+# Webhook
+# ================================
+
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        # Verificación del token para Meta
         token = "mi_token_123"
         if request.args.get("hub.verify_token") == token:
             return request.args.get("hub.challenge")
@@ -98,34 +167,42 @@ def webhook():
 
     if request.method == "POST":
         data = request.get_json(force=True)
+
         print("\n====================")
         print("📩 REQUEST RAW:")
         print(data)
         print("====================\n")
 
-        # Extraer número y texto correctamente
         try:
             mensaje = data["entry"][0]["changes"][0]["value"]["messages"][0]
             numero = mensaje["from"]
             texto = mensaje["text"]["body"]
         except (KeyError, IndexError):
-            print("❌ No se pudo extraer número o texto")
-            return "no text"
-
-        print(f"👉 numero: {numero}")
-        print(f"👉 texto: {texto}")
+            print("❌ No se pudo extraer mensaje")
+            return "no message"
 
         respuesta = procesar_mensaje(texto, numero)
-
-        # Enviar respuesta a WhatsApp
         enviar_whatsapp(numero, respuesta)
 
         return "ok"
 
+# ================================
+# Endpoints útiles
+# ================================
+
+@app.route("/", methods=["GET", "HEAD"])
+def home():
+    return "OK", 200
+
 @app.route("/pedidos", methods=["GET"])
 def ver_pedidos():
-    return jsonify(leer_pedidos())
+    return jsonify(obtener_pedidos())
+
+# ================================
+# RUN
+# ================================
 
 if __name__ == "__main__":
+    init_db()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
