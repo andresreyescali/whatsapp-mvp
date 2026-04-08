@@ -213,6 +213,7 @@ def webhook():
             value = data["entry"][0]["changes"][0]["value"]
 
             phone_id = value["metadata"]["phone_number_id"]
+            print("📱 phone_id recibido:", phone_id)
             mensaje = value["messages"][0]
 
             numero = mensaje["from"]
@@ -224,6 +225,7 @@ def webhook():
 
         # 🔥 MULTI-TENANT
         negocio = obtener_negocio(phone_id)
+        print("🔎 buscando negocio con phone_id:", phone_id)
 
         if not negocio:
             print("❌ Negocio no encontrado")
