@@ -67,6 +67,7 @@ def obtener_negocio(phone_id):
     return dict(row) if row else None
 
 def crear_pedido(pedido_id, numero, item, total, negocio_id):
+    
     conn = get_db()
     cursor = conn.cursor()
 
@@ -76,7 +77,12 @@ def crear_pedido(pedido_id, numero, item, total, negocio_id):
     INSERT INTO pedidos (id, numero, item, total, estado, negocio_id, fecha)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (pedido_id, numero, item, total, "pendiente_pago", negocio_id, fecha))
-
+    
+    print("🧾 creando pedido...", flush=True)
+    print("🆔 negocio_id:", negocio["id"], flush=True)
+    print("📦 item:", item, flush=True)
+    print("💰 total:", total, flush=True)
+    
     conn.commit()
     conn.close()
 
@@ -227,7 +233,9 @@ def webhook():
         # 🔥 MULTI-TENANT
         negocio = obtener_negocio(phone_id)
         print("🔎 buscando negocio con phone_id:", phone_id, flush=True)
-
+        print("🏢 negocio encontrado:", negocio, flush=True)
+        print("🆔 negocio_id:", negocio["id"] if negocio else None, flush=True)
+        
         if not negocio:
             print("❌ Negocio no encontrado", flush=True)
             return "no negocio"
