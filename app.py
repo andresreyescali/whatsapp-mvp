@@ -276,6 +276,20 @@ def crear_negocio_demo():
 
     return "Negocio creado ✅"
 
+@app.route("/pedidos/<negocio_id>", methods=["GET"])
+def ver_pedidos_por_negocio(negocio_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM pedidos WHERE negocio_id = ?", (negocio_id,))
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    pedidos = [dict(row) for row in rows]
+
+    return jsonify(pedidos)
+
 # ================================
 # RUN
 # ================================
