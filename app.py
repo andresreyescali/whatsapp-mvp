@@ -6,6 +6,7 @@ import os
 import requests
 import sqlite3
 
+ADMIN_KEY = os.environ.get("ADMIN_KEY")
 app = Flask(__name__)
 
 # ================================
@@ -240,16 +241,13 @@ def webhook():
 # Endpoints útiles
 # ================================
 
-@app.route("/", methods=["GET", "HEAD"])
-def home():
-    return "OK", 200
-
-@app.route("/pedidos", methods=["GET"])
-def ver_pedidos():
-    return jsonify(obtener_pedidos())
-
 @app.route("/crear_negocio", methods=["GET"])
 def crear_negocio_demo():
+    key = request.args.get("key")
+
+    if key != ADMIN_KEY:
+        return "Unauthorized", 401
+
     conn = get_db()
     cursor = conn.cursor()
 
@@ -262,17 +260,17 @@ def crear_negocio_demo():
     INSERT INTO negocios (id, nombre, phone_id, token, menu)
     VALUES (?, ?, ?, ?, ?)
     """, (
-        "negocio_1",
+        str(uuid.uuid4()),
         "Pizzeria Juan",
-        "946960701843409",  # 👈 TU phone_id REAL
-        "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6",     # 👈 TU TOKEN REAL
+        "TU_PHONE_ID",
+        "TU_TOKEN",
         menu
     ))
 
     conn.commit()
     conn.close()
 
-    return "Negocio creado"
+    return "Negocio creado ✅"
 
 # ================================
 # RUN
