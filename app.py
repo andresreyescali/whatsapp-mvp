@@ -121,7 +121,7 @@ def procesar_mensaje(texto, numero, negocio):
     # MENU dinámico
     if "menu" in texto:
         respuesta = "🍔 Menú:\n"
-        print("📤 respuesta generada:", respuesta)
+        print("📤 respuesta generada:", respuesta, flush=True)
         for item, precio in menu.items():
             respuesta += f"- {item.capitalize()} (${precio})\n"
         return respuesta
@@ -205,36 +205,36 @@ def webhook():
     if request.method == "POST":
         data = request.get_json(force=True)
 
-        print("\n====================")
-        print("📩 REQUEST RAW:")
-        print(data)
-        print("====================\n")
+        print("\n====================", flush=True)
+        print("📩 REQUEST RAW:", flush=True)
+        print(data, flush=True)
+        print("====================\n", flush=True)
 
         try:
             value = data["entry"][0]["changes"][0]["value"]
 
             phone_id = value["metadata"]["phone_number_id"]
-            print("📱 phone_id recibido:", phone_id)
+            print("📱 phone_id recibido:", phone_id, flush=True)
             mensaje = value["messages"][0]
 
             numero = mensaje["from"]
             texto = mensaje["text"]["body"]
 
         except (KeyError, IndexError):
-            print("❌ No se pudo extraer mensaje")
+            print("❌ No se pudo extraer mensaje", flush=True)
             return "no message"
 
         # 🔥 MULTI-TENANT
         negocio = obtener_negocio(phone_id)
-        print("🔎 buscando negocio con phone_id:", phone_id)
+        print("🔎 buscando negocio con phone_id:", phone_id, flush=True)
 
         if not negocio:
-            print("❌ Negocio no encontrado")
+            print("❌ Negocio no encontrado", flush=True)
             return "no negocio"
 
         # 🔥 PASAR NEGOCIO
         respuesta = procesar_mensaje(texto, numero, negocio)
-        print("📤 respuesta generada:", respuesta)
+        print("📤 respuesta generada:", respuesta,flush=True)
 
         # 🔥 ENVIAR CON TOKEN DEL NEGOCIO
         enviar_whatsapp(numero, respuesta, negocio)
