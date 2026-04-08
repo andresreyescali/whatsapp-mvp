@@ -59,7 +59,7 @@ def obtener_negocio(phone_id):
     conn = get_db()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM negocios WHERE phone_id = ?", (phone_id,))
+    cursor.execute("SELECT * FROM negocios")
     row = cursor.fetchone()
 
     conn.close()
@@ -121,6 +121,7 @@ def procesar_mensaje(texto, numero, negocio):
     # MENU dinámico
     if "menu" in texto:
         respuesta = "🍔 Menú:\n"
+        print("📤 respuesta generada:", respuesta)
         for item, precio in menu.items():
             respuesta += f"- {item.capitalize()} (${precio})\n"
         return respuesta
@@ -233,6 +234,7 @@ def webhook():
 
         # 🔥 PASAR NEGOCIO
         respuesta = procesar_mensaje(texto, numero, negocio)
+        print("📤 respuesta generada:", respuesta)
 
         # 🔥 ENVIAR CON TOKEN DEL NEGOCIO
         enviar_whatsapp(numero, respuesta, negocio)
@@ -263,9 +265,9 @@ def crear_negocio_demo():
     VALUES (?, ?, ?, ?, ?)
     """, (
         str(uuid.uuid4()),
-        "Pizzeria Juan",
-        "TU_PHONE_ID",
-        "TU_TOKEN",
+        "Pizzeria Avars",
+        "946960701843409",
+        "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6",
         menu
     ))
 
