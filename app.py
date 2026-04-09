@@ -154,7 +154,7 @@ def procesar_mensaje(texto, numero, negocio):
 
             link = generar_link_pago(total, pedido_id)
 
-            return f"""Perfecto 👍
+            return f"""Peerfecto 👍
 
 🆔 Pedido: {pedido_id}
 {item} - ${total}
