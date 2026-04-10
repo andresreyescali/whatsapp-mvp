@@ -310,6 +310,20 @@ def actualizar_token():
 
     return "Token actualizado ✅"
 
+@app.route("/negocios", methods=["GET"])
+def ver_negocios():
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id, nombre, phone_id FROM negocios")
+    rows = cursor.fetchall()
+
+    negocios = rows_to_dict(cursor, rows)
+
+    conn.close()
+
+    return jsonify(negocios)
+
 # ================================
 # RUN
 # ================================
