@@ -242,6 +242,7 @@ def webhook():
 # ENDPOINTS
 # ================================
 
+
 @app.route("/crear_negocio", methods=["GET"])
 def crear_negocio():
     key = request.args.get("key")
@@ -249,29 +250,48 @@ def crear_negocio():
     if key != ADMIN_KEY:
         return "Unauthorized", 401
 
+    nombre = request.args.get("nombre")
+    phone_id = request.args.get("phone_id")
+    token = request.args.get("token")
+
+    if not nombre or not phone_id or not token:
+        return "Faltan parámetros (nombre, phone_id, token)", 400
+
     conn = get_db()
     cursor = conn.cursor()
 
+    # 🚨 Evitar duplicados
+    cursor.execute("SELECT * FROM negocios WHERE phone_id = %s", (phone_id,))
+    existente = cursor.fetchone()
+
+    if existente:
+        conn.close()
+        return "❌ Ya existe un negocio con ese phone_id"
+
+    # 📦 Menú base (puedes hacerlo dinámico luego)
     menu = json.dumps({
         "pizza": 25000,
         "gaseosa": 5000
     })
 
+    negocio_id = str(uuid.uuid4())
+
     cursor.execute("""
     INSERT INTO negocios (id, nombre, phone_id, token, menu)
     VALUES (%s, %s, %s, %s, %s)
-    """, (
-        str(uuid.uuid4()),
-        "Pizzeria Avars",
-        "946960701843409",
-        "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6",
-        menu
-    ))
+    """, (negocio_id, nombre, phone_id, token, menu))
 
     conn.commit()
     conn.close()
 
-    return "Negocio creado ✅"
+    print("✅ Negocio creado:", nombre, flush=True)
+    print("🆔 negocio_id:", negocio_id, flush=True)
+
+    return jsonify({
+        "status": "ok",
+        "negocio_id": negocio_id,
+        "nombre": nombre
+    })
 
 @app.route("/pedidos/<negocio_id>", methods=["GET"])
 def ver_pedidos(negocio_id):
@@ -323,6 +343,47 @@ def ver_negocios():
     conn.close()
 
     return jsonify(negocios)
+
+@app.route("/eliminar_negocio", methods=["GET"])
+def eliminar_negocio():
+    key = request.args.get("key")
+    negocio_id = request.args.get("negocio_id")
+
+    if key != ADMIN_KEY:
+        return "Unauthorized", 401
+
+    if not negocio_id:
+        return "Falta negocio_id", 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 🔍 Verificar si existe
+    cursor.execute("SELECT * FROM negocios WHERE id = %s", (negocio_id,))
+    negocio = cursor.fetchone()
+
+    if not negocio:
+        conn.close()
+        return "❌ Negocio no existe"
+
+    print("🗑 Eliminando negocio:", negocio_id, flush=True)
+
+    # 🔥 Eliminar pedidos primero (foreign logic)
+    cursor.execute("DELETE FROM pedidos WHERE negocio_id = %s", (negocio_id,))
+
+    # 🔥 Eliminar negocio
+    cursor.execute("DELETE FROM negocios WHERE id = %s", (negocio_id,))
+
+    conn.commit()
+    conn.close()
+
+    print("✅ Negocio eliminado:", negocio_id, flush=True)
+
+    return jsonify({
+        "status": "ok",
+        "mensaje": "Negocio eliminado",
+        "negocio_id": negocio_id
+    })
 
 # ================================
 # RUN
