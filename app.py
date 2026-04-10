@@ -287,6 +287,29 @@ def ver_pedidos(negocio_id):
 
     return jsonify(pedidos)
 
+@app.route("/actualizar_token", methods=["GET"])
+def actualizar_token():
+    key = request.args.get("key")
+    negocio_id = request.args.get("negocio_id")
+    nuevo_token = request.args.get("token")
+
+    if key != ADMIN_KEY:
+        return "Unauthorized", 401
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    UPDATE negocios
+    SET token = %s
+    WHERE id = %s
+    """, (nuevo_token, negocio_id))
+
+    conn.commit()
+    conn.close()
+
+    return "Token actualizado ✅"
+
 # ================================
 # RUN
 # ================================
