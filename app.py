@@ -5,7 +5,8 @@ import json
 import uuid
 import os
 import requests
-import psycopg2
+import psycopg
+from psycopg.rows import dict_row
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
@@ -17,57 +18,69 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 app = Flask(__name__)
 
 # Inicializar cliente de DeepSeek
-deepseek_client = OpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com"
-)
+if DEEPSEEK_API_KEY:
+    deepseek_client = OpenAI(
+        api_key=DEEPSEEK_API_KEY,
+        base_url="https://api.deepseek.com"
+    )
+else:
+    deepseek_client = None
+    print("⚠️ DEEPSEEK_API_KEY no configurada, la IA no funcionará")
 
 # ================================
 # DB
 # ================================
 
 def get_db():
-    return psycopg2.connect(os.environ["DATABASE_URL"])
+    """Retorna una conexión a la base de datos"""
+    return psycopg.connect(os.environ["DATABASE_URL"])
 
 def init_db():
-    conn = get_db()
-    cursor = conn.cursor()
+    """Inicializa las tablas de la base de datos"""
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            # Tabla de negocios
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS negocios (
+                id TEXT PRIMARY KEY,
+                nombre TEXT,
+                phone_id TEXT,
+                token TEXT,
+                menu TEXT,
+                usar_ia BOOLEAN DEFAULT FALSE
+            );
+            """)
+            
+            # Tabla de pedidos
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pedidos (
+                id TEXT PRIMARY KEY,
+                numero TEXT,
+                item TEXT,
+                total INTEGER,
+                estado TEXT,
+                negocio_id TEXT,
+                fecha TIMESTAMP
+            );
+            """)
+            
+            # Agregar columna usar_ia si no existe (para migración)
+            try:
+                cursor.execute("ALTER TABLE negocios ADD COLUMN usar_ia BOOLEAN DEFAULT FALSE")
+            except:
+                pass  # La columna ya existe
+            
+            conn.commit()
+    
+    print("✅ Base de datos inicializada correctamente")
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS negocios (
-        id TEXT PRIMARY KEY,
-        nombre TEXT,
-        phone_id TEXT,
-        token TEXT,
-        menu TEXT,
-        usar_ia BOOLEAN DEFAULT FALSE
-    );
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS pedidos (
-        id TEXT PRIMARY KEY,
-        numero TEXT,
-        item TEXT,
-        total INTEGER,
-        estado TEXT,
-        negocio_id TEXT,
-        fecha TIMESTAMP
-    );
-    """)
-
-    # Agregar columna usar_ia si no existe (para migración)
-    try:
-        cursor.execute("ALTER TABLE negocios ADD COLUMN usar_ia BOOLEAN DEFAULT FALSE")
-    except:
-        pass  # La columna ya existe
-
-    conn.commit()
-    conn.close()
-
-def rows_to_dict(cursor, rows):
-    columns = [desc[0] for desc in cursor.description]
-    return [dict(zip(columns, row)) for row in rows]
+def obtener_negocio(phone_id):
+    """Obtiene un negocio por su phone_id"""
+    with get_db() as conn:
+        with conn.cursor(row_factory=dict_row) as cursor:
+            cursor.execute("SELECT * FROM negocios WHERE phone_id = %s", (phone_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
 # ================================
 # DEEPSEEK INTEGRATION
@@ -77,6 +90,9 @@ def responder_con_ia(texto, negocio, numero, pedidos_pendientes=None):
     """
     Usa DeepSeek para generar respuestas inteligentes
     """
+    if not deepseek_client:
+        return None
+        
     menu = json.loads(negocio["menu"])
     
     # Formatear menú para el prompt
@@ -140,6 +156,9 @@ def procesar_pedido_con_ia(texto, menu, negocio_id, numero):
     Usa IA para detectar si el cliente quiere hacer un pedido
     Retorna: (item_encontrado, total, mensaje_confirmacion)
     """
+    if not deepseek_client:
+        return None, None, None
+        
     prompt = f"""
 Analiza si el siguiente mensaje de un cliente indica que quiere hacer un pedido de alguno de estos productos:
 
@@ -200,64 +219,65 @@ Escribe 'ya pague' cuando completes el pago ✅"""
 # ================================
 
 def crear_pedido(pedido_id, numero, item, total, negocio_id):
-    conn = get_db()
-    cursor = conn.cursor()
-
+    """Crea un nuevo pedido en la base de datos"""
     fecha = datetime.now()
-
+    
     print("🧾 creando pedido...", flush=True)
     print("🆔 negocio_id:", negocio_id, flush=True)
     print("📦 item:", item, flush=True)
     print("💰 total:", total, flush=True)
-
-    cursor.execute("""
-    INSERT INTO pedidos (id, numero, item, total, estado, negocio_id, fecha)
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """, (pedido_id, numero, item, total, "pendiente_pago", negocio_id, fecha))
-
-    conn.commit()
-    conn.close()
+    
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+            INSERT INTO pedidos (id, numero, item, total, estado, negocio_id, fecha)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (pedido_id, numero, item, total, "pendiente_pago", negocio_id, fecha))
+            conn.commit()
 
 def marcar_pagado(numero, negocio_id):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    UPDATE pedidos
-    SET estado = 'pagado'
-    WHERE numero = %s AND negocio_id = %s AND estado = 'pendiente_pago'
-    """, (numero, negocio_id))
-
-    conn.commit()
-    conn.close()
+    """Marca un pedido como pagado"""
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+            UPDATE pedidos
+            SET estado = 'pagado'
+            WHERE numero = %s AND negocio_id = %s AND estado = 'pendiente_pago'
+            """, (numero, negocio_id))
+            conn.commit()
     
 def obtener_pedidos_pendientes(numero, negocio_id):
     """Obtiene pedidos pendientes del cliente"""
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-    SELECT * FROM pedidos 
-    WHERE numero = %s AND negocio_id = %s AND estado = 'pendiente_pago'
-    ORDER BY fecha DESC
-    """, (numero, negocio_id))
-    
-    rows = cursor.fetchall()
-    pedidos = rows_to_dict(cursor, rows)
-    conn.close()
-    
-    return pedidos
+    with get_db() as conn:
+        with conn.cursor(row_factory=dict_row) as cursor:
+            cursor.execute("""
+            SELECT * FROM pedidos 
+            WHERE numero = %s AND negocio_id = %s AND estado = 'pendiente_pago'
+            ORDER BY fecha DESC
+            """, (numero, negocio_id))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+def obtener_pedidos_negocio(negocio_id):
+    """Obtiene todos los pedidos de un negocio"""
+    with get_db() as conn:
+        with conn.cursor(row_factory=dict_row) as cursor:
+            cursor.execute("SELECT * FROM pedidos WHERE negocio_id = %s", (negocio_id,))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
 
 def generar_link_pago(total, referencia):
+    """Genera un link de pago (ejemplo con Wompi)"""
     return f"https://checkout.wompi.co/l/test_{referencia}_{total}"
 
 def procesar_mensaje(texto, numero, negocio):
+    """Procesa el mensaje del cliente y retorna la respuesta"""
     texto_lower = texto.lower()
     menu = json.loads(negocio["menu"])
     usar_ia = negocio.get("usar_ia", False)
     
     # Verificar si el negocio tiene IA activada
-    if usar_ia:
+    if usar_ia and deepseek_client:
         print("🤖 Usando IA para responder...", flush=True)
         
         # Verificar si es confirmación de pago
@@ -335,6 +355,7 @@ Puedes escribir:
 # ================================
 
 def enviar_whatsapp(numero, mensaje, negocio):
+    """Envía un mensaje por WhatsApp usando la API de Meta"""
     token = negocio["token"]
     phone_id = negocio["phone_id"]
 
@@ -362,6 +383,7 @@ def enviar_whatsapp(numero, mensaje, negocio):
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
+    """Webhook para recibir mensajes de WhatsApp"""
     if request.method == "GET":
         token = "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6"
         if request.args.get("hub.verify_token") == token:
@@ -412,11 +434,12 @@ def webhook():
     return "ok"
 
 # ================================
-# ENDPOINTS
+# ENDPOINTS ADMIN
 # ================================
 
 @app.route("/crear_negocio", methods=["GET"])
 def crear_negocio():
+    """Crea un nuevo negocio"""
     key = request.args.get("key")
 
     if key != ADMIN_KEY:
@@ -430,34 +453,31 @@ def crear_negocio():
     if not nombre or not phone_id or not token:
         return "Faltan parámetros (nombre, phone_id, token)", 400
 
-    conn = get_db()
-    cursor = conn.cursor()
+    # Verificar si ya existe
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM negocios WHERE phone_id = %s", (phone_id,))
+            existente = cursor.fetchone()
 
-    # 🚨 Evitar duplicados
-    cursor.execute("SELECT * FROM negocios WHERE phone_id = %s", (phone_id,))
-    existente = cursor.fetchone()
+            if existente:
+                return "❌ Ya existe un negocio con ese phone_id"
 
-    if existente:
-        conn.close()
-        return "❌ Ya existe un negocio con ese phone_id"
+            # Menú base
+            menu = json.dumps({
+                "pizza": 25000,
+                "gaseosa": 5000,
+                "hamburguesa": 18000,
+                "perro caliente": 12000
+            })
 
-    # 📦 Menú base (puedes hacerlo dinámico luego)
-    menu = json.dumps({
-        "pizza": 25000,
-        "gaseosa": 5000,
-        "hamburguesa": 18000,
-        "perro caliente": 12000
-    })
+            negocio_id = str(uuid.uuid4())
 
-    negocio_id = str(uuid.uuid4())
+            cursor.execute("""
+            INSERT INTO negocios (id, nombre, phone_id, token, menu, usar_ia)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """, (negocio_id, nombre, phone_id, token, menu, usar_ia))
 
-    cursor.execute("""
-    INSERT INTO negocios (id, nombre, phone_id, token, menu, usar_ia)
-    VALUES (%s, %s, %s, %s, %s, %s)
-    """, (negocio_id, nombre, phone_id, token, menu, usar_ia))
-
-    conn.commit()
-    conn.close()
+            conn.commit()
 
     print("✅ Negocio creado:", nombre, flush=True)
     print("🆔 negocio_id:", negocio_id, flush=True)
@@ -472,20 +492,13 @@ def crear_negocio():
 
 @app.route("/pedidos/<negocio_id>", methods=["GET"])
 def ver_pedidos(negocio_id):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM pedidos WHERE negocio_id = %s", (negocio_id,))
-    rows = cursor.fetchall()
-
-    pedidos = rows_to_dict(cursor, rows)
-
-    conn.close()
-
+    """Lista todos los pedidos de un negocio"""
+    pedidos = obtener_pedidos_negocio(negocio_id)
     return jsonify(pedidos)
 
 @app.route("/actualizar_token", methods=["GET"])
 def actualizar_token():
+    """Actualiza el token de WhatsApp de un negocio"""
     key = request.args.get("key")
     negocio_id = request.args.get("negocio_id")
     nuevo_token = request.args.get("token")
@@ -493,36 +506,31 @@ def actualizar_token():
     if key != ADMIN_KEY:
         return "Unauthorized", 401
 
-    conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    UPDATE negocios
-    SET token = %s
-    WHERE id = %s
-    """, (nuevo_token, negocio_id))
-
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+            UPDATE negocios
+            SET token = %s
+            WHERE id = %s
+            """, (nuevo_token, negocio_id))
+            conn.commit()
 
     return "Token actualizado ✅"
 
 @app.route("/negocios", methods=["GET"])
 def ver_negocios():
-    conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT id, nombre, phone_id, usar_ia FROM negocios")
-    rows = cursor.fetchall()
-
-    negocios = rows_to_dict(cursor, rows)
-
-    conn.close()
+    """Lista todos los negocios"""
+    with get_db() as conn:
+        with conn.cursor(row_factory=dict_row) as cursor:
+            cursor.execute("SELECT id, nombre, phone_id, usar_ia FROM negocios")
+            rows = cursor.fetchall()
+            negocios = [dict(row) for row in rows]
 
     return jsonify(negocios)
 
 @app.route("/eliminar_negocio", methods=["GET"])
 def eliminar_negocio():
+    """Elimina un negocio y sus pedidos"""
     key = request.args.get("key")
     negocio_id = request.args.get("negocio_id")
 
@@ -532,27 +540,24 @@ def eliminar_negocio():
     if not negocio_id:
         return "Falta negocio_id", 400
 
-    conn = get_db()
-    cursor = conn.cursor()
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            # Verificar si existe
+            cursor.execute("SELECT * FROM negocios WHERE id = %s", (negocio_id,))
+            negocio = cursor.fetchone()
 
-    # 🔍 Verificar si existe
-    cursor.execute("SELECT * FROM negocios WHERE id = %s", (negocio_id,))
-    negocio = cursor.fetchone()
+            if not negocio:
+                return "❌ Negocio no existe"
 
-    if not negocio:
-        conn.close()
-        return "❌ Negocio no existe"
+            print("🗑 Eliminando negocio:", negocio_id, flush=True)
 
-    print("🗑 Eliminando negocio:", negocio_id, flush=True)
+            # Eliminar pedidos primero
+            cursor.execute("DELETE FROM pedidos WHERE negocio_id = %s", (negocio_id,))
 
-    # 🔥 Eliminar pedidos primero (foreign logic)
-    cursor.execute("DELETE FROM pedidos WHERE negocio_id = %s", (negocio_id,))
+            # Eliminar negocio
+            cursor.execute("DELETE FROM negocios WHERE id = %s", (negocio_id,))
 
-    # 🔥 Eliminar negocio
-    cursor.execute("DELETE FROM negocios WHERE id = %s", (negocio_id,))
-
-    conn.commit()
-    conn.close()
+            conn.commit()
 
     print("✅ Negocio eliminado:", negocio_id, flush=True)
 
@@ -564,7 +569,7 @@ def eliminar_negocio():
 
 @app.route("/activar_ia", methods=["GET"])
 def activar_ia():
-    """Endpoint para activar/desactivar IA en un negocio"""
+    """Activa o desactiva la IA en un negocio"""
     key = request.args.get("key")
     negocio_id = request.args.get("negocio_id")
     activar = request.args.get("activar", "true").lower() == "true"
@@ -575,17 +580,14 @@ def activar_ia():
     if not negocio_id:
         return "Falta negocio_id", 400
 
-    conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    UPDATE negocios
-    SET usar_ia = %s
-    WHERE id = %s
-    """, (activar, negocio_id))
-
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+            UPDATE negocios
+            SET usar_ia = %s
+            WHERE id = %s
+            """, (activar, negocio_id))
+            conn.commit()
 
     estado = "activada" if activar else "desactivada"
     print(f"🤖 IA {estado} para negocio {negocio_id}", flush=True)
