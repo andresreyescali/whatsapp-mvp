@@ -280,7 +280,7 @@ def procesar_mensaje(texto, numero, negocio):
     if usar_ia and deepseek_client:
         print("🤖 Usando IA para responder...", flush=True)
         
-        # Verificar si es confirmación de pago
+        # Verificar si es confirmación de pago (esto SIEMPRE va primero)
         if any(palabra in texto_lower for palabra in ["pague", "pago", "pagado", "ya pague", "ya pagué"]):
             marcar_pagado(numero, negocio["id"])
             return "¡Pago confirmado! ✅ Tu pedido va en camino 🚀"
@@ -290,7 +290,20 @@ def procesar_mensaje(texto, numero, negocio):
         if producto:
             return mensaje_pedido
         
-        # Si no es pedido, usar IA para respuesta general
+        # 🔥 NUEVO: Verificar comandos específicos ANTES de la IA
+        if "menu" in texto_lower:
+            respuesta = "🍔 Menú:\n"
+            for item, precio in menu.items():
+                respuesta += f"- {item.capitalize()} (${precio})\n"
+            return respuesta
+        
+        if "horario" in texto_lower:
+            return "🕒 Abrimos de 12pm a 10pm"
+        
+        if "ubicacion" in texto_lower or "donde" in texto_lower:
+            return "📍 Estamos en Cali"
+        
+        # 🔥 CAMBIO IMPORTANTE: Para TODO lo demás (incluyendo "No gracias", saludos, etc.), usar IA
         pedidos_pendientes = obtener_pedidos_pendientes(numero, negocio["id"])
         respuesta_ia = responder_con_ia(texto, negocio, numero, pedidos_pendientes)
         
