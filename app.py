@@ -19,6 +19,10 @@ def api_register():
 def health():
     return {'status': 'ok'}
 
+@app.route('/')
+def index():
+    return {'message': 'WhatsApp SaaS API', 'status': 'running'}
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)

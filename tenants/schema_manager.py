@@ -1,7 +1,9 @@
 from core.database import db_manager
+from core.logger import logger
 
 class SchemaManager:
     def create_tenant_schema(self, tenant_id: str, tipo_negocio: str):
+        logger.info(f'Creando schema para tenant {tenant_id}')
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(f'CREATE SCHEMA IF NOT EXISTS {tenant_id}')
@@ -26,6 +28,7 @@ class SchemaManager:
                 )
                 ''')
             conn.commit()
+        logger.info(f'Schema creado para {tenant_id}')
     
     def get_menu(self, tenant_id: str):
         with db_manager.get_connection(tenant_id) as conn:
