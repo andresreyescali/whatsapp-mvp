@@ -1,5 +1,6 @@
 from flask import request
 from core.logger import logger
+from whatsapp.message_handler import message_handler
 
 def register_webhook_routes(app):
     @app.route('/webhook', methods=['GET', 'POST'])
@@ -15,17 +16,27 @@ def register_webhook_routes(app):
         
         try:
             value = data["entry"][0]["changes"][0]["value"]
+            
             if "messages" not in value:
                 return "ok"
+            
             mensaje = value["messages"][0]
             if "text" not in mensaje:
                 return "ok"
+            
             phone_id = value["metadata"]["phone_number_id"]
             numero = mensaje["from"]
             texto = mensaje["text"]["body"]
+            
             logger.info(f'Mensaje de {numero}: {texto}')
+            
+            # Procesar mensaje
+            message_handler.process(phone_id, numero, texto)
+            
         except Exception as e:
             logger.error(f'Error en webhook: {e}')
+            import traceback
+            traceback.print_exc()
             return "error", 500
         
         return "ok"
