@@ -4,7 +4,8 @@ from core.database import db_manager
 from core.logger import setup_logging, logger
 from whatsapp.webhook import register_webhook_routes
 from tenants.onboarding import register_new_tenant
-from psycopg.rows import dict_row
+from tenants.repository import tenant_repo
+from tenants.schema_manager import schema_manager
 
 setup_logging()
 
@@ -16,31 +17,23 @@ register_webhook_routes(app)
 def api_register():
     return register_new_tenant()
 
-@app.route('/health')
+@app.route('/health', methods=['GET'])
 def health():
-    return {'status': 'ok'}
+    return {'status': 'ok', 'message': 'WhatsApp SaaS is running'}
 
-@app.route('/')
-def index():
-    return {'message': 'WhatsApp SaaS API', 'status': 'running'}
-
-# Agregar estos endpoints a tu app.py
-
-from flask import render_template
+# ==================== PANEL DE ADMINISTRACIÓN ====================
 
 @app.route('/admin/menu', methods=['GET'])
 def admin_menu():
-    """Panel de administración de menú - Versión sin templates"""
-    from tenants.repository import tenant_repo
+    """Panel de administración de menú"""
     tenant_id = request.args.get('tenant_id')
     
     if not tenant_id:
         return "<h1>Error</h1><p>Se requiere tenant_id</p>", 400
     
-    # Verificar que el tenant existe
     tenant = tenant_repo.find_by_id(tenant_id)
     if not tenant:
-        return "<h1>Error</h1><p>Tenant no encontrado</p>", 404
+        return f"<h1>Error</h1><p>Tenant no encontrado: {tenant_id}</p>", 404
     
     # Generar HTML directamente
     html = f"""
@@ -52,50 +45,34 @@ def admin_menu():
         <title>Gestión de Menú - {tenant['nombre']}</title>
         <style>
             * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }}
-            .container {{ max-width: 1200px; margin: 0 auto; }}
-            .header {{ background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-            .header h1 {{ color: #333; margin-bottom: 10px; }}
-            .card {{ background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-            .card h2 {{ color: #333; margin-bottom: 15px; border-bottom: 2px solid #667eea; padding-bottom: 10px; }}
+            body {{ font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px; }}
+            .container {{ max-width: 800px; margin: 0 auto; }}
+            .header {{ background: #25D366; color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }}
+            .card {{ background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            .card h2 {{ margin-bottom: 15px; color: #333; }}
             .form-group {{ margin-bottom: 15px; }}
-            label {{ display: block; margin-bottom: 5px; color: #333; font-weight: 500; }}
-            input, textarea, select {{ width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }}
-            button {{ background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }}
-            button:hover {{ background: #5a67d8; }}
-            .delete-btn {{ background: #e53e3e; padding: 5px 10px; font-size: 12px; }}
+            label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
+            input, textarea, select {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; }}
+            button {{ background: #25D366; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+            button:hover {{ background: #128C7E; }}
+            .delete-btn {{ background: #e74c3c; padding: 5px 10px; font-size: 12px; }}
             table {{ width: 100%; border-collapse: collapse; }}
-            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
-            th {{ background: #f7f7f7; }}
-            .alert {{ padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
-            .alert-success {{ background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }}
-            .alert-error {{ background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }}
+            th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background: #f5f5f5; }}
+            .success {{ background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin-bottom: 10px; }}
+            .error {{ background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin-bottom: 10px; }}
             .hidden {{ display: none; }}
-            .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }}
-            .stat-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; }}
-            .stat-card .number {{ font-size: 32px; font-weight: bold; }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
                 <h1>🍕 {tenant['nombre']}</h1>
-                <p>Gestiona tu menú y configura tu asistente de ventas</p>
-                <p><strong>Tenant ID:</strong> {tenant_id}</p>
+                <p>Gestiona el menú de tu negocio</p>
+                <p><small>ID: {tenant_id}</small></p>
             </div>
             
             <div id="alert" class="hidden"></div>
-            
-            <div class="stats">
-                <div class="stat-card">
-                    <h3>Productos en Menú</h3>
-                    <div class="number" id="totalProductos">0</div>
-                </div>
-                <div class="stat-card">
-                    <h3>IA Activada</h3>
-                    <div class="number" id="iaStatus">❌</div>
-                </div>
-            </div>
             
             <div class="card">
                 <h2>➕ Agregar Producto</h2>
@@ -106,7 +83,7 @@ def admin_menu():
                     </div>
                     <div class="form-group">
                         <label>Descripción</label>
-                        <textarea id="descripcion" rows="3" placeholder="Describe el producto..."></textarea>
+                        <textarea id="descripcion" rows="2" placeholder="Describe el producto..."></textarea>
                     </div>
                     <div class="form-group">
                         <label>Precio ($) *</label>
@@ -118,7 +95,6 @@ def admin_menu():
                             <option value="pizzas">🍕 Pizzas</option>
                             <option value="hamburguesas">🍔 Hamburguesas</option>
                             <option value="bebidas">🥤 Bebidas</option>
-                            <option value="acompañamientos">🍟 Acompañamientos</option>
                             <option value="postres">🍰 Postres</option>
                         </select>
                     </div>
@@ -134,10 +110,10 @@ def admin_menu():
             <div class="card">
                 <h2>⚙️ Configuración</h2>
                 <label>
-                    <input type="checkbox" id="usarIA">
+                    <input type="checkbox" id="usarIA" {'checked' if tenant.get('usar_ia') else ''}>
                     Activar respuestas con Inteligencia Artificial
                 </label>
-                <button id="saveConfigBtn" style="margin-top: 15px;">Guardar Configuración</button>
+                <button id="saveConfigBtn" style="margin-top: 15px;">Guardar</button>
             </div>
         </div>
         
@@ -149,42 +125,27 @@ def admin_menu():
                 try {{
                     const response = await fetch(`${{API_BASE}}/api/tenant/${{tenantId}}/menu`);
                     const menu = await response.json();
-                    document.getElementById('totalProductos').innerText = menu.length;
                     
                     if (menu.length === 0) {{
-                        document.getElementById('menuContainer').innerHTML = '<p>No hay productos en el menú. Agrega tu primer producto.</p>';
+                        document.getElementById('menuContainer').innerHTML = '<p>No hay productos. Agrega tu primer producto.</p>';
                         return;
                     }}
                     
-                    let html = '<table><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Categoría</th><th>Acciones</th></tr></thead><tbody>';
+                    let html = '<table><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Acciones</th></tr></thead><tbody>';
                     menu.forEach(item => {{
                         html += `
                             <tr>
-                                <td><strong>${{escapeHtml(item.nombre)}}</strong></td>
-                                <td>${{escapeHtml(item.descripcion || '-')}}</td>
+                                <td>${{item.nombre}}</strong></td>
+                                <td>${{item.descripcion || '-'}}</td>
                                 <td>$${{item.precio.toLocaleString()}}</td>
-                                <td>${{item.categoria || 'general'}}</td>
                                 <td><button class="delete-btn" onclick="deleteProduct('${{item.id}}')">Eliminar</button></td>
                             </tr>
                         `;
                     }});
-                    html += '</tbody></table>';
+                    html += '</tbody></div>';
                     document.getElementById('menuContainer').innerHTML = html;
                 }} catch (error) {{
-                    document.getElementById('menuContainer').innerHTML = '<p style="color:red">Error al cargar menú</p>';
-                }}
-            }}
-            
-            async function loadConfig() {{
-                try {{
-                    const response = await fetch(`${{API_BASE}}/api/tenant/${{tenantId}}/config`);
-                    if (response.ok) {{
-                        const config = await response.json();
-                        document.getElementById('usarIA').checked = config.usar_ia || false;
-                        document.getElementById('iaStatus').innerHTML = config.usar_ia ? '✅' : '❌';
-                    }}
-                }} catch (error) {{
-                    console.error('Error loading config:', error);
+                    document.getElementById('menuContainer').innerHTML = '<p style="color:red">Error al cargar el menú</p>';
                 }}
             }}
             
@@ -205,14 +166,14 @@ def admin_menu():
                     }});
                     
                     if (response.ok) {{
-                        alert('Producto agregado');
+                        showAlert('success', 'Producto agregado');
                         document.getElementById('productForm').reset();
                         loadMenu();
                     }} else {{
-                        alert('Error al agregar producto');
+                        showAlert('error', 'Error al agregar');
                     }}
                 }} catch (error) {{
-                    alert('Error de conexión');
+                    showAlert('error', 'Error de conexión');
                 }}
             }});
             
@@ -225,11 +186,10 @@ def admin_menu():
                         body: JSON.stringify({{ usar_ia: usarIA }})
                     }});
                     if (response.ok) {{
-                        alert('Configuración guardada');
-                        document.getElementById('iaStatus').innerHTML = usarIA ? '✅' : '❌';
+                        showAlert('success', 'Configuración guardada');
                     }}
                 }} catch (error) {{
-                    alert('Error al guardar');
+                    showAlert('error', 'Error al guardar');
                 }}
             }});
             
@@ -238,19 +198,21 @@ def admin_menu():
                 try {{
                     await fetch(`${{API_BASE}}/admin/delete_product/${{tenantId}}/${{productId}}`, {{ method: 'DELETE' }});
                     loadMenu();
+                    showAlert('success', 'Producto eliminado');
                 }} catch (error) {{
-                    alert('Error al eliminar');
+                    showAlert('error', 'Error al eliminar');
                 }}
             }};
             
-            function escapeHtml(text) {{
-                const div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
+            function showAlert(type, message) {{
+                const alertDiv = document.getElementById('alert');
+                alertDiv.className = type === 'success' ? 'success' : 'error';
+                alertDiv.innerHTML = message;
+                alertDiv.classList.remove('hidden');
+                setTimeout(() => alertDiv.classList.add('hidden'), 3000);
             }}
             
             loadMenu();
-            loadConfig();
         </script>
     </body>
     </html>
@@ -258,34 +220,52 @@ def admin_menu():
     
     return html
 
+# ==================== ENDPOINTS PARA EL PANEL ====================
+
+@app.route('/api/tenant/<tenant_id>/menu', methods=['GET'])
+def get_tenant_menu(tenant_id):
+    """Obtiene el menú del tenant"""
+    try:
+        menu = schema_manager.get_menu(tenant_id)
+        return jsonify(menu)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/tenant/<tenant_id>/config', methods=['GET'])
 def get_tenant_config(tenant_id):
-    from tenants.repository import tenant_repo
+    """Obtiene configuración del tenant"""
     tenant = tenant_repo.find_by_id(tenant_id)
     if not tenant:
         return jsonify({'error': 'Tenant no encontrado'}), 404
     return jsonify({'usar_ia': tenant.get('usar_ia', False)})
 
+@app.route('/api/tenant/<tenant_id>/config/ia', methods=['PUT'])
+def update_tenant_ia(tenant_id):
+    """Actualiza configuración de IA del tenant"""
+    data = request.json
+    usar_ia = data.get('usar_ia', False)
+    tenant_repo.update_ia_config(tenant_id, usar_ia)
+    return jsonify({'status': 'ok', 'usar_ia': usar_ia})
+
 @app.route('/admin/add_product/<tenant_id>', methods=['POST'])
 def add_product(tenant_id):
-    from tenants.schema_manager import schema_manager
+    """Agrega un producto al menú del tenant"""
     data = request.json
     try:
-        schema_manager.add_product(
+        product_id = schema_manager.add_product(
             tenant_id,
             data['nombre'],
             data['precio'],
             data.get('descripcion', ''),
             data.get('categoria', 'general')
         )
-        return jsonify({'status': 'ok'}), 201
+        return jsonify({'status': 'ok', 'product_id': product_id}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/admin/delete_product/<tenant_id>/<product_id>', methods=['DELETE'])
 def delete_product(tenant_id, product_id):
-    from core.database import db_manager
+    """Elimina un producto del menú"""
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
@@ -294,6 +274,46 @@ def delete_product(tenant_id, product_id):
         return jsonify({'status': 'ok'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/tenants', methods=['GET'])
+def list_tenants():
+    """Lista todos los tenants (para administrador)"""
+    tenants = tenant_repo.get_all()
+    
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Administración de Tenants</title>
+        <style>
+            body { font-family: Arial; padding: 20px; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+            th { background: #25D366; color: white; }
+            a { color: #25D366; text-decoration: none; }
+        </style>
+    </head>
+    <body>
+        <h1>📋 Negocios Registrados</h1>
+        <table>
+            <tr><th>ID</th><th>Nombre</th><th>Phone ID</th><th>Fecha</th><th>Panel</th></tr>
+    """
+    for t in tenants:
+        html += f"""
+            <tr>
+                <td>{t['id']}</td>
+                <td>{t['nombre']}</td>
+                <td>{t['phone_id']}</td>
+                <td>{t['created_at']}</td>
+                <td><a href="/admin/menu?tenant_id={t['id']}">🎛️ Gestionar Menú</a></td>
+            </tr>
+        """
+    html += """
+        </table>
+    </body>
+    </html>
+    """
+    return html
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')

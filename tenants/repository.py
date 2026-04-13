@@ -14,13 +14,32 @@ class TenantRepository:
                     )
                     row = cur.fetchone()
                     if row:
-                        # Convertir tupla a diccionario
                         columns = ['id', 'nombre', 'tipo_negocio', 'schema_name', 'phone_id', 
                                   'token', 'usar_ia', 'configuracion', 'created_at', 'activo']
                         return dict(zip(columns, row))
                     return None
         except Exception as e:
             logger.error(f'Error en find_by_phone_id: {e}')
+            return None
+    
+    def find_by_id(self, tenant_id: str):
+        """Busca tenant por ID"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, configuracion, created_at, activo '
+                        'FROM public.tenants WHERE id = %s',
+                        (tenant_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        columns = ['id', 'nombre', 'tipo_negocio', 'schema_name', 'phone_id', 
+                                  'token', 'usar_ia', 'configuracion', 'created_at', 'activo']
+                        return dict(zip(columns, row))
+                    return None
+        except Exception as e:
+            logger.error(f'Error en find_by_id: {e}')
             return None
     
     def create(self, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante'):
@@ -48,5 +67,20 @@ class TenantRepository:
         except Exception as e:
             logger.error(f'Error actualizando IA config: {e}')
             raise
+    
+    def get_all(self):
+        """Obtiene todos los tenants"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'SELECT id, nombre, phone_id, created_at FROM public.tenants ORDER BY created_at DESC'
+                    )
+                    rows = cur.fetchall()
+                    columns = ['id', 'nombre', 'phone_id', 'created_at']
+                    return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            logger.error(f'Error obteniendo tenants: {e}')
+            return []
 
 tenant_repo = TenantRepository()
