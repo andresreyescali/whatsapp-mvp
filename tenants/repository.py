@@ -1,18 +1,21 @@
 import uuid
-from psycopg.rows import dict_row  # ← Esta línea DEBE estar
 from core.database import db_manager
 from core.logger import logger
 
 class TenantRepository:
     def find_by_phone_id(self, phone_id: str):
         with db_manager.get_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
+            with conn.cursor() as cur:  # ← Sin row_factory
                 cur.execute(
                     'SELECT * FROM public.tenants WHERE phone_id = %s AND activo = true',
                     (phone_id,)
                 )
                 row = cur.fetchone()
-                return row if row else None
+                if row:
+                    # Convertir tupla a diccionario manualmente
+                    columns = [desc[0] for desc in cur.description]
+                    return dict(zip(columns, row))
+                return None
     
     def create(self, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante'):
         tenant_id = f'tenant_{uuid.uuid4().hex[:8]}'
