@@ -4,6 +4,7 @@ from core.database import db_manager
 from core.logger import setup_logging, logger
 from whatsapp.webhook import register_webhook_routes
 from tenants.onboarding import register_new_tenant
+from psycopg.rows import dict_row
 
 setup_logging()
 
