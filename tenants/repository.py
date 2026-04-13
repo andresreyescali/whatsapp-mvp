@@ -1,4 +1,5 @@
 import uuid
+from psycopg.rows import dict_row  # ← Esta línea DEBE estar
 from core.database import db_manager
 from core.logger import logger
 
