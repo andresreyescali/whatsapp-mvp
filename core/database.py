@@ -1,5 +1,4 @@
 import psycopg
-from psycopg.rows import dict_row
 from core.config import config
 from core.logger import logger
 
@@ -9,11 +8,11 @@ class DatabaseManager:
         self._tenant_connections = {}
     
     def get_connection(self, tenant_id: str = None):
-        """Obtiene una conexión activa"""
+        """Obtiene una conexión activa, crea una nueva si es necesario"""
         try:
             if tenant_id:
                 # Conexión para tenant específico
-                if tenant_id not in self._tenant_connections:
+                if tenant_id not in self._tenant_connections or self._tenant_connections[tenant_id].closed:
                     logger.info(f'Creando conexion para tenant: {tenant_id}')
                     conn = psycopg.connect(config.database_url)
                     conn.autocommit = True
@@ -33,18 +32,21 @@ class DatabaseManager:
             logger.error(f'Error de conexion: {e}')
             raise
     
+    def close_all_connections(self):
+        """Cierra todas las conexiones (útil para shutdown)"""
+        if self._base_conn and not self._base_conn.closed:
+            self._base_conn.close()
+        for tenant_id, conn in self._tenant_connections.items():
+            if conn and not conn.closed:
+                conn.close()
+        logger.info('Todas las conexiones cerradas')
+    
     def init_global_tables(self):
         """Inicializa tablas globales"""
         logger.info('Inicializando tablas globales...')
         
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                # Crear extensión pgvector si no existe
-                try:
-                    cur.execute('CREATE EXTENSION IF NOT EXISTS vector')
-                except:
-                    pass
-                
                 # Tabla de tenants
                 cur.execute('''
                 CREATE TABLE IF NOT EXISTS public.tenants (
