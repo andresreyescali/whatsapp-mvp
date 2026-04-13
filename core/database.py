@@ -9,23 +9,43 @@ class DatabaseManager:
         self._tenant_connections = {}
     
     def get_connection(self, tenant_id: str = None):
-        if tenant_id:
-            if tenant_id not in self._tenant_connections:
-                logger.info(f'Creando conexion para tenant: {tenant_id}')
-                conn = psycopg.connect(config.database_url)
-                with conn.cursor() as cur:
-                    cur.execute(f'SET search_path TO {tenant_id}, public')
-                self._tenant_connections[tenant_id] = conn
-            return self._tenant_connections[tenant_id]
-        else:
-            if not self._base_conn:
-                self._base_conn = psycopg.connect(config.database_url)
-            return self._base_conn
+        """Obtiene una conexión activa"""
+        try:
+            if tenant_id:
+                # Conexión para tenant específico
+                if tenant_id not in self._tenant_connections:
+                    logger.info(f'Creando conexion para tenant: {tenant_id}')
+                    conn = psycopg.connect(config.database_url)
+                    conn.autocommit = True
+                    with conn.cursor() as cur:
+                        cur.execute(f'CREATE SCHEMA IF NOT EXISTS {tenant_id}')
+                        cur.execute(f'SET search_path TO {tenant_id}, public')
+                    self._tenant_connections[tenant_id] = conn
+                return self._tenant_connections[tenant_id]
+            else:
+                # Conexión global
+                if not self._base_conn or self._base_conn.closed:
+                    logger.info('Creando conexion global')
+                    self._base_conn = psycopg.connect(config.database_url)
+                    self._base_conn.autocommit = True
+                return self._base_conn
+        except Exception as e:
+            logger.error(f'Error de conexion: {e}')
+            raise
     
     def init_global_tables(self):
+        """Inicializa tablas globales"""
         logger.info('Inicializando tablas globales...')
+        
         with self.get_connection() as conn:
             with conn.cursor() as cur:
+                # Crear extensión pgvector si no existe
+                try:
+                    cur.execute('CREATE EXTENSION IF NOT EXISTS vector')
+                except:
+                    pass
+                
+                # Tabla de tenants
                 cur.execute('''
                 CREATE TABLE IF NOT EXISTS public.tenants (
                     id TEXT PRIMARY KEY,
@@ -38,8 +58,10 @@ class DatabaseManager:
                     configuracion JSONB DEFAULT '{}',
                     created_at TIMESTAMP DEFAULT NOW(),
                     activo BOOLEAN DEFAULT true
-                );
+                )
                 ''')
+                
+                # Tabla de métricas
                 cur.execute('''
                 CREATE TABLE IF NOT EXISTS public.metricas_tenants (
                     id SERIAL PRIMARY KEY,
@@ -48,9 +70,14 @@ class DatabaseManager:
                     mensajes INTEGER DEFAULT 0,
                     pedidos INTEGER DEFAULT 0,
                     costo_ia DECIMAL(10,4) DEFAULT 0
-                );
+                )
                 ''')
+                
+                # Índices
+                cur.execute('CREATE INDEX IF NOT EXISTS idx_tenants_phone_id ON public.tenants(phone_id)')
+                
             conn.commit()
+        
         logger.info('Tablas globales listas')
 
 db_manager = DatabaseManager()
