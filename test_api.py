@@ -1,5 +1,6 @@
 import requests
 import json
+from psycopg.rows import dict_row
 
 url = "https://whatsapp-mvp-1v5v.onrender.com/api/register"
 data = {
