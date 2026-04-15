@@ -3,12 +3,13 @@ from tenants.schema_manager import schema_manager
 from orders.repository import order_repo
 from orders.payment import generar_link_pago
 from whatsapp.client import whatsapp_client
+from ai.client import ai_client
 from core.logger import logger
 import json
 
 class MessageHandler:
     def process(self, phone_id: str, numero: str, texto: str):
-        """Procesa mensaje entrante y envía respuesta"""
+        """Procesa mensaje entrante usando SOLO IA"""
         logger.info(f'Procesando mensaje de {numero}: {texto}')
         
         # Obtener tenant
@@ -19,95 +20,129 @@ class MessageHandler:
         
         logger.info(f'Tenant encontrado: {tenant["nombre"]} (ID: {tenant["id"]})')
         
-        # Obtener menú
+        # Obtener menú y pedidos pendientes
         menu = schema_manager.get_menu(tenant['id'])
-        logger.info(f'Menú obtenido: {len(menu)} productos')
+        pedidos_pendientes = order_repo.get_pendientes(tenant['id'], numero)
         
-        # Generar respuesta según el mensaje
-        respuesta = self._generar_respuesta(texto, tenant, menu, numero)
+        # Generar respuesta con IA
+        respuesta = self._responder_con_ia(texto, tenant, menu, numero, pedidos_pendientes)
         
-        # Enviar respuesta por WhatsApp
+        # Enviar respuesta
         if respuesta:
-            logger.info(f'Enviando respuesta a {numero}: {respuesta[:100]}...')
             whatsapp_client.send_message(tenant, numero, respuesta)
-        else:
-            logger.warning(f'No se generó respuesta para {numero}')
     
-    def _generar_respuesta(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
-        """Genera respuesta según el mensaje del cliente"""
-        texto_lower = texto.lower().strip()
+    def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, pedidos_pendientes: list) -> str:
+        """Usa DeepSeek para generar todas las respuestas"""
         
-        # 1. Comando: menu
-        if texto_lower == 'menu' or texto_lower == 'ver menu' or texto_lower == 'menú':
-            return self._formatear_menu(menu)
+        # Si no hay cliente de IA, usar fallback
+        if not ai_client.client:
+            logger.warning("Cliente de IA no disponible, usando fallback")
+            return self._respuesta_fallback(texto, tenant, menu, numero)
         
-        # 2. Comando: horario
-        if 'horario' in texto_lower or 'hora' in texto_lower:
-            return "🕒 *Horario de atención*\n\nLunes a Domingo\n12:00 pm - 10:00 pm"
+        # Construir contexto del menú
+        menu_contexto = self._formatear_menu_para_ia(menu)
         
-        # 3. Comando: ubicacion
-        if 'ubicacion' in texto_lower or 'ubicación' in texto_lower or 'donde' in texto_lower:
-            return "📍 *Ubicación*\n\nCalle 123 #45-67, Cali, Colombia\n\n📱 Escríbenos para coordinar envío"
+        # Construir contexto de pedidos pendientes
+        pedidos_contexto = ""
+        if pedidos_pendientes:
+            pedidos_contexto = "\nPEDIDOS PENDIENTES DEL CLIENTE:\n"
+            for p in pedidos_pendientes:
+                pedidos_contexto += f"- {p['items'][0]['nombre'] if p.get('items') else 'Producto'}: ${p['total']} (ID: {p['id']})\n"
         
-        # 4. Comando: pago
-        if 'pague' in texto_lower or 'pago' in texto_lower or 'ya pague' in texto_lower or 'ya pagué' in texto_lower:
-            order_repo.marcar_pagado(tenant['id'], numero)
-            return "✅ *¡Pago confirmado!*\n\nTu pedido está siendo preparado y pronto estará en camino. 🚀"
+        # Prompt del sistema
+        system_prompt = f"""Eres un asistente de ventas por WhatsApp para {tenant['nombre']}, una {tenant.get('tipo_negocio', 'restaurante')}.
+
+CONTEXTO DEL NEGOCIO:
+- Nombre: {tenant['nombre']}
+- Horario: 12pm a 10pm (todos los días)
+- Ubicación: Cali, Colombia
+- Tipo de negocio: {tenant.get('tipo_negocio', 'restaurante')}
+
+MENÚ COMPLETO:
+{menu_contexto}
+
+{pedidos_contexto}
+
+REGLAS IMPORTANTES:
+1. Eres un vendedor amable, conversacional y natural.
+2. Tu objetivo es ayudar al cliente a hacer un pedido.
+3. Si el cliente pide el menú, preséntalo de forma atractiva.
+4. Si el cliente pregunta por horario o ubicación, responde con la información.
+5. Si el cliente quiere comprar algo, confirma el producto, el precio y genera un link de pago.
+6. Para generar un link de pago, usa el formato: https://checkout.wompi.co/l/test_[ID_PEDIDO]_[TOTAL]
+7. Si el cliente dice "ya pague" o similar, confirma el pago y despídete amablemente.
+8. Responde SIEMPRE en español, de forma breve pero completa (2-4 oraciones).
+9. Sé proactivo: si el cliente duda, recomienda los productos más populares.
+10. Si el cliente pide algo que no está en el menú, ofrécele alternativas similares.
+
+INSTRUCCIÓN CRÍTICA: Tu respuesta debe ser SOLO el mensaje para el cliente, sin explicaciones adicionales."""
         
-        # 5. Detectar pedido de producto
-        producto_encontrado = None
-        for producto in menu:
-            if producto['nombre'].lower() in texto_lower:
-                producto_encontrado = producto
-                break
+        # Mensaje del usuario
+        user_message = f"""Cliente dice: "{texto}"
+
+Genera una respuesta amable y útil para este cliente."""
         
-        if producto_encontrado:
-            # Crear pedido
-            pedido = order_repo.create(
-                tenant['id'], 
-                numero, 
-                producto_encontrado['nombre'], 
-                producto_encontrado['precio']
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.7,
+                max_tokens=500
             )
-            link_pago = generar_link_pago(pedido['total'], pedido['id'])
             
-            return f"""🍕 *¡Pedido confirmado!*
-
-**Producto:** {producto_encontrado['nombre']}
-**Precio:** ${producto_encontrado['precio']:,.0f}
-
-📝 *Tu pedido ID:* `{pedido['id'][:8]}...`
-
-🔗 *Paga aquí:*
-{link_pago}
-
-✍️ *Escribe "ya pague"* cuando completes el pago."""
-        
-        # 6. Saludo o mensaje no reconocido
-        if any(saludo in texto_lower for saludo in ['hola', 'buenas', 'holi', 'que tal', 'saludos']):
-            return f"""👋 *¡Hola! Bienvenido a {tenant['nombre']}*
-
-🍕 Escribe *"menu"* para ver todos nuestros productos
-📍 Escribe *"ubicacion"* para saber dónde estamos
-🕒 Escribe *"horario"* para conocer nuestra atención
-
-¿En qué podemos ayudarte hoy?"""
-        
-        # 7. Respuesta por defecto
-        return f"""🤖 *Hola! Soy el asistente de {tenant['nombre']}*
-
-Comandos disponibles:
-• *menu* - Ver productos disponibles
-• *horario* - Horario de atención  
-• *ubicacion* - Dónde encontrarnos
-• *[nombre del producto]* - Para hacer un pedido
-
-¿Qué te gustaría ordenar?"""
+            respuesta = response.choices[0].message.content
+            
+            # Post-procesamiento: detectar si la IA quiere crear un pedido
+            respuesta, pedido_creado = self._detectar_y_crear_pedido(respuesta, texto, tenant, menu, numero)
+            
+            return respuesta
+            
+        except Exception as e:
+            logger.error(f'Error llamando a DeepSeek: {e}')
+            return self._respuesta_fallback(texto, tenant, menu, numero)
     
-    def _formatear_menu(self, menu: list) -> str:
-        """Formatea el menú para mostrar al cliente"""
+    def _detectar_y_crear_pedido(self, respuesta_ia: str, texto_original: str, tenant: dict, menu: list, numero: str) -> tuple:
+        """Detecta si la IA quiere crear un pedido y lo ejecuta"""
+        
+        # Buscar si la respuesta contiene indicación de pedido
+        lineas = respuesta_ia.lower().split('\n')
+        
+        for linea in lineas:
+            # Buscar patrones de confirmación de pedido
+            if any(palabra in linea for palabra in ['pedido confirmado', 'producto agregado', 'link de pago', 'paga aquí']):
+                # Intentar extraer el producto del texto original
+                for producto in menu:
+                    if producto['nombre'].lower() in texto_original.lower():
+                        # Crear pedido
+                        pedido = order_repo.create(
+                            tenant['id'],
+                            numero,
+                            producto['nombre'],
+                            producto['precio']
+                        )
+                        link_pago = generar_link_pago(pedido['total'], pedido['id'])
+                        
+                        # Reemplazar la respuesta con el formato correcto
+                        respuesta_nueva = f"""✅ ¡Pedido confirmado!
+
+**Producto:** {producto['nombre']}
+**Precio:** ${producto['precio']:,.0f}
+
+🔗 **Link de pago:** {link_pago}
+
+✍️ Escribe "ya pagué" cuando completes el pago."""
+                        
+                        return respuesta_nueva, True
+        
+        return respuesta_ia, False
+    
+    def _formatear_menu_para_ia(self, menu: list) -> str:
+        """Formatea el menú para incluirlo en el prompt de IA"""
         if not menu:
-            return "📋 *Menú*\n\nActualmente no hay productos disponibles. Por favor consulta más tarde."
+            return "No hay productos disponibles actualmente."
         
         # Agrupar por categoría
         categorias = {}
@@ -117,32 +152,43 @@ Comandos disponibles:
                 categorias[cat] = []
             categorias[cat].append(p)
         
-        # Emojis por categoría
-        emojis = {
-            'pizzas': '🍕',
-            'hamburguesas': '🍔',
-            'bebidas': '🥤',
-            'postres': '🍰',
-            'acompañamientos': '🍟',
-            'general': '📦'
-        }
-        
-        respuesta = "📋 *MENÚ*\n\n"
-        
+        resultado = ""
         for categoria, productos in categorias.items():
-            emoji = emojis.get(categoria, '📦')
-            respuesta += f"*{emoji} {categoria.upper()}*\n"
+            resultado += f"\n{categoria.upper()}:\n"
             for p in productos:
-                precio = f"${p['precio']:,.0f}"
-                respuesta += f"• *{p['nombre']}* - {precio}\n"
+                resultado += f"  - {p['nombre']}: ${p['precio']:,.0f}"
                 if p.get('descripcion'):
-                    respuesta += f"  _{p['descripcion'][:50]}_\n"
-            respuesta += "\n"
+                    resultado += f" - {p['descripcion'][:80]}"
+                resultado += "\n"
         
-        respuesta += "✍️ *Para pedir:* Escribe el nombre del producto\n"
-        respuesta += "💳 *Para pagar:* Recibirás un link de pago después de tu pedido"
+        return resultado
+    
+    def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
+        """Respuesta de fallback si la IA no está disponible"""
         
-        return respuesta
+        texto_lower = texto.lower()
+        
+        # Detectar pedido básico
+        for producto in menu:
+            if producto['nombre'].lower() in texto_lower:
+                pedido = order_repo.create(tenant['id'], numero, producto['nombre'], producto['precio'])
+                link_pago = generar_link_pago(pedido['total'], pedido['id'])
+                return f"✅ Pedido: {producto['nombre']} - ${producto['precio']:,.0f}\n🔗 Paga aquí: {link_pago}"
+        
+        # Comandos básicos
+        if 'menu' in texto_lower:
+            respuesta = "📋 *MENÚ*\n\n"
+            for p in menu:
+                respuesta += f"• {p['nombre']}: ${p['precio']:,.0f}\n"
+            return respuesta
+        
+        if 'horario' in texto_lower:
+            return "🕒 Horario: 12pm a 10pm"
+        
+        if 'ubicacion' in texto_lower:
+            return "📍 Ubicación: Cali, Colombia"
+        
+        return f"👋 Hola! Soy el asistente de {tenant['nombre']}. ¿Qué te gustaría ordenar?"
 
 # Instancia global
 message_handler = MessageHandler()
