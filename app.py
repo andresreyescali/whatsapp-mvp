@@ -481,6 +481,16 @@ def debug_test():
         ]
     })
 
+from flask import Flask, request, jsonify, render_template
+from tenants.onboarding import register_new_tenant
+
+app = Flask(__name__)
+
+# 🔥 API (POST JSON)
+@app.route("/registro", methods=["POST"])
+def registro():
+    return register_new_tenant()
+
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
