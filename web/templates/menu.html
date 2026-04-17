@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Menú - {{ tenant.nombre }}{% endblock %}
+
+{% block content %}
+<div class="stats">
+    <div class="stat-card">
+        <div class="number" id="totalProductos">0</div>
+        <div class="label">Productos en Menú</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="iaStatus">❌</div>
+        <div class="label">Inteligencia Artificial</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>➕ Agregar Producto</h2>
+    <form id="productForm">
+        <div class="form-group">
+            <label>Nombre del producto *</label>
+            <input type="text" id="nombre" required placeholder="Ej: Pizza Margarita">
+        </div>
+        <div class="form-group">
+            <label>Descripción</label>
+            <textarea id="descripcion" rows="2" placeholder="Describe el producto..."></textarea>
+        </div>
+        <div class="form-group">
+            <label>Precio ($) *</label>
+            <input type="number" id="precio" required placeholder="25000">
+        </div>
+        <div class="form-group">
+            <label>Categoría</label>
+            <select id="categoria">
+                <option value="pizzas">🍕 Pizzas</option>
+                <option value="hamburguesas">🍔 Hamburguesas</option>
+                <option value="bebidas">🥤 Bebidas</option>
+                <option value="acompañamientos">🍟 Acompañamientos</option>
+                <option value="postres">🍰 Postres</option>
+            </select>
+        </div>
+        <button type="submit" class="btn">Agregar Producto</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>📋 Mi Menú</h2>
+    <div id="menuContainer" class="loading">Cargando menú...</div>
+</div>
+
+<div class="card">
+    <h2>⚙️ Configuración</h2>
+    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+        <input type="checkbox" id="usarIA" {% if tenant.usar_ia %}checked{% endif %}>
+        <span>Activar respuestas con Inteligencia Artificial</span>
+    </label>
+    <p style="font-size: 12px; color: #666; margin-top: 10px;">
+        La IA permite respuestas más naturales y personalizadas para tus clientes.
+    </p>
+    <button id="saveConfigBtn" class="btn" style="margin-top: 15px;">💾 Guardar Configuración</button>
+</div>
+
+<script>
+    const tenantId = '{{ tenant.id }}';
+    const API_BASE = window.location.origin;
+    
+    async function loadMenu() {
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/menu`);
+            if (!response.ok) throw new Error('Error al cargar menú');
+            const menu = await response.json();
+            
+            document.getElementById('totalProductos').innerText = menu.length;
+            
+            if (menu.length === 0) {
+                document.getElementById('menuContainer').innerHTML = '<div class="loading">📭 No hay productos en el menú.<br>Agrega tu primer producto usando el formulario.</div>';
+                return;
+            }
+            
+            let html = '<table><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Acciones</th></tr></thead><tbody>';
+            menu.forEach(item => {
+                html += `
+                    <tr>
+                        <td><strong>${escapeHtml(item.nombre)}</strong></td>
+                        <td>${escapeHtml(item.descripcion || '-')}</td>
+                        <td>$${item.precio.toLocaleString()}</td>
+                        <td><button class="btn btn-danger btn-small" onclick="deleteProduct('${item.id}')">🗑️ Eliminar</button></td>
+                    </tr>
+                `;
+            });
+            html += '</tbody></table>';
+            document.getElementById('menuContainer').innerHTML = html;
+        } catch (error) {
+            document.getElementById('menuContainer').innerHTML = '<div class="alert alert-error">❌ Error al cargar el menú</div>';
+        }
+    }
+    
+    async function loadConfig() {
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/config`);
+            if (response.ok) {
+                const config = await response.json();
+                document.getElementById('usarIA').checked = config.usar_ia || false;
+                document.getElementById('iaStatus').innerHTML = config.usar_ia ? '✅' : '❌';
+            }
+        } catch (error) {
+            console.error('Error loading config:', error);
+        }
+    }
+    
+    document.getElementById('productForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const producto = {
+            nombre: document.getElementById('nombre').value,
+            descripcion: document.getElementById('descripcion').value,
+            precio: parseInt(document.getElementById('precio').value),
+            categoria: document.getElementById('categoria').value
+        };
+        
+        const submitBtn = e.target.querySelector('button');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Agregando...';
+        
+        try {
+            const response = await fetch(`${API_BASE}/admin/add_product/${tenantId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(producto)
+            });
+            
+            if (response.ok) {
+                showAlert('success', '✅ Producto agregado correctamente');
+                document.getElementById('productForm').reset();
+                loadMenu();
+            } else {
+                showAlert('error', '❌ Error al agregar producto');
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Agregar Producto';
+        }
+    });
+    
+    document.getElementById('saveConfigBtn').addEventListener('click', async () => {
+        const usarIA = document.getElementById('usarIA').checked;
+        const btn = document.getElementById('saveConfigBtn');
+        btn.disabled = true;
+        btn.textContent = 'Guardando...';
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/config/ia`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ usar_ia: usarIA })
+            });
+            
+            if (response.ok) {
+                showAlert('success', '✅ Configuración guardada');
+                document.getElementById('iaStatus').innerHTML = usarIA ? '✅' : '❌';
+            } else {
+                showAlert('error', '❌ Error al guardar configuración');
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '💾 Guardar Configuración';
+        }
+    });
+    
+    window.deleteProduct = async (productId) => {
+        if (!confirm('¿Eliminar este producto del menú?')) return;
+        
+        try {
+            const response = await fetch(`${API_BASE}/admin/delete_product/${tenantId}/${productId}`, { 
+                method: 'DELETE' 
+            });
+            
+            if (response.ok) {
+                showAlert('success', '✅ Producto eliminado');
+                loadMenu();
+            } else {
+                showAlert('error', '❌ Error al eliminar producto');
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión');
+        }
+    };
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    loadMenu();
+    loadConfig();
+</script>
+{% endblock %}

@@ -1,37 +1,40 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Registrar negocio</title>
-    <style>
-        body { font-family: Arial; padding: 20px; max-width: 500px; margin: auto; }
-        input, button { width: 100%; padding: 10px; margin: 5px 0; }
-        button { background: #25D366; color: white; border: none; cursor: pointer; }
-        button:hover { background: #128C7E; }
-        .form-group { margin-bottom: 15px; }
-        label { font-weight: bold; }
-    </style>
-</head>
-<body>
+{% extends "base.html" %}
+
+{% block title %}Registrar Negocio - WhatsApp Bot SaaS{% endblock %}
+
+{% block content %}
+<div class="card">
     <h2>🚀 Registrar nuevo negocio</h2>
     <p>Completa los datos para conectar tu WhatsApp Business</p>
     
     <form action="/registro_web" method="post">
         <div class="form-group">
             <label>Nombre del negocio</label>
-            <input name="nombre" placeholder="Ej: Pizzería Avars" required>
+            <input type="text" name="nombre" placeholder="Ej: Pizzería Avars" required>
         </div>
         
         <div class="form-group">
             <label>Phone ID</label>
-            <input name="phone_id" placeholder="Ej: 123456789" required>
+            <input type="text" name="phone_id" placeholder="Ej: 123456789" required>
         </div>
         
         <div class="form-group">
             <label>Token</label>
-            <input name="token" placeholder="EAA..." required>
+            <input type="text" name="token" placeholder="EAA..." required>
         </div>
         
-        <button type="submit">Registrar</button>
+        <button type="submit" class="btn">Registrar negocio</button>
     </form>
-</body>
-</html>
+</div>
+
+<div class="card">
+    <h2>📌 ¿Cómo obtener estos datos?</h2>
+    <ol style="margin-left: 20px; line-height: 1.8;">
+        <li>Ve a <a href="https://developers.facebook.com/apps" target="_blank">Meta Developers</a></li>
+        <li>Selecciona tu aplicación o crea una nueva</li>
+        <li>Agrega el producto WhatsApp</li>
+        <li>Ve a <strong>WhatsApp → API Setup</strong></li>
+        <li>Copia el <strong>Phone Number ID</strong> y el <strong>Token</strong></li>
+    </ol>
+</div>
+{% endblock %}

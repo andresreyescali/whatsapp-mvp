@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Registro Exitoso - WhatsApp Bot SaaS{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>✅ ¡Negocio registrado exitosamente!</h2>
+    <p><strong>Nombre:</strong> {{ tenant.nombre }}</p>
+    <p><strong>Tenant ID:</strong> <code>{{ tenant.id }}</code></p>
+    
+    <div style="margin-top: 20px;">
+        <a href="/admin/menu?tenant_id={{ tenant.id }}" class="btn">🎛️ Ir al panel de menú</a>
+        <a href="/admin/tenants" class="btn">📋 Ver todos los negocios</a>
+    </div>
+</div>
+{% endblock %}

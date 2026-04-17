@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Negocios Registrados - WhatsApp Bot SaaS{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📋 Negocios Registrados</h2>
+    <p>Total: <strong id="totalCount">{{ tenants|length }}</strong> negocios</p>
+    
+    <div style="overflow-x: auto;">
+        <table>
+            <thead>
+                <tr><th>ID</th><th>Nombre</th><th>Phone ID</th><th>Fecha</th><th>Panel</th><th>Acciones</th></tr>
+            </thead>
+            <tbody id="tenantsTable">
+                {% for t in tenants %}
+                <tr id="row-{{ t.id }}">
+                    <td><code>{{ t.id }}</code></td>
+                    <td><strong>{{ t.nombre }}</strong></td>
+                    <td>{{ t.phone_id }}</td>
+                    <td>{{ t.created_at }}</td>
+                    <td><a href="/admin/menu?tenant_id={{ t.id }}" class="btn btn-small">🎛️ Gestionar</a></td>
+                    <td><button class="btn btn-danger btn-small" onclick="confirmDelete('{{ t.id }}', '{{ t.nombre }}')">🗑️ Eliminar</button></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Diálogo de confirmación -->
+<div id="confirmDialog" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1000; min-width: 350px;">
+    <h3>⚠️ Confirmar eliminación</h3>
+    <p id="confirmMessage">¿Estás seguro de eliminar este negocio?</p>
+    <p style="color: red; font-size: 12px; margin-top: 10px;">Esta acción eliminará TODOS los datos del negocio (menú, pedidos, configuración). No se puede deshacer.</p>
+    <div style="margin-top: 20px; text-align: right;">
+        <button class="btn" onclick="closeDialog()">Cancelar</button>
+        <button class="btn btn-danger" id="confirmDeleteBtn">Eliminar</button>
+    </div>
+</div>
+<div id="overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"></div>
+
+<script>
+    let deleteTenantId = null;
+    
+    function confirmDelete(tenantId, tenantName) {
+        deleteTenantId = tenantId;
+        document.getElementById('confirmMessage').innerHTML = `¿Estás seguro de eliminar el negocio <strong>${tenantName}</strong>?`;
+        document.getElementById('overlay').style.display = 'block';
+        document.getElementById('confirmDialog').style.display = 'block';
+    }
+    
+    function closeDialog() {
+        deleteTenantId = null;
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('confirmDialog').style.display = 'none';
+    }
+    
+    document.getElementById('confirmDeleteBtn').onclick = async function() {
+        if (!deleteTenantId) return;
+        
+        try {
+            const response = await fetch(`/admin/delete_tenant/${deleteTenantId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                const row = document.getElementById(`row-${deleteTenantId}`);
+                if (row) row.remove();
+                
+                const totalRows = document.querySelectorAll('#tenantsTable tr').length;
+                document.getElementById('totalCount').innerText = totalRows;
+                
+                showAlert('success', '✅ Negocio eliminado correctamente');
+            } else {
+                const error = await response.json();
+                showAlert('error', '❌ Error: ' + (error.error || 'No se pudo eliminar'));
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión: ' + error.message);
+        }
+        closeDialog();
+    };
+</script>
+{% endblock %}
