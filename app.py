@@ -84,6 +84,31 @@ def list_tenants():
     """
     return html
 
+@app.route('/registro')
+def registro():
+    """Muestra el formulario para registrar un nuevo negocio"""
+    return render_template('registro.html')
+
+@app.route('/registro_web', methods=['POST'])
+def registro_web():
+    from tenants.repository import tenant_repo
+    from tenants.schema_manager import schema_manager
+    
+    nombre = request.form.get('nombre')
+    phone_id = request.form.get('phone_id')
+    token = request.form.get('token')
+    
+    # Crear tenant
+    tenant = tenant_repo.create(nombre, phone_id, token)
+    
+    # Crear su esquema y tablas
+    schema_manager.create_tenant_schema(tenant['id'], 'restaurante')
+    
+    return f"""
+    ✅ Negocio {nombre} registrado exitosamente!<br>
+    Tenant ID: {tenant['id']}<br>
+    <a href="/admin/menu?tenant_id={tenant['id']}">Ir al panel de menú</a>
+    """
 
 @app.route('/admin/menu', methods=['GET'])
 def admin_menu():
@@ -103,7 +128,7 @@ def admin_menu():
     <html lang="es">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=   device-width, initial-scale=1.0">
         <title>Gestión de Menú - {tenant['nombre']}</title>
         <style>
             * {{ margin: 0; padding: 0; box-sizing: border-box; }}
