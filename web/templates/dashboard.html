@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard - {{ tenant.nombre }}</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: #25D366;
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-card .number { font-size: 32px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎉 {{ tenant.nombre }}</h1>
+            <p>¡Tu asistente de WhatsApp está activo!</p>
+            <p><strong>Número:</strong> {{ tenant.phone_id }}</p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="number" id="totalProductos">-</div>
+                <div>Productos en menú</div>
+            </div>
+            <div class="stat-card">
+                <div class="number" id="iaStatus">❌</div>
+                <div>IA Activada</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>📋 Acceso rápido</h2>
+            <p><a href="/admin/menu?tenant_id={{ tenant.id }}">🎛️ Ir al panel de gestión de menú</a></p>
+            <p><a href="https://wa.me/{{ tenant.phone_id }}">📱 Probar mi WhatsApp Business</a></p>
+        </div>
+        
+        <div class="card">
+            <h2>📦 Pedidos recientes</h2>
+            <div id="pedidos">Cargando...</div>
+        </div>
+    </div>
+    
+    <script>
+        const tenantId = '{{ tenant.id }}';
+        
+        async function loadStats() {
+            const response = await fetch(`/api/tenant/${tenantId}/menu`);
+            const menu = await response.json();
+            document.getElementById('totalProductos').innerText = menu.length;
+            
+            const configResp = await fetch(`/api/tenant/${tenantId}/config`);
+            const config = await configResp.json();
+            document.getElementById('iaStatus').innerHTML = config.usar_ia ? '✅' : '❌';
+        }
+        
+        async function loadPedidos() {
+            const response = await fetch(`/api/tenant/${tenantId}/pedidos`);
+            const pedidos = await response.json();
+            if (pedidos.length === 0) {
+                document.getElementById('pedidos').innerHTML = '<p>No hay pedidos aún</p>';
+            } else {
+                let html = '<table style="width:100%; border-collapse:collapse;">';
+                html += '<tr><th>ID</th><th>Cliente</th><th>Total</th><th>Estado</th></tr>';
+                pedidos.slice(0, 10).forEach(p => {
+                    html += `<tr><td>${p.id.substring(0,8)}</td><td>${p.cliente_numero}</td><td>$${p.total}</td><td>${p.estado}</td></tr>`;
+                });
+                html += '</table>';
+                document.getElementById('pedidos').innerHTML = html;
+            }
+        }
+        
+        loadStats();
+        loadPedidos();
+        setInterval(loadPedidos, 30000);
+    </script>
+</body>
+</html>

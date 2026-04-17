@@ -6,6 +6,7 @@ from whatsapp.webhook import register_webhook_routes
 from tenants.onboarding import register_new_tenant
 from tenants.repository import tenant_repo
 from tenants.schema_manager import schema_manager
+from flask import render_template
 
 setup_logging()
 

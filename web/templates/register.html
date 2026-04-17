@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Registro - WhatsApp Bot SaaS</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 { color: #333; margin-bottom: 10px; }
+        .subtitle { color: #666; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #333; }
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .whatsapp-btn {
+            background: #25D366;
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .whatsapp-btn:hover { background: #128C7E; }
+        .whatsapp-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        button[type="submit"] {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+        }
+        button[type="submit"]:hover { background: #5a67d8; }
+        .alert {
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .hidden { display: none; }
+        .status { 
+            font-size: 14px; 
+            margin-top: 10px; 
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .status-waiting { background: #fff3cd; color: #856404; }
+        .status-success { background: #d4edda; color: #155724; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 WhatsApp Bot SaaS</h1>
+        <p class="subtitle">Conecta WhatsApp a tu negocio en minutos</p>
+        
+        <div id="alert" class="alert"></div>
+        
+        <form id="businessForm">
+            <div class="form-group">
+                <label>Nombre de tu negocio</label>
+                <input type="text" id="nombre" required placeholder="Ej: Pizza House">
+            </div>
+            
+            <div class="form-group">
+                <label>Tipo de negocio</label>
+                <select id="tipo_negocio" required>
+                    <option value="restaurante">🍕 Restaurante</option>
+                    <option value="panaderia">🥖 Panadería</option>
+                    <option value="pasteleria">🎂 Pastelería</option>
+                    <option value="otros">📦 Otros</option>
+                </select>
+            </div>
+            
+            <!-- Botón de Embedded Signup (se mostrará después de FB.init) -->
+            <div id="whatsapp-button-container"></div>
+            
+            <button type="submit" id="submitBtn" style="display: none;">Registrar mi negocio</button>
+        </form>
+        
+        <div id="status" class="status status-waiting" style="display: none;">
+            ⏳ Conectando con WhatsApp...
+        </div>
+    </div>
+
+    <script>
+        // Configuración
+        const FB_APP_ID = '{{ fb_app_id }}';
+        const FB_CONFIG_ID = '{{ fb_config_id }}';
+        const API_BASE = window.location.origin;
+        
+        let whatsappCode = null;
+        let wabaId = null;
+        
+        // Mostrar alerta
+        function showAlert(message, type) {
+            const alertDiv = document.getElementById('alert');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = message;
+            alertDiv.style.display = 'block';
+            setTimeout(() => {
+                alertDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Renderizar botón de WhatsApp
+        function renderWhatsAppButton() {
+            const container = document.getElementById('whatsapp-button-container');
+            container.innerHTML = `
+                <button type="button" class="whatsapp-btn" id="whatsappConnectBtn">
+                    📱 Conectar WhatsApp
+                </button>
+            `;
+            
+            document.getElementById('whatsappConnectBtn').onclick = () => {
+                FB.login(function(response) {
+                    if (response.authResponse) {
+                        whatsappCode = response.authResponse.code;
+                        wabaId = response.authResponse.waba_id;
+                        
+                        // Mostrar éxito
+                        document.getElementById('status').style.display = 'block';
+                        document.getElementById('status').innerHTML = '✅ WhatsApp conectado correctamente';
+                        document.getElementById('status').className = 'status status-success';
+                        document.getElementById('submitBtn').style.display = 'block';
+                        
+                        showAlert('WhatsApp conectado. Completa el registro.', 'success');
+                    } else {
+                        showAlert('No se pudo conectar WhatsApp. Intenta de nuevo.', 'error');
+                    }
+                }, {
+                    config_id: FB_CONFIG_ID,
+                    response_type: 'code',
+                    override_default_response_type: true,
+                    extras: { sessionInfoVersion: 2 }
+                });
+            };
+        }
+        
+        // Inicializar Facebook SDK
+        window.fbAsyncInit = function() {
+            FB.init({
+                appId: FB_APP_ID,
+                version: 'v18.0'
+            });
+            renderWhatsAppButton();
+        };
+        
+        // Cargar SDK
+        (function(d, s, id) {
+            var js, fjs = d.getElementsByTagName(s)[0];
+            if (d.getElementById(id)) return;
+            js = d.createElement(s); js.id = id;
+            js.src = "https://connect.facebook.net/en_US/sdk.js";
+            fjs.parentNode.insertBefore(js, fjs);
+        }(document, 'script', 'facebook-jssdk'));
+        
+        // Enviar registro
+        document.getElementById('businessForm').onsubmit = async (e) => {
+            e.preventDefault();
+            
+            if (!whatsappCode) {
+                showAlert('Primero conecta WhatsApp', 'error');
+                return;
+            }
+            
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Registrando...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/onboarding/complete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        nombre: document.getElementById('nombre').value,
+                        tipo_negocio: document.getElementById('tipo_negocio').value,
+                        whatsapp_code: whatsappCode,
+                        waba_id: wabaId
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showAlert('✅ ¡Registro completado! Redirigiendo...', 'success');
+                    setTimeout(() => {
+                        window.location.href = `/dashboard/${result.tenant_id}`;
+                    }, 2000);
+                } else {
+                    showAlert('❌ Error: ' + result.error, 'error');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Registrar mi negocio';
+                }
+            } catch (error) {
+                showAlert('❌ Error de conexión: ' + error.message, 'error');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Registrar mi negocio';
+            }
+        };
+    </script>
+</body>
+</html>
