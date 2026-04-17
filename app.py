@@ -10,7 +10,8 @@ from flask import render_template
 
 setup_logging()
 
-app = Flask(__name__)
+#app = Flask(__name__)
+app = Flask(__name__, template_folder='web/templates')
 
 # Configurar CORS
 @app.after_request
