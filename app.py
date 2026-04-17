@@ -72,6 +72,27 @@ def admin_menu():
     return render_template('menu.html', tenant=tenant)
 
 
+@app.route('/admin/delete_tenant/<tenant_id>', methods=['DELETE', 'OPTIONS'])
+def delete_tenant(tenant_id):
+    """Elimina un tenant y todos sus datos"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    try:
+        logger.info(f'Eliminando tenant: {tenant_id}')
+        
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if not tenant:
+            return jsonify({'error': 'Tenant no encontrado'}), 404
+        
+        tenant_repo.delete(tenant_id)
+        
+        return jsonify({'status': 'ok', 'message': 'Tenant eliminado'}), 200
+        
+    except Exception as e:
+        logger.error(f'Error eliminando tenant: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
 # ==================== API ENDPOINTS ====================
 
 @app.route('/api/tenant/<tenant_id>/menu', methods=['GET'])
@@ -194,6 +215,10 @@ def debug_test():
         ]
     })
 
+@app.route('/admin/test_delete', methods=['GET'])
+def test_delete():
+    """Endpoint de prueba para verificar que la API funciona"""
+    return jsonify({'status': 'ok', 'message': 'API de eliminación funciona'})
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')

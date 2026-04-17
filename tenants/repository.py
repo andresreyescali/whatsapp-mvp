@@ -82,5 +82,23 @@ class TenantRepository:
         except Exception as e:
             logger.error(f'Error obteniendo tenants: {e}')
             return []
+        
+    def delete(self, tenant_id: str):
+        """Elimina tenant y todos sus datos"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Eliminar métricas
+                cur.execute("DELETE FROM public.metricas_tenants WHERE tenant_id = %s", (tenant_id,))
+                # Eliminar tenant de la tabla
+                cur.execute("DELETE FROM public.tenants WHERE id = %s", (tenant_id,))
+                # Eliminar el schema completo
+                cur.execute(f"DROP SCHEMA IF EXISTS {tenant_id} CASCADE")
+            conn.commit()
+        logger.info(f'Tenant {tenant_id} eliminado permanentemente')
+        return True
+    except Exception as e:
+        logger.error(f'Error en delete: {e}')
+        raise
 
 tenant_repo = TenantRepository()

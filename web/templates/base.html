@@ -51,17 +51,20 @@
         
         {% block content %}{% endblock %}
     </div>
-    
     <script>
-        function showAlert(type, message) {
-            const alertDiv = document.getElementById('alert');
-            alertDiv.className = `alert alert-${type}`;
-            alertDiv.innerHTML = message;
-            alertDiv.style.display = 'block';
-            setTimeout(() => {
-                alertDiv.style.display = 'none';
-            }, 3000);
+    function showAlert(type, message) {
+        const alertDiv = document.getElementById('alert');
+        if (!alertDiv) {
+            console.log('Alert:', type, message);
+            return;
         }
+        alertDiv.className = `alert alert-${type}`;
+        alertDiv.innerHTML = message;
+        alertDiv.style.display = 'block';
+        setTimeout(() => {
+            alertDiv.style.display = 'none';
+        }, 3000);
+    }
     </script>
     {% block extra_js %}{% endblock %}
 </body>

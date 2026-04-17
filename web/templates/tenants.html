@@ -8,9 +8,16 @@
     <p>Total: <strong id="totalCount">{{ tenants|length }}</strong> negocios</p>
     
     <div style="overflow-x: auto;">
-        <table>
+        <table style="width: 100%;">
             <thead>
-                <tr><th>ID</th><th>Nombre</th><th>Phone ID</th><th>Fecha</th><th>Panel</th><th>Acciones</th></tr>
+                <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Phone ID</th>
+                    <th>Fecha</th>
+                    <th>Panel</th>
+                    <th>Acciones</th>
+                </tr>
             </thead>
             <tbody id="tenantsTable">
                 {% for t in tenants %}
@@ -19,8 +26,12 @@
                     <td><strong>{{ t.nombre }}</strong></td>
                     <td>{{ t.phone_id }}</td>
                     <td>{{ t.created_at }}</td>
-                    <td><a href="/admin/menu?tenant_id={{ t.id }}" class="btn btn-small">🎛️ Gestionar</a></td>
-                    <td><button class="btn btn-danger btn-small" onclick="confirmDelete('{{ t.id }}', '{{ t.nombre }}')">🗑️ Eliminar</button></td>
+                    <td>
+                        <a href="/admin/menu?tenant_id={{ t.id }}" class="btn btn-small">🎛️ Gestionar</a>
+                    </td>
+                    <td>
+                        <button class="btn btn-danger btn-small" onclick="confirmDelete('{{ t.id }}', '{{ t.nombre|escape }}')">🗑️ Eliminar</button>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -59,27 +70,59 @@
     document.getElementById('confirmDeleteBtn').onclick = async function() {
         if (!deleteTenantId) return;
         
+        const btn = document.getElementById('confirmDeleteBtn');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Eliminando...';
+        
         try {
+            console.log('Eliminando tenant:', deleteTenantId);
+            
             const response = await fetch(`/admin/delete_tenant/${deleteTenantId}`, {
-                method: 'DELETE'
+                method: 'DELETE',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                }
             });
             
-            if (response.ok) {
-                const row = document.getElementById(`row-${deleteTenantId}`);
-                if (row) row.remove();
+            console.log('Response status:', response.status);
+            
+            // Verificar si la respuesta es JSON
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const result = await response.json();
                 
-                const totalRows = document.querySelectorAll('#tenantsTable tr').length;
-                document.getElementById('totalCount').innerText = totalRows;
-                
-                showAlert('success', '✅ Negocio eliminado correctamente');
+                if (response.ok) {
+                    // Eliminar la fila de la tabla
+                    const row = document.getElementById(`row-${deleteTenantId}`);
+                    if (row) row.remove();
+                    
+                    // Actualizar contador
+                    const totalRows = document.querySelectorAll('#tenantsTable tr').length;
+                    document.getElementById('totalCount').innerText = totalRows;
+                    
+                    showAlert('success', '✅ Negocio eliminado correctamente');
+                } else {
+                    showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
+                }
             } else {
-                const error = await response.json();
-                showAlert('error', '❌ Error: ' + (error.error || 'No se pudo eliminar'));
+                // Si no es JSON, mostrar el error como texto
+                const text = await response.text();
+                console.error('Respuesta no JSON:', text.substring(0, 200));
+                showAlert('error', '❌ Error del servidor. Revisa los logs.');
             }
         } catch (error) {
+            console.error('Error en la petición:', error);
             showAlert('error', '❌ Error de conexión: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+            closeDialog();
         }
-        closeDialog();
     };
+    
+    // Cerrar diálogo al hacer clic en overlay
+    document.getElementById('overlay').onclick = closeDialog;
 </script>
 {% endblock %}
