@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}Entrenar IA - {{ tenant_id }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>🤖 Entrenar Asistente IA</h2>
+    <p>Sube una imagen de tu menú o escribe la información de tu negocio para que la IA aprenda a atender pedidos correctamente.</p>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <!-- Opción 1: Subir imagen -->
+    <div class="card">
+        <h2>📷 Opción 1: Subir imagen del menú</h2>
+        <p>Toma una foto clara de tu menú físico y la IA extraerá automáticamente los productos, precios y descripciones.</p>
+        
+        <div class="form-group">
+            <label>Selecciona una imagen</label>
+            <input type="file" id="imageInput" accept="image/*" capture="environment">
+        </div>
+        
+        <div id="imagePreview" style="margin-top: 10px; display: none;">
+            <img id="preview" style="max-width: 100%; border-radius: 10px;">
+        </div>
+        
+        <button id="trainImageBtn" class="btn" style="margin-top: 15px;" disabled>Entrenar con imagen</button>
+        <div id="imageResult" class="hidden" style="margin-top: 15px;"></div>
+    </div>
+    
+    <!-- Opción 2: Escribir texto -->
+    <div class="card">
+        <h2>✍️ Opción 2: Escribir información</h2>
+        <p>Describe tu negocio, productos, horarios, políticas y cómo quieres que atiendas a los clientes.</p>
+        
+        <div class="form-group">
+            <label>Descripción del negocio</label>
+            <textarea id="textoInput" rows="8" placeholder="Ejemplo:
+            
+Nombre: Pizzería Avars
+Horario: Lunes a Domingo 12pm a 10pm
+Ubicación: Calle 123, Cali
+
+Productos:
+- Pizza Margarita: $25,000 (salsa de tomate, mozzarella, albahaca)
+- Pizza Pepperoni: $32,000 (pepperoni italiano, queso mozzarella)
+- Gaseosa: $5,000
+
+Políticas:
+- Tiempo de entrega: 30-45 minutos
+- Mínimo para envío: $15,000
+- Formas de pago: efectivo, transferencia, link de pago
+
+Instrucciones para atender:
+- Sé amable y ofrece combos
+- Pregunta si quieren agregar bebida
+- Confirma el pedido antes de generar pago"></textarea>
+        </div>
+        
+        <button id="trainTextBtn" class="btn">Entrenar con texto</button>
+        <div id="textResult" class="hidden" style="margin-top: 15px;"></div>
+    </div>
+</div>
+
+<div class="card" id="contextPreview" style="display: none;">
+    <h2>📋 Contexto aprendido</h2>
+    <div id="contextContent"></div>
+    <a href="/admin/menu?tenant_id={{ tenant_id }}" class="btn" style="margin-top: 15px;">Ver menú generado</a>
+</div>
+
+<script>
+    const tenantId = '{{ tenant_id }}';
+    
+    // Previsualizar imagen
+    document.getElementById('imageInput').onchange = function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                document.getElementById('preview').src = event.target.result;
+                document.getElementById('imagePreview').style.display = 'block';
+                document.getElementById('trainImageBtn').disabled = false;
+                window.selectedImage = event.target.result.split(',')[1];
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+    
+    // Entrenar con imagen
+    document.getElementById('trainImageBtn').onclick = async function() {
+        const btn = this;
+        const resultDiv = document.getElementById('imageResult');
+        
+        btn.disabled = true;
+        btn.textContent = 'Procesando imagen...';
+        resultDiv.className = 'loading';
+        resultDiv.innerHTML = '🔄 Procesando imagen con IA...';
+        resultDiv.style.display = 'block';
+        
+        try {
+            const response = await fetch(`/admin/train/${tenantId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    tipo: 'imagen',
+                    imagen: window.selectedImage
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                resultDiv.className = 'alert alert-success';
+                resultDiv.innerHTML = '✅ ¡Entrenamiento completado! La IA ha aprendido tu menú.';
+                mostrarContexto(result.contexto);
+            } else {
+                throw new Error(result.error || 'Error');
+            }
+        } catch (error) {
+            resultDiv.className = 'alert alert-error';
+            resultDiv.innerHTML = '❌ Error: ' + error.message;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Entrenar con imagen';
+        }
+    };
+    
+    // Entrenar con texto
+    document.getElementById('trainTextBtn').onclick = async function() {
+        const btn = this;
+        const resultDiv = document.getElementById('textResult');
+        const texto = document.getElementById('textoInput').value;
+        
+        if (!texto.trim()) {
+            alert('Por favor escribe la información de tu negocio');
+            return;
+        }
+        
+        btn.disabled = true;
+        btn.textContent = 'Procesando texto...';
+        resultDiv.className = 'loading';
+        resultDiv.innerHTML = '🔄 Procesando texto con IA...';
+        resultDiv.style.display = 'block';
+        
+        try {
+            const response = await fetch(`/admin/train/${tenantId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    tipo: 'texto',
+                    texto: texto
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                resultDiv.className = 'alert alert-success';
+                resultDiv.innerHTML = '✅ ¡Entrenamiento completado! La IA ha aprendido tu negocio.';
+                mostrarContexto(result.contexto);
+            } else {
+                throw new Error(result.error || 'Error');
+            }
+        } catch (error) {
+            resultDiv.className = 'alert alert-error';
+            resultDiv.innerHTML = '❌ Error: ' + error.message;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Entrenar con texto';
+        }
+    };
+    
+    function mostrarContexto(contexto) {
+        const preview = document.getElementById('contextPreview');
+        const content = document.getElementById('contextContent');
+        
+        let html = '<ul>';
+        if (contexto.productos && contexto.productos.length > 0) {
+            html += `<li><strong>📦 Productos detectados:</strong> ${contexto.productos.length}</li>`;
+        }
+        if (contexto.horario) html += `<li><strong>🕒 Horario:</strong> ${contexto.horario}</li>`;
+        if (contexto.ubicacion) html += `<li><strong>📍 Ubicación:</strong> ${contexto.ubicacion}</li>`;
+        if (contexto.politicas) html += `<li><strong>📋 Políticas:</strong> ${contexto.politicas.substring(0, 100)}...</li>`;
+        html += '</ul>';
+        
+        content.innerHTML = html;
+        preview.style.display = 'block';
+    }
+    
+    // Cargar contexto existente
+    async function cargarContexto() {
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/context`);
+            if (response.ok) {
+                const contexto = await response.json();
+                if (contexto && contexto.menu_estructurado && contexto.menu_estructurado.length > 0) {
+                    mostrarContexto(contexto);
+                }
+            }
+        } catch (error) {
+            console.error('Error cargando contexto:', error);
+        }
+    }
+    
+    cargarContexto();
+</script>
+{% endblock %}

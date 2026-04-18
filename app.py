@@ -71,7 +71,6 @@ def admin_menu():
     
     return render_template('menu.html', tenant=tenant)
 
-
 @app.route('/admin/delete_tenant/<tenant_id>', methods=['DELETE', 'OPTIONS'])
 def delete_tenant(tenant_id):
     """Elimina un tenant y todos sus datos"""
@@ -81,6 +80,7 @@ def delete_tenant(tenant_id):
     try:
         logger.info(f'Eliminando tenant: {tenant_id}')
         
+        from tenants.repository import tenant_repo
         tenant = tenant_repo.find_by_id(tenant_id)
         if not tenant:
             return jsonify({'error': 'Tenant no encontrado'}), 404
@@ -197,6 +197,67 @@ def delete_product(tenant_id, product_id):
         logger.error(f'Error eliminando producto: {str(e)}')
         return jsonify({'error': str(e)}), 500
 
+# ==================== AI ENDPOINTS ====================
+
+@app.route('/admin/train/<tenant_id>', methods=['GET', 'POST'])
+def train_ia(tenant_id):
+    """Panel para entrenar la IA del negocio"""
+    
+    if request.method == 'GET':
+        return render_template('train.html', tenant_id=tenant_id)
+    
+    # POST: procesar el entrenamiento
+    data = request.json
+    tipo = data.get('tipo')  # 'imagen' o 'texto'
+    
+    if tipo == 'imagen':
+        image_base64 = data.get('imagen')
+        resultado = trainer.procesar_imagen(image_base64)
+    else:
+        texto = data.get('texto')
+        resultado = trainer.procesar_texto(texto)
+    
+    if not resultado:
+        return jsonify({'error': 'No se pudo procesar'}), 500
+    
+    # Guardar contexto en base de datos
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''
+                INSERT INTO public.tenant_context (tenant_id, menu_estructurado, instrucciones, 
+                                                   horario, ubicacion, politicas, prompt_personalizado,
+                                                   updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (tenant_id) DO UPDATE SET
+                    menu_estructurado = EXCLUDED.menu_estructurado,
+                    instrucciones = EXCLUDED.instrucciones,
+                    horario = EXCLUDED.horario,
+                    ubicacion = EXCLUDED.ubicacion,
+                    politicas = EXCLUDED.politicas,
+                    prompt_personalizado = EXCLUDED.prompt_personalizado,
+                    updated_at = NOW()
+            ''', (
+                tenant_id,
+                json.dumps(resultado.get('productos', [])),
+                resultado.get('instrucciones_adicionales', ''),
+                resultado.get('horario', ''),
+                resultado.get('ubicacion', ''),
+                resultado.get('politicas', ''),
+                trainer.generar_prompt_personalizado(resultado)
+            ))
+        conn.commit()
+    
+    return jsonify({'status': 'ok', 'contexto': resultado})
+
+
+@app.route('/api/tenant/<tenant_id>/context', methods=['GET'])
+def get_tenant_context(tenant_id):
+    """Obtiene el contexto de IA del tenant"""
+    with db_manager.get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute('SELECT * FROM public.tenant_context WHERE tenant_id = %s', (tenant_id,))
+            row = cur.fetchone()
+            return jsonify(row if row else {})
 
 # ==================== HEALTH CHECK ====================
 

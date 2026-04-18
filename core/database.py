@@ -77,7 +77,21 @@ class DatabaseManager:
                 
                 # Índices
                 cur.execute('CREATE INDEX IF NOT EXISTS idx_tenants_phone_id ON public.tenants(phone_id)')
-                
+
+                # Tabla de contexto IA por tenant
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS public.tenant_context (
+                    tenant_id TEXT PRIMARY KEY,
+                    menu_estructurado JSONB DEFAULT '[]',
+                    instrucciones TEXT,
+                    politicas TEXT,
+                    horario TEXT,
+                    ubicacion TEXT,
+                    prompt_personalizado TEXT,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                    );
+                ''')                
             conn.commit()
         
         logger.info('Tablas globales listas')
