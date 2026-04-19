@@ -126,4 +126,5 @@ class IATrainer:
             logger.error(f"Error generando prompt: {e}")
             return None
 
+# Instancia global
 trainer = IATrainer()

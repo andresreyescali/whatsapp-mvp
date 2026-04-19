@@ -7,6 +7,7 @@ from tenants.onboarding import register_new_tenant
 from tenants.repository import tenant_repo
 from tenants.schema_manager import schema_manager
 from flask import render_template
+from ai.training import trainer
 
 
 setup_logging()
@@ -207,48 +208,68 @@ def train_ia(tenant_id):
         return render_template('train.html', tenant_id=tenant_id)
     
     # POST: procesar el entrenamiento
-    data = request.json
-    tipo = data.get('tipo')  # 'imagen' o 'texto'
-    
-    if tipo == 'imagen':
-        image_base64 = data.get('imagen')
-        resultado = trainer.procesar_imagen(image_base64)
-    else:
-        texto = data.get('texto')
-        resultado = trainer.procesar_texto(texto)
-    
-    if not resultado:
-        return jsonify({'error': 'No se pudo procesar'}), 500
-    
-    # Guardar contexto en base de datos
-    with db_manager.get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('''
-                INSERT INTO public.tenant_context (tenant_id, menu_estructurado, instrucciones, 
-                                                   horario, ubicacion, politicas, prompt_personalizado,
-                                                   updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                ON CONFLICT (tenant_id) DO UPDATE SET
-                    menu_estructurado = EXCLUDED.menu_estructurado,
-                    instrucciones = EXCLUDED.instrucciones,
-                    horario = EXCLUDED.horario,
-                    ubicacion = EXCLUDED.ubicacion,
-                    politicas = EXCLUDED.politicas,
-                    prompt_personalizado = EXCLUDED.prompt_personalizado,
-                    updated_at = NOW()
-            ''', (
-                tenant_id,
-                json.dumps(resultado.get('productos', [])),
-                resultado.get('instrucciones_adicionales', ''),
-                resultado.get('horario', ''),
-                resultado.get('ubicacion', ''),
-                resultado.get('politicas', ''),
-                trainer.generar_prompt_personalizado(resultado)
-            ))
-        conn.commit()
-    
-    return jsonify({'status': 'ok', 'contexto': resultado})
-
+    try:
+        data = request.json
+        tipo = data.get('tipo')  # 'imagen' o 'texto'
+        
+        if tipo == 'imagen':
+            image_base64 = data.get('imagen')
+            resultado = trainer.procesar_imagen(image_base64)
+        else:
+            texto = data.get('texto')
+            resultado = trainer.procesar_texto(texto)
+        
+        if not resultado:
+            return jsonify({'error': 'No se pudo procesar'}), 500
+        
+        # Guardar contexto en base de datos
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Generar prompt personalizado
+                prompt_personalizado = trainer.generar_prompt_personalizado(resultado)
+                
+                cur.execute('''
+                    INSERT INTO public.tenant_context (tenant_id, menu_estructurado, instrucciones, 
+                                                       horario, ubicacion, politicas, prompt_personalizado,
+                                                       updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (tenant_id) DO UPDATE SET
+                        menu_estructurado = EXCLUDED.menu_estructurado,
+                        instrucciones = EXCLUDED.instrucciones,
+                        horario = EXCLUDED.horario,
+                        ubicacion = EXCLUDED.ubicacion,
+                        politicas = EXCLUDED.politicas,
+                        prompt_personalizado = EXCLUDED.prompt_personalizado,
+                        updated_at = NOW()
+                ''', (
+                    tenant_id,
+                    json.dumps(resultado.get('productos', [])),
+                    resultado.get('instrucciones_adicionales', ''),
+                    resultado.get('horario', ''),
+                    resultado.get('ubicacion', ''),
+                    resultado.get('politicas', ''),
+                    prompt_personalizado
+                ))
+            conn.commit()
+        
+        # También guardar los productos en el menú del tenant
+        for producto in resultado.get('productos', []):
+            try:
+                schema_manager.add_product(
+                    tenant_id,
+                    producto.get('nombre'),
+                    producto.get('precio', 0),
+                    producto.get('descripcion', ''),
+                    producto.get('categoria', 'general')
+                )
+            except Exception as e:
+                logger.warning(f'Error guardando producto {producto.get("nombre")}: {e}')
+        
+        return jsonify({'status': 'ok', 'contexto': resultado})
+        
+    except Exception as e:
+        logger.error(f'Error en train_ia: {e}')
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET'])
 def get_tenant_context(tenant_id):
