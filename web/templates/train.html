@@ -91,9 +91,9 @@ Instrucciones para atender:
         const resultDiv = document.getElementById('imageResult');
         
         btn.disabled = true;
-        btn.textContent = 'Procesando imagen...';
+        btn.textContent = '📸 Aplicando OCR a la imagen...';
         resultDiv.className = 'loading';
-        resultDiv.innerHTML = '🔄 Procesando imagen con IA...';
+        resultDiv.innerHTML = '🔄 Leyendo texto de la imagen con OCR... (puede tomar 10-20 segundos)';
         resultDiv.style.display = 'block';
         
         try {

@@ -1,71 +1,93 @@
 import base64
-import requests
+import io
+import json
+import re
+from PIL import Image
+import pytesseract
 from core.logger import logger
 from ai.client import ai_client
-import json
 
 class IATrainer:
-    """Entrenador de IA para cada negocio"""
+    """Entrenador de IA para cada negocio con soporte OCR"""
     
     def procesar_imagen(self, image_base64: str) -> dict:
-        """Procesa una imagen de menú usando IA (OCR + extracción)"""
+        """Procesa una imagen de menú usando Tesseract OCR + IA"""
         
-        prompt = """
+        try:
+            # 1. Decodificar la imagen base64
+            image_data = base64.b64decode(image_base64)
+            image = Image.open(io.BytesIO(image_data))
+            
+            # 2. Aplicar OCR con Tesseract (español)
+            logger.info("Aplicando OCR a la imagen...")
+            texto_extraido = pytesseract.image_to_string(image, lang='spa')
+            
+            if not texto_extraido or len(texto_extraido.strip()) < 10:
+                logger.warning("No se pudo extraer texto suficiente de la imagen")
+                return None
+            
+            logger.info(f"Texto extraído ({len(texto_extraido)} caracteres): {texto_extraido[:200]}...")
+            
+            # 3. Usar IA para estructurar el texto extraído
+            resultado = self._estructurar_con_ia(texto_extraido)
+            
+            return resultado
+            
+        except Exception as e:
+            logger.error(f"Error procesando imagen con OCR: {e}")
+            return None
+    
+    def _estructurar_con_ia(self, texto_ocr: str) -> dict:
+        """Usa IA para estructurar el texto extraído por OCR"""
+        
+        prompt = f"""
         Eres un experto en extraer información de menús de restaurantes.
         
-        Analiza esta imagen de menú y extrae:
-        1. Lista de productos con: nombre, precio, descripción, categoría
-        2. Horario del negocio
-        3. Ubicación/dirección
-        4. Políticas especiales (mínimo de pedido, tiempo de entrega, etc.)
+        Este texto fue extraído de una imagen de menú mediante OCR. Puede tener errores.
+        Limpia y estructura la información:
         
-        Devuelve SOLO un JSON válido con esta estructura:
-        {
-            "productos": [{"nombre": "", "precio": 0, "descripcion": "", "categoria": ""}],
+        TEXTO EXTRAÍDO:
+        {texto_ocr}
+        
+        Extrae y devuelve SOLO un JSON válido con:
+        {{
+            "productos": [
+                {{"nombre": "", "precio": 0, "descripcion": "", "categoria": ""}}
+            ],
             "horario": "",
             "ubicacion": "",
             "politicas": "",
             "instrucciones_adicionales": ""
-        }
+        }}
+        
+        Si no encuentras cierta información, deja el campo vacío o null.
         """
         
         try:
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Extrae la información de este menú:"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                    ]}
-                ],
-                max_tokens=2000
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2000,
+                temperature=0.3
             )
             
             resultado = json.loads(response.choices[0].message.content)
             return resultado
             
         except Exception as e:
-            logger.error(f"Error procesando imagen: {e}")
+            logger.error(f"Error estructurando texto con IA: {e}")
             return None
     
     def procesar_texto(self, texto: str) -> dict:
-        """Procesa texto descriptivo del negocio"""
+        """Procesa texto descriptivo del negocio (sin OCR)"""
         
         prompt = f"""
-        Eres un experto en configurar asistentes de ventas.
-        
-        Basado en esta descripción del negocio, extrae:
-        1. Productos (si menciona alguno)
-        2. Horario
-        3. Ubicación
-        4. Políticas
-        5. Instrucciones para atender clientes
+        Basado en esta descripción del negocio, extrae la información estructurada:
         
         DESCRIPCIÓN:
         {texto}
         
-        Devuelve SOLO un JSON válido con esta estructura:
+        Devuelve SOLO un JSON válido:
         {{
             "productos": [{{"nombre": "", "precio": 0, "descripcion": "", "categoria": ""}}],
             "horario": "",
@@ -79,7 +101,8 @@ class IATrainer:
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000
+                max_tokens=2000,
+                temperature=0.3
             )
             
             resultado = json.loads(response.choices[0].message.content)
@@ -90,34 +113,28 @@ class IATrainer:
             return None
     
     def generar_prompt_personalizado(self, contexto: dict) -> str:
-        """Genera un prompt personalizado para el asistente basado en el contexto"""
+        """Genera prompt personalizado para el asistente"""
         
         prompt = f"""
-        Eres un asistente de ventas para un negocio con estas características:
+        Genera un prompt de sistema para un asistente de ventas de WhatsApp.
         
-        PRODUCTOS:
-        {json.dumps(contexto.get('productos', []), indent=2)}
+        Información del negocio:
+        - Productos: {json.dumps(contexto.get('productos', []), indent=2)}
+        - Horario: {contexto.get('horario', 'No especificado')}
+        - Ubicación: {contexto.get('ubicacion', 'No especificada')}
+        - Políticas: {contexto.get('politicas', 'No especificadas')}
+        - Instrucciones: {contexto.get('instrucciones_adicionales', '')}
         
-        HORARIO: {contexto.get('horario', 'No especificado')}
-        UBICACIÓN: {contexto.get('ubicacion', 'No especificada')}
-        POLÍTICAS: {contexto.get('politicas', 'No especificadas')}
-        INSTRUCCIONES: {contexto.get('instrucciones_adicionales', '')}
-        
-        Genera un prompt de sistema personalizado para que el asistente:
-        1. Conozca todos los productos y precios
-        2. Sepa el horario y ubicación
-        3. Siga las políticas del negocio
-        4. Sea amable y eficiente
-        5. Ayude al cliente a hacer pedidos
-        
-        El prompt debe ser breve pero completo.
+        El prompt debe ser breve, en español, incluyendo toda esta información.
+        Responde SOLO con el prompt.
         """
         
         try:
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000
+                max_tokens=1000,
+                temperature=0.5
             )
             
             return response.choices[0].message.content

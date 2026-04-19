@@ -297,6 +297,21 @@ def debug_test():
         ]
     })
 
+
+@app.route('/debug/tesseract', methods=['GET'])
+def test_tesseract():
+    import subprocess
+    try:
+        result = subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
+        return {
+            'tesseract_installed': True,
+            'version': result.stdout.split('\n')[0] if result.stdout else 'unknown',
+            'status': 'ok'
+        }
+    except Exception as e:
+        return {'tesseract_installed': False, 'error': str(e), 'status': 'fail'}, 500
+
+
 @app.route('/admin/test_delete', methods=['GET'])
 def test_delete():
     """Endpoint de prueba para verificar que la API funciona"""
