@@ -409,6 +409,7 @@ def webhook_info():
         ]
     }
 
+
 @app.route('/debug/tenant/<phone_id>', methods=['GET'])
 def debug_tenant(phone_id):
     """Verifica si existe un tenant con ese phone_id"""
