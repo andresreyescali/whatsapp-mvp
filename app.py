@@ -210,17 +210,28 @@ def train_ia(tenant_id):
     # POST: procesar el entrenamiento
     try:
         data = request.json
-        tipo = data.get('tipo')  # 'imagen' o 'texto'
+        if not data:
+            return jsonify({'error': 'No se recibieron datos'}), 400
+        
+        tipo = data.get('tipo')
+        logger.info(f'Entrenando IA para tenant {tenant_id}, tipo: {tipo}')
         
         if tipo == 'imagen':
             image_base64 = data.get('imagen')
+            if not image_base64:
+                return jsonify({'error': 'No se recibió la imagen'}), 400
             resultado = trainer.procesar_imagen(image_base64)
-        else:
+        elif tipo == 'texto':
             texto = data.get('texto')
+            if not texto:
+                return jsonify({'error': 'No se recibió el texto'}), 400
             resultado = trainer.procesar_texto(texto)
+        else:
+            return jsonify({'error': 'Tipo no válido. Use "imagen" o "texto"'}), 400
         
         if not resultado:
-            return jsonify({'error': 'No se pudo procesar'}), 500
+            logger.error('El procesamiento devolvió None')
+            return jsonify({'error': 'No se pudo procesar el contenido. Verifica que la imagen sea clara o el texto tenga información válida.'}), 500
         
         # Guardar contexto en base de datos
         with db_manager.get_connection() as conn:
@@ -253,23 +264,36 @@ def train_ia(tenant_id):
             conn.commit()
         
         # También guardar los productos en el menú del tenant
+        productos_agregados = 0
         for producto in resultado.get('productos', []):
             try:
-                schema_manager.add_product(
-                    tenant_id,
-                    producto.get('nombre'),
-                    producto.get('precio', 0),
-                    producto.get('descripcion', ''),
-                    producto.get('categoria', 'general')
-                )
+                if producto.get('nombre') and producto.get('precio'):
+                    schema_manager.add_product(
+                        tenant_id,
+                        producto.get('nombre'),
+                        int(producto.get('precio', 0)),
+                        producto.get('descripcion', ''),
+                        producto.get('categoria', 'general')
+                    )
+                    productos_agregados += 1
             except Exception as e:
                 logger.warning(f'Error guardando producto {producto.get("nombre")}: {e}')
         
-        return jsonify({'status': 'ok', 'contexto': resultado})
+        logger.info(f'Entrenamiento completado: {productos_agregados} productos guardados')
+        
+        return jsonify({
+            'status': 'ok', 
+            'contexto': resultado,
+            'productos_guardados': productos_agregados,
+            'message': f'Entrenamiento exitoso. Se guardaron {productos_agregados} productos.'
+        })
         
     except Exception as e:
-        logger.error(f'Error en train_ia: {e}')
-        return jsonify({'error': str(e)}), 500
+        logger.error(f'Error en train_ia: {str(e)}')
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'details': 'Error interno del servidor'}), 500
+    
 
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET'])
 def get_tenant_context(tenant_id):
@@ -280,6 +304,32 @@ def get_tenant_context(tenant_id):
             row = cur.fetchone()
             return jsonify(row if row else {})
 
+
+@app.route('/debug/train_test', methods=['GET'])
+def train_test():
+    """Prueba simple para verificar que el entrenamiento funciona"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'Endpoint de entrenamiento disponible',
+        'trainer_available': 'trainer' in globals()
+    })
+
+@app.route('/debug/check_trainer', methods=['GET'])
+def check_trainer():
+    """Verifica que el trainer está disponible"""
+    try:
+        from ai.training import trainer
+        return jsonify({
+            'trainer_available': True,
+            'trainer_type': str(type(trainer)),
+            'methods': [m for m in dir(trainer) if not m.startswith('_')]
+        })
+    except Exception as e:
+        return jsonify({
+            'trainer_available': False,
+            'error': str(e)
+        }), 500
+    
 # ==================== HEALTH CHECK ====================
 
 @app.route('/debug/test', methods=['GET'])

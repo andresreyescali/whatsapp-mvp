@@ -145,3 +145,10 @@ class IATrainer:
 
 # Instancia global
 trainer = IATrainer()
+
+# Al final del archivo, después de trainer = IATrainer()
+def test_trainer():
+    """Prueba simple para verificar que el trainer funciona"""
+    test_text = "Pizza Margarita 25000, Pizza Pepperoni 32000"
+    result = trainer.procesar_texto(test_text)
+    return result is not None
