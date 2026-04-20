@@ -395,6 +395,19 @@ def test_tesseract():
     except Exception as e:
         return {'tesseract_installed': False, 'error': str(e), 'status': 'fail'}, 500
 
+@app.route('/debug/webhook_info', methods=['GET'])
+def webhook_info():
+    """Muestra la configuración actual del webhook"""
+    from tenants.repository import tenant_repo
+    
+    tenants = tenant_repo.get_all()
+    return {
+        'webhook_url': 'https://whatsapp-mvp-docker.onrender.com/webhook',
+        'tenants_registrados': [
+            {'nombre': t['nombre'], 'phone_id': t['phone_id']} 
+            for t in tenants
+        ]
+    }
 
 @app.route('/admin/test_delete', methods=['GET'])
 def test_delete():
