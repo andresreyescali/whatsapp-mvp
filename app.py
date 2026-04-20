@@ -409,6 +409,21 @@ def webhook_info():
         ]
     }
 
+@app.route('/debug/tenant/<phone_id>', methods=['GET'])
+def debug_tenant(phone_id):
+    """Verifica si existe un tenant con ese phone_id"""
+    tenant = tenant_repo.find_by_phone_id(phone_id)
+    if tenant:
+        return jsonify({
+            'exists': True,
+            'tenant': tenant
+        })
+    else:
+        return jsonify({
+            'exists': False,
+            'message': f'No se encontró tenant con phone_id: {phone_id}',
+            'tenants_available': tenant_repo.get_all()
+        })
 
 @app.route('/admin/test_delete', methods=['GET'])
 def test_delete():
