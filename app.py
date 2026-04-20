@@ -409,23 +409,6 @@ def webhook_info():
         ]
     }
 
-@app.route('/webhook', methods=['GET', 'POST'])
-def webhook():
-    if request.method == 'GET':
-        # Verificación
-        mode = request.args.get('hub.mode')
-        token = request.args.get('hub.verify_token')
-        challenge = request.args.get('hub.challenge')
-        verify_token = "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6"
-        
-        if mode == 'subscribe' and token == verify_token:
-            return challenge, 200
-        return "Verification failed", 403
-    
-    # POST - procesar mensajes
-    data = request.get_json(force=True)
-    logger.info(f"Webhook POST recibido: {data}")
-    # ... resto del código
 
 @app.route('/admin/test_delete', methods=['GET'])
 def test_delete():
