@@ -1,3 +1,4 @@
+import json
 from flask import Flask, jsonify, request
 from core.config import config
 from core.database import db_manager
@@ -298,11 +299,23 @@ def train_ia(tenant_id):
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET'])
 def get_tenant_context(tenant_id):
     """Obtiene el contexto de IA del tenant"""
-    with db_manager.get_connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute('SELECT * FROM public.tenant_context WHERE tenant_id = %s', (tenant_id,))
-            row = cur.fetchone()
-            return jsonify(row if row else {})
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT * FROM public.tenant_context WHERE tenant_id = %s', (tenant_id,))
+                row = cur.fetchone()
+                if row:
+                    # Obtener nombres de columnas
+                    columns = [desc[0] for desc in cur.description]
+                    result = dict(zip(columns, row))
+                    # Convertir JSONB a dict si es necesario
+                    if result.get('menu_estructurado') and isinstance(result['menu_estructurado'], str):
+                        result['menu_estructurado'] = json.loads(result['menu_estructurado'])
+                    return jsonify(result)
+                return jsonify({})
+    except Exception as e:
+        logger.error(f'Error obteniendo contexto: {e}')
+        return jsonify({}), 500
 
 
 @app.route('/debug/train_test', methods=['GET'])
