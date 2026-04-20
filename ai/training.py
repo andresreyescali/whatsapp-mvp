@@ -38,79 +38,157 @@ class IATrainer:
             return None
     
     def _estructurar_con_ia(self, texto_ocr: str) -> dict:
-        """Usa IA para estructurar el texto extraído por OCR"""
-        
-        prompt = f"""
-        Eres un experto en extraer información de menús de restaurantes.
-        
-        Este texto fue extraído de una imagen de menú mediante OCR. Puede tener errores.
-        Limpia y estructura la información:
-        
-        TEXTO EXTRAÍDO:
-        {texto_ocr}
-        
-        Extrae y devuelve SOLO un JSON válido con:
-        {{
-            "productos": [
-                {{"nombre": "", "precio": 0, "descripcion": "", "categoria": ""}}
-            ],
-            "horario": "",
-            "ubicacion": "",
-            "politicas": "",
-            "instrucciones_adicionales": ""
-        }}
-        
-        Si no encuentras cierta información, deja el campo vacío o null.
-        """
-        
-        try:
-            response = ai_client.client.chat.completions.create(
-                model=ai_client.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
-                temperature=0.3
-            )
-            
-            resultado = json.loads(response.choices[0].message.content)
-            return resultado
-            
-        except Exception as e:
-            logger.error(f"Error estructurando texto con IA: {e}")
-            return None
+    """Usa IA para estructurar el texto extraído por OCR"""
+    logger.info("=== INICIO _estructurar_con_ia ===")
     
-    def procesar_texto(self, texto: str) -> dict:
-        """Procesa texto descriptivo del negocio (sin OCR)"""
+    if not ai_client.client:
+        logger.error("Cliente de IA no disponible")
+        return None
+    
+    prompt = f"""
+    Extrae información de menú del siguiente texto OCR.
+    
+    TEXTO OCR:
+    {texto_ocr}
+    
+    IMPORTANTE: Devuelve SOLO un JSON válido. Sin explicaciones, sin markdown.
+    
+    Formato exacto:
+    {{
+        "productos": [
+            {{"nombre": "nombre", "precio": 12345, "descripcion": "descripción", "categoria": "categoría"}}
+        ],
+        "horario": "horario",
+        "ubicacion": "dirección",
+        "politicas": "políticas",
+        "instrucciones_adicionales": "instrucciones"
+    }}
+    """
+    
+    try:
+        response = ai_client.client.chat.completions.create(
+            model=ai_client.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.3
+        )
         
-        prompt = f"""
-        Basado en esta descripción del negocio, extrae la información estructurada:
+        contenido = response.choices[0].message.content
         
-        DESCRIPCIÓN:
-        {texto}
+        # Limpiar markdown
+        contenido_limpio = contenido.strip()
+        if contenido_limpio.startswith('```json'):
+            contenido_limpio = contenido_limpio[7:]
+        elif contenido_limpio.startswith('```'):
+            contenido_limpio = contenido_limpio[3:]
+        if contenido_limpio.endswith('```'):
+            contenido_limpio = contenido_limpio[:-3]
         
-        Devuelve SOLO un JSON válido:
-        {{
-            "productos": [{{"nombre": "", "precio": 0, "descripcion": "", "categoria": ""}}],
-            "horario": "",
-            "ubicacion": "",
-            "politicas": "",
-            "instrucciones_adicionales": ""
-        }}
-        """
+        # Extraer JSON
+        inicio = contenido_limpio.find('{')
+        fin = contenido_limpio.rfind('}')
+        if inicio != -1 and fin != -1:
+            contenido_limpio = contenido_limpio[inicio:fin+1]
         
-        try:
-            response = ai_client.client.chat.completions.create(
-                model=ai_client.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
-                temperature=0.3
-            )
-            
-            resultado = json.loads(response.choices[0].message.content)
-            return resultado
-            
-        except Exception as e:
-            logger.error(f"Error procesando texto: {e}")
-            return None
+        resultado = json.loads(contenido_limpio)
+        return resultado
+        
+    except Exception as e:
+        logger.error(f"Error estructurando texto con IA: {e}")
+        return None
+    
+def procesar_texto(self, texto: str) -> dict:
+    """Procesa texto descriptivo del negocio (sin OCR)"""
+    logger.info("=== INICIO procesar_texto ===")
+    
+    if not ai_client.client:
+        logger.error("Cliente de IA no disponible")
+        return None
+    
+    prompt = f"""
+    Basado en esta descripción del negocio, extrae la información estructurada.
+    
+    DESCRIPCIÓN:
+    {texto}
+    
+    IMPORTANTE: Debes devolver SOLO un JSON válido, sin texto adicional, sin markdown, sin explicaciones.
+    
+    Formato exacto requerido:
+    {{
+        "productos": [
+            {{"nombre": "nombre del producto", "precio": 12345, "descripcion": "descripción", "categoria": "categoría"}}
+        ],
+        "horario": "horario del negocio",
+        "ubicacion": "dirección",
+        "politicas": "políticas del negocio",
+        "instrucciones_adicionales": "instrucciones para atender"
+    }}
+    
+    Si no encuentras información para algún campo, déjalo como cadena vacía o array vacío.
+    """
+    
+    try:
+        logger.info("Llamando a DeepSeek para procesar texto...")
+        response = ai_client.client.chat.completions.create(
+            model=ai_client.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.3
+        )
+        
+        contenido = response.choices[0].message.content
+        logger.info(f"Respuesta recibida (longitud: {len(contenido)} caracteres)")
+        logger.info(f"Respuesta: {contenido[:500]}...")
+        
+        # Limpiar la respuesta - eliminar markdown y texto adicional
+        contenido_limpio = contenido.strip()
+        
+        # Eliminar bloques de código markdown
+        if contenido_limpio.startswith('```json'):
+            contenido_limpio = contenido_limpio[7:]
+        elif contenido_limpio.startswith('```'):
+            contenido_limpio = contenido_limpio[3:]
+        
+        if contenido_limpio.endswith('```'):
+            contenido_limpio = contenido_limpio[:-3]
+        
+        contenido_limpio = contenido_limpio.strip()
+        
+        # Buscar el primer { y el último }
+        inicio = contenido_limpio.find('{')
+        fin = contenido_limpio.rfind('}')
+        if inicio != -1 and fin != -1:
+            contenido_limpio = contenido_limpio[inicio:fin+1]
+        
+        logger.info(f"JSON limpio: {contenido_limpio[:200]}...")
+        
+        # Intentar parsear JSON
+        resultado = json.loads(contenido_limpio)
+        
+        # Validar que tenga la estructura esperada
+        if 'productos' not in resultado:
+            resultado['productos'] = []
+        if 'horario' not in resultado:
+            resultado['horario'] = ''
+        if 'ubicacion' not in resultado:
+            resultado['ubicacion'] = ''
+        if 'politicas' not in resultado:
+            resultado['politicas'] = ''
+        if 'instrucciones_adicionales' not in resultado:
+            resultado['instrucciones_adicionales'] = ''
+        
+        logger.info(f"Productos encontrados: {len(resultado.get('productos', []))}")
+        return resultado
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decodificando JSON: {e}")
+        logger.error(f"Contenido que falló: {contenido[:500] if 'contenido' in locals() else 'No hay contenido'}")
+        return None
+    except Exception as e:
+        logger.error(f"Error procesando texto: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
     
     def generar_prompt_personalizado(self, contexto: dict) -> str:
         """Genera prompt personalizado para el asistente"""

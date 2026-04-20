@@ -343,6 +343,26 @@ def check_trainer():
             'error': str(e)
         }), 500
     
+    @app.route('/debug/test_deepseek', methods=['POST'])
+def test_deepseek():
+    """Prueba qué devuelve DeepSeek con un texto simple"""
+    try:
+        data = request.json
+        texto = data.get('texto', 'Pizza Margarita 25000')
+        
+        response = ai_client.client.chat.completions.create(
+            model=ai_client.model,
+            messages=[{"role": "user", "content": f"Extrae productos de: {texto}. Devuelve SOLO JSON: {{\"productos\": [{{\"nombre\": \"\", \"precio\": 0}}]}}"}],
+            max_tokens=500
+        )
+        
+        return jsonify({
+            'respuesta_original': response.choices[0].message.content,
+            'status': 'ok'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
 # ==================== HEALTH CHECK ====================
 
 @app.route('/debug/test', methods=['GET'])
