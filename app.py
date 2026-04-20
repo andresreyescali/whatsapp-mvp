@@ -1,5 +1,5 @@
 import json
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request
 from core.config import config
 from core.database import db_manager
 from core.logger import setup_logging, logger
@@ -7,11 +7,13 @@ from whatsapp.webhook import register_webhook_routes
 from tenants.onboarding import register_new_tenant
 from tenants.repository import tenant_repo
 from tenants.schema_manager import schema_manager
+from flask import render_template
 from ai.training import trainer
 from ai.client import ai_client
 
 setup_logging()
 
+#app = Flask(__name__)
 app = Flask(__name__, template_folder='web/templates')
 
 # Configurar CORS
@@ -47,6 +49,7 @@ def list_tenants():
 def registro():
     return render_template('registro.html')
 
+
 @app.route('/registro_web', methods=['POST'])
 def registro_web():
     nombre = request.form.get('nombre')
@@ -79,6 +82,7 @@ def delete_tenant(tenant_id):
     try:
         logger.info(f'Eliminando tenant: {tenant_id}')
         
+        from tenants.repository import tenant_repo
         tenant = tenant_repo.find_by_id(tenant_id)
         if not tenant:
             return jsonify({'error': 'Tenant no encontrado'}), 404
@@ -104,6 +108,7 @@ def get_tenant_menu(tenant_id):
         logger.error(f'Error obteniendo menú: {str(e)}')
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/tenant/<tenant_id>/config', methods=['GET'])
 def get_tenant_config(tenant_id):
     """Obtiene configuración del tenant"""
@@ -115,6 +120,7 @@ def get_tenant_config(tenant_id):
     except Exception as e:
         logger.error(f'Error obteniendo config: {str(e)}')
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/tenant/<tenant_id>/config/ia', methods=['PUT', 'OPTIONS'])
 def update_tenant_ia(tenant_id):
@@ -131,6 +137,7 @@ def update_tenant_ia(tenant_id):
     except Exception as e:
         logger.error(f'Error actualizando IA: {str(e)}')
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/admin/add_product/<tenant_id>', methods=['POST', 'OPTIONS'])
 def add_product(tenant_id):
@@ -167,6 +174,7 @@ def add_product(tenant_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/admin/delete_product/<tenant_id>/<product_id>', methods=['DELETE', 'OPTIONS'])
 def delete_product(tenant_id, product_id):
@@ -286,6 +294,7 @@ def train_ia(tenant_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e), 'details': 'Error interno del servidor'}), 500
+    
 
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET'])
 def get_tenant_context(tenant_id):
@@ -296,8 +305,10 @@ def get_tenant_context(tenant_id):
                 cur.execute('SELECT * FROM public.tenant_context WHERE tenant_id = %s', (tenant_id,))
                 row = cur.fetchone()
                 if row:
+                    # Obtener nombres de columnas
                     columns = [desc[0] for desc in cur.description]
                     result = dict(zip(columns, row))
+                    # Convertir JSONB a dict si es necesario
                     if result.get('menu_estructurado') and isinstance(result['menu_estructurado'], str):
                         result['menu_estructurado'] = json.loads(result['menu_estructurado'])
                     return jsonify(result)
@@ -306,96 +317,14 @@ def get_tenant_context(tenant_id):
         logger.error(f'Error obteniendo contexto: {e}')
         return jsonify({}), 500
 
-# ==================== WEBHOOK (para Meta WhatsApp) ====================
 
-@app.route('/webhook', methods=['GET', 'POST'])
-def webhook():
-    """Endpoint para webhook de WhatsApp Meta"""
-    
-    # Verificación GET (Meta envía esto cuando configuras el webhook)
-    if request.method == 'GET':
-        mode = request.args.get('hub.mode')
-        token = request.args.get('hub.verify_token')
-        challenge = request.args.get('hub.challenge')
-        
-        # Este token debe coincidir con el que pusiste en Meta
-        verify_token = "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6"
-        
-        if mode == 'subscribe' and token == verify_token:
-            logger.info("Webhook verificado correctamente")
-            return challenge, 200
-        else:
-            logger.warning(f"Verificación fallida. mode={mode}, token recibido={token[:50]}...")
-            return "Verification failed", 403
-    
-    # POST: Procesar mensajes entrantes
-    try:
-        data = request.get_json(force=True)
-        logger.info(f"Webhook POST recibido: {data}")
-        
-        # Extraer información del mensaje
-        entry = data.get('entry', [])
-        if not entry:
-            return "ok", 200
-        
-        changes = entry[0].get('changes', [])
-        if not changes:
-            return "ok", 200
-        
-        value = changes[0].get('value', {})
-        
-        # Verificar si hay mensajes
-        if 'messages' not in value:
-            logger.info("Evento sin mensaje (puede ser status)")
-            return "ok", 200
-        
-        message = value['messages'][0]
-        if 'text' not in message:
-            logger.info("Mensaje sin texto (puede ser imagen, etc.)")
-            return "ok", 200
-        
-        phone_id = value['metadata']['phone_number_id']
-        from_number = message['from']
-        text = message['text']['body']
-        
-        logger.info(f"Mensaje recibido - phone_id: {phone_id}, from: {from_number}, text: {text}")
-        
-        # Buscar el tenant por phone_id
-        tenant = tenant_repo.find_by_phone_id(phone_id)
-        if not tenant:
-            logger.warning(f"No se encontró tenant para phone_id: {phone_id}")
-            return "ok", 200
-        
-        logger.info(f"Tenant encontrado: {tenant['nombre']}")
-        
-        # Procesar mensaje con el message_handler
-        from whatsapp.message_handler import message_handler
-        message_handler.process(phone_id, from_number, text)
-        
-        return "ok", 200
-        
-    except Exception as e:
-        logger.error(f"Error procesando webhook: {e}")
-        import traceback
-        traceback.print_exc()
-        return "error", 500
-
-# ==================== HEALTH CHECK ====================
-
-@app.route('/debug/test', methods=['GET'])
-def debug_test():
-    """Endpoint de prueba para verificar que la API funciona"""
+@app.route('/debug/train_test', methods=['GET'])
+def train_test():
+    """Prueba simple para verificar que el entrenamiento funciona"""
     return jsonify({
         'status': 'ok',
-        'message': 'API funcionando correctamente',
-        'endpoints': [
-            '/admin/tenants',
-            '/admin/menu?tenant_id=xxx',
-            '/api/tenant/xxx/menu',
-            '/admin/add_product/xxx',
-            '/api/tenant/xxx/config/ia',
-            '/admin/train/xxx'
-        ]
+        'message': 'Endpoint de entrenamiento disponible',
+        'trainer_available': 'trainer' in globals()
     })
 
 @app.route('/debug/check_trainer', methods=['GET'])
@@ -413,10 +342,48 @@ def check_trainer():
             'trainer_available': False,
             'error': str(e)
         }), 500
+    
+    @app.route('/debug/test_deepseek', methods=['POST'])
+
+    def test_deepseek():
+        """Prueba qué devuelve DeepSeek con un texto simple"""
+    try:
+        data = request.json
+        texto = data.get('texto', 'Pizza Margarita 25000')
+        
+        response = ai_client.client.chat.completions.create(
+            model=ai_client.model,
+            messages=[{"role": "user", "content": f"Extrae productos de: {texto}. Devuelve SOLO JSON: {{\"productos\": [{{\"nombre\": \"\", \"precio\": 0}}]}}"}],
+            max_tokens=500
+        )
+        
+        return jsonify({
+            'respuesta_original': response.choices[0].message.content,
+            'status': 'ok'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+# ==================== HEALTH CHECK ====================
+
+@app.route('/debug/test', methods=['GET'])
+def debug_test():
+    """Endpoint de prueba para verificar que la API funciona"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'API funcionando correctamente',
+        'endpoints': [
+            '/admin/tenants',
+            '/admin/menu?tenant_id=xxx',
+            '/api/tenant/xxx/menu',
+            '/admin/add_product/xxx',
+            '/api/tenant/xxx/config/ia'
+        ]
+    })
+
 
 @app.route('/debug/tesseract', methods=['GET'])
 def test_tesseract():
-    """Verifica que Tesseract OCR está instalado"""
     import subprocess
     try:
         result = subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
@@ -431,6 +398,8 @@ def test_tesseract():
 @app.route('/debug/webhook_info', methods=['GET'])
 def webhook_info():
     """Muestra la configuración actual del webhook"""
+    from tenants.repository import tenant_repo
+    
     tenants = tenant_repo.get_all()
     return {
         'webhook_url': 'https://whatsapp-mvp-docker.onrender.com/webhook',
@@ -439,6 +408,29 @@ def webhook_info():
             for t in tenants
         ]
     }
+
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
+    if request.method == 'GET':
+        # Verificación
+        mode = request.args.get('hub.mode')
+        token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+        verify_token = "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6"
+        
+        if mode == 'subscribe' and token == verify_token:
+            return challenge, 200
+        return "Verification failed", 403
+    
+    # POST - procesar mensajes
+    data = request.get_json(force=True)
+    logger.info(f"Webhook POST recibido: {data}")
+    # ... resto del código
+
+@app.route('/admin/test_delete', methods=['GET'])
+def test_delete():
+    """Endpoint de prueba para verificar que la API funciona"""
+    return jsonify({'status': 'ok', 'message': 'API de eliminación funciona'})
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
