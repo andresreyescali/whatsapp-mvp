@@ -9,7 +9,7 @@ from tenants.repository import tenant_repo
 from tenants.schema_manager import schema_manager
 from flask import render_template
 from ai.training import trainer
-
+from ai.client import ai_client
 
 setup_logging()
 
@@ -344,8 +344,9 @@ def check_trainer():
         }), 500
     
     @app.route('/debug/test_deepseek', methods=['POST'])
-def test_deepseek():
-    """Prueba qué devuelve DeepSeek con un texto simple"""
+
+    def test_deepseek():
+        """Prueba qué devuelve DeepSeek con un texto simple"""
     try:
         data = request.json
         texto = data.get('texto', 'Pizza Margarita 25000')
