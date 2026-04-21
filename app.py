@@ -83,27 +83,20 @@ def update_tenant(tenant_id):
         data = request.json
         logger.info(f'Actualizando tenant {tenant_id}: {data}')
         
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    UPDATE public.tenants 
-                    SET nombre = %s, phone_id = %s, token = %s, usar_ia = %s
-                    WHERE id = %s
-                ''', (
-                    data.get('nombre'),
-                    data.get('phone_id'),
-                    data.get('token'),
-                    data.get('usar_ia', False),
-                    tenant_id
-                ))
-                conn.commit()
+        tenant_repo.update_tenant(
+            tenant_id,
+            data.get('nombre'),
+            data.get('phone_id'),
+            data.get('token'),
+            data.get('usar_ia', False)
+        )
         
         return jsonify({'status': 'ok', 'message': 'Tenant actualizado'}), 200
         
     except Exception as e:
         logger.error(f'Error actualizando tenant: {str(e)}')
         return jsonify({'error': str(e)}), 500
-
+    
 @app.route('/admin/delete_tenant/<tenant_id>', methods=['DELETE', 'OPTIONS'])
 def delete_tenant(tenant_id):
     """Elimina un tenant y todos sus datos"""

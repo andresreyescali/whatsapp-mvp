@@ -74,14 +74,31 @@ class TenantRepository:
             logger.error(f'Error actualizando IA: {e}')
             raise
     
-    def get_all(self):
-        """Obtiene todos los tenants"""
+    def update_tenant(self, tenant_id: str, nombre: str, phone_id: str, token: str, usar_ia: bool):
+        """Actualiza todos los datos de un tenant"""
         try:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute('SELECT id, nombre, phone_id, created_at FROM public.tenants ORDER BY created_at DESC')
+                    cur.execute('''
+                        UPDATE public.tenants 
+                        SET nombre = %s, phone_id = %s, token = %s, usar_ia = %s
+                        WHERE id = %s
+                    ''', (nombre, phone_id, token, usar_ia, tenant_id))
+                conn.commit()
+            logger.info(f'Tenant {tenant_id} actualizado')
+            return True
+        except Exception as e:
+            logger.error(f'Error actualizando tenant: {e}')
+            raise
+    
+    def get_all(self):
+        """Obtiene todos los tenants con todos los campos necesarios"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('SELECT id, nombre, phone_id, token, usar_ia, created_at FROM public.tenants ORDER BY created_at DESC')
                     rows = cur.fetchall()
-                    columns = ['id', 'nombre', 'phone_id', 'created_at']
+                    columns = ['id', 'nombre', 'phone_id', 'token', 'usar_ia', 'created_at']
                     return [dict(zip(columns, row)) for row in rows]
         except Exception as e:
             logger.error(f'Error obteniendo tenants: {e}')
@@ -96,7 +113,7 @@ class TenantRepository:
                     cur.execute("DELETE FROM public.metricas_tenants WHERE tenant_id = %s", (tenant_id,))
                     # Eliminar tenant de la tabla
                     cur.execute("DELETE FROM public.tenants WHERE id = %s", (tenant_id,))
-                    # Eliminar el schema completo (todas las tablas del tenant)
+                    # Eliminar el schema completo
                     cur.execute(f"DROP SCHEMA IF EXISTS {tenant_id} CASCADE")
                 conn.commit()
             logger.info(f'Tenant {tenant_id} eliminado permanentemente')
