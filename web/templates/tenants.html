@@ -1,30 +1,269 @@
-@app.route('/admin/update_tenant/<tenant_id>', methods=['PUT', 'OPTIONS'])
-def update_tenant(tenant_id):
-    """Actualiza los datos de un tenant"""
-    if request.method == 'OPTIONS':
-        return '', 200
+{% extends "base.html" %}
+
+{% block title %}Negocios Registrados - WhatsApp Bot SaaS{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📋 Negocios Registrados</h2>
+    <p>Total: <strong id="totalCount">{{ tenants|length }}</strong> negocios</p>
     
-    try:
-        data = request.json
-        logger.info(f'Actualizando tenant {tenant_id}: {data}')
+    <div style="overflow-x: auto;">
+        <table style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Phone ID</th>
+                    <th>Token</th>
+                    <th>Fecha</th>
+                    <th>IA</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="tenantsTable">
+                {% for t in tenants %}
+                <tr id="row-{{ t.id }}" data-tenant='{{ t|tojson }}'>
+                    <td class="tenant-id"><code>{{ t.id }}</code></td>
+                    <td class="tenant-nombre">
+                        <span class="display-value">{{ t.nombre }}</span>
+                        <input type="text" class="edit-input" value="{{ t.nombre }}" style="display:none; width:100%;">
+                    </td>
+                    <td class="tenant-phone_id">
+                        <span class="display-value">{{ t.phone_id }}</span>
+                        <input type="text" class="edit-input" value="{{ t.phone_id }}" style="display:none; width:100%;">
+                    </td>
+                    <td class="tenant-token">
+                        <span class="display-value" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; display:inline-block;">{{ t.token[:30] }}...</span>
+                        <input type="text" class="edit-input" value="{{ t.token }}" style="display:none; width:250px;">
+                    </td>
+                    <td class="tenant-created_at">{{ t.created_at }}</td>
+                    <td class="tenant-usar_ia">
+                        <span class="display-value">{% if t.usar_ia %}✅ Activada{% else %}❌ Desactivada{% endif %}</span>
+                        <select class="edit-input" style="display:none;">
+                            <option value="true" {% if t.usar_ia %}selected{% endif %}>Activada</option>
+                            <option value="false" {% if not t.usar_ia %}selected{% endif %}>Desactivada</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button class="btn-edit btn-small" onclick="editRow(this)">✏️ Editar</button>
+                        <button class="btn-save btn-small btn-success" onclick="saveRow(this)" style="display:none;">💾 Guardar</button>
+                        <button class="btn-cancel btn-small" onclick="cancelEdit(this)" style="display:none;">❌ Cancelar</button>
+                        <button class="btn-delete btn-danger btn-small" onclick="confirmDelete('{{ t.id }}', '{{ t.nombre|escape }}')">🗑️ Eliminar</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Diálogo de confirmación para eliminar -->
+<div id="confirmDialog" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1000; min-width: 350px;">
+    <h3>⚠️ Confirmar eliminación</h3>
+    <p id="confirmMessage">¿Estás seguro de eliminar este negocio?</p>
+    <p style="color: red; font-size: 12px; margin-top: 10px;">Esta acción eliminará TODOS los datos del negocio (menú, pedidos, configuración). No se puede deshacer.</p>
+    <div style="margin-top: 20px; text-align: right;">
+        <button class="btn" onclick="closeDialog()">Cancelar</button>
+        <button class="btn btn-danger" id="confirmDeleteBtn">Eliminar</button>
+    </div>
+</div>
+<div id="overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"></div>
+
+<style>
+    .btn-small {
+        padding: 5px 10px;
+        font-size: 12px;
+        margin: 2px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    .btn-edit {
+        background: #ffc107;
+        color: #333;
+    }
+    .btn-edit:hover {
+        background: #e0a800;
+    }
+    .btn-save {
+        background: #28a745;
+        color: white;
+    }
+    .btn-save:hover {
+        background: #218838;
+    }
+    .btn-cancel {
+        background: #6c757d;
+        color: white;
+    }
+    .btn-cancel:hover {
+        background: #5a6268;
+    }
+    .btn-delete {
+        background: #dc3545;
+        color: white;
+    }
+    .btn-delete:hover {
+        background: #c82333;
+    }
+    .editing .display-value {
+        display: none;
+    }
+    .editing .edit-input {
+        display: inline-block !important;
+    }
+    .editing .btn-edit, .editing .btn-delete {
+        display: none;
+    }
+    .editing .btn-save, .editing .btn-cancel {
+        display: inline-block !important;
+    }
+    td {
+        vertical-align: middle;
+    }
+    .edit-input {
+        padding: 5px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+</style>
+
+<script>
+    let deleteTenantId = null;
+    let editingRow = null;
+    
+    // Función para editar una fila
+    function editRow(btn) {
+        const row = btn.closest('tr');
+        if (editingRow && editingRow !== row) {
+            cancelEdit(editingRow.querySelector('.btn-cancel'));
+        }
+        row.classList.add('editing');
+        editingRow = row;
+    }
+    
+    // Función para guardar los cambios
+    async function saveRow(btn) {
+        const row = btn.closest('tr');
+        const tenantId = row.querySelector('.tenant-id code').textContent;
         
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    UPDATE public.tenants 
-                    SET nombre = %s, phone_id = %s, token = %s, usar_ia = %s
-                    WHERE id = %s
-                ''', (
-                    data.get('nombre'),
-                    data.get('phone_id'),
-                    data.get('token'),
-                    data.get('usar_ia', False),
-                    tenant_id
-                ))
-                conn.commit()
+        // Obtener valores editados
+        const nombre = row.querySelector('.tenant-nombre .edit-input').value;
+        const phone_id = row.querySelector('.tenant-phone_id .edit-input').value;
+        const token = row.querySelector('.tenant-token .edit-input').value;
+        const usar_ia = row.querySelector('.tenant-usar_ia .edit-input').value === 'true';
         
-        return jsonify({'status': 'ok', 'message': 'Tenant actualizado'}), 200
+        // Mostrar loading
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Guardando...';
         
-    except Exception as e:
-        logger.error(f'Error actualizando tenant: {str(e)}')
-        return jsonify({'error': str(e)}), 500
+        try {
+            const response = await fetch(`/admin/update_tenant/${tenantId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    nombre: nombre,
+                    phone_id: phone_id,
+                    token: token,
+                    usar_ia: usar_ia
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                // Actualizar valores mostrados
+                row.querySelector('.tenant-nombre .display-value').textContent = nombre;
+                row.querySelector('.tenant-phone_id .display-value').textContent = phone_id;
+                row.querySelector('.tenant-token .display-value').textContent = token.substring(0, 30) + '...';
+                row.querySelector('.tenant-token .edit-input').value = token;
+                const iaText = usar_ia ? '✅ Activada' : '❌ Desactivada';
+                row.querySelector('.tenant-usar_ia .display-value').textContent = iaText;
+                
+                showAlert('success', '✅ Negocio actualizado correctamente');
+                row.classList.remove('editing');
+                editingRow = null;
+            } else {
+                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo actualizar'));
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('error', '❌ Error de conexión: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+    
+    // Función para cancelar edición
+    function cancelEdit(btn) {
+        const row = btn.closest('tr');
+        // Restaurar valores originales desde los datos guardados
+        const originalData = JSON.parse(row.getAttribute('data-tenant'));
+        row.querySelector('.tenant-nombre .edit-input').value = originalData.nombre;
+        row.querySelector('.tenant-phone_id .edit-input').value = originalData.phone_id;
+        row.querySelector('.tenant-token .edit-input').value = originalData.token;
+        row.querySelector('.tenant-usar_ia .edit-input').value = originalData.usar_ia ? 'true' : 'false';
+        
+        row.classList.remove('editing');
+        editingRow = null;
+    }
+    
+    // Confirmar eliminación
+    function confirmDelete(tenantId, tenantName) {
+        deleteTenantId = tenantId;
+        document.getElementById('confirmMessage').innerHTML = `¿Estás seguro de eliminar el negocio <strong>${tenantName}</strong>?`;
+        document.getElementById('overlay').style.display = 'block';
+        document.getElementById('confirmDialog').style.display = 'block';
+    }
+    
+    function closeDialog() {
+        deleteTenantId = null;
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('confirmDialog').style.display = 'none';
+    }
+    
+    document.getElementById('confirmDeleteBtn').onclick = async function() {
+        if (!deleteTenantId) return;
+        
+        const btn = document.getElementById('confirmDeleteBtn');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Eliminando...';
+        
+        try {
+            const response = await fetch(`/admin/delete_tenant/${deleteTenantId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                const row = document.getElementById(`row-${deleteTenantId}`);
+                if (row) row.remove();
+                
+                const totalRows = document.querySelectorAll('#tenantsTable tr').length;
+                document.getElementById('totalCount').innerText = totalRows;
+                
+                showAlert('success', '✅ Negocio eliminado correctamente');
+            } else {
+                const result = await response.json();
+                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+            closeDialog();
+        }
+    };
+    
+    document.getElementById('overlay').onclick = closeDialog;
+</script>
+{% endblock %}
