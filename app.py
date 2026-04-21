@@ -73,6 +73,65 @@ def admin_menu():
     
     return render_template('menu.html', tenant=tenant)
 
+@app.route('/admin/update_product/<tenant_id>/<product_id>', methods=['PUT', 'OPTIONS'])
+def update_product(tenant_id, product_id):
+    """Actualiza un producto del menú"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    try:
+        data = request.json
+        logger.info(f'Actualizando producto {product_id} en tenant {tenant_id}: {data}')
+        
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    UPDATE {tenant_id}.productos 
+                    SET nombre = %s, descripcion = %s, precio = %s, categoria = %s, disponible = %s
+                    WHERE id = %s
+                """, (
+                    data.get('nombre'),
+                    data.get('descripcion'),
+                    data.get('precio'),
+                    data.get('categoria', 'general'),
+                    data.get('disponible', True),
+                    product_id
+                ))
+            conn.commit()
+        
+        return jsonify({'status': 'ok', 'message': 'Producto actualizado'}), 200
+        
+    except Exception as e:
+        logger.error(f'Error actualizando producto: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/toggle_product/<tenant_id>/<product_id>', methods=['PUT', 'OPTIONS'])
+def toggle_product(tenant_id, product_id):
+    """Activa o desactiva un producto"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    try:
+        data = request.json
+        disponible = data.get('disponible', True)
+        logger.info(f'Cambiando estado del producto {product_id} a {disponible}')
+        
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    UPDATE {tenant_id}.productos 
+                    SET disponible = %s
+                    WHERE id = %s
+                """, (disponible, product_id))
+            conn.commit()
+        
+        estado = "activado" if disponible else "desactivado"
+        return jsonify({'status': 'ok', 'message': f'Producto {estado}'}), 200
+        
+    except Exception as e:
+        logger.error(f'Error cambiando estado del producto: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/update_tenant/<tenant_id>', methods=['PUT', 'OPTIONS'])
 def update_tenant(tenant_id):
     """Actualiza los datos de un tenant"""

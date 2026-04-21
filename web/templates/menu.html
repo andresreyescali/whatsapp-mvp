@@ -58,6 +58,48 @@
     <div id="menuContainer" class="loading">Cargando menú...</div>
 </div>
 
+<!-- Modal de edición de producto -->
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>✏️ Editar Producto</h2>
+        <input type="hidden" id="editProductId">
+        <div class="form-group">
+            <label>Nombre del producto *</label>
+            <input type="text" id="editNombre" required>
+        </div>
+        <div class="form-group">
+            <label>Descripción</label>
+            <textarea id="editDescripcion" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Precio ($) *</label>
+            <input type="number" id="editPrecio" required>
+        </div>
+        <div class="form-group">
+            <label>Categoría</label>
+            <select id="editCategoria">
+                <option value="pizzas">🍕 Pizzas</option>
+                <option value="hamburguesas">🍔 Hamburguesas</option>
+                <option value="bebidas">🥤 Bebidas</option>
+                <option value="acompañamientos">🍟 Acompañamientos</option>
+                <option value="postres">🍰 Postres</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Disponible</label>
+            <select id="editDisponible">
+                <option value="true">✅ Disponible</option>
+                <option value="false">❌ No disponible</option>
+            </select>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+            <button id="saveEditBtn" class="btn btn-success">💾 Guardar Cambios</button>
+            <button id="cancelEditBtn" class="btn btn-secondary">❌ Cancelar</button>
+        </div>
+    </div>
+</div>
+
 <div class="card">
     <h2>⚙️ Configuración</h2>
     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
@@ -70,9 +112,110 @@
     <button id="saveConfigBtn" class="btn" style="margin-top: 15px;">💾 Guardar Configuración</button>
 </div>
 
+<style>
+    .btn-small {
+        padding: 5px 10px;
+        font-size: 12px;
+        margin: 2px;
+    }
+    .btn-edit {
+        background: #ffc107;
+        color: #333;
+    }
+    .btn-edit:hover {
+        background: #e0a800;
+    }
+    .btn-toggle {
+        background: #17a2b8;
+        color: white;
+    }
+    .btn-toggle:hover {
+        background: #138496;
+    }
+    .btn-toggle-off {
+        background: #6c757d;
+        color: white;
+    }
+    .btn-toggle-off:hover {
+        background: #5a6268;
+    }
+    .btn-success {
+        background: #28a745;
+        color: white;
+    }
+    .btn-success:hover {
+        background: #218838;
+    }
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+    .btn-secondary:hover {
+        background: #5a6268;
+    }
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.5);
+    }
+    .modal-content {
+        background-color: white;
+        margin: 10% auto;
+        padding: 25px;
+        border-radius: 10px;
+        width: 90%;
+        max-width: 500px;
+        position: relative;
+    }
+    .close {
+        position: absolute;
+        right: 20px;
+        top: 15px;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+        color: #aaa;
+    }
+    .close:hover {
+        color: #333;
+    }
+    .btn-danger {
+        background: #dc3545;
+        color: white;
+    }
+    .btn-danger:hover {
+        background: #c82333;
+    }
+    .product-disabled {
+        opacity: 0.6;
+        background-color: #f8f9fa;
+    }
+    .badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+    .badge-success {
+        background: #28a745;
+        color: white;
+    }
+    .badge-danger {
+        background: #dc3545;
+        color: white;
+    }
+</style>
+
 <script>
     const tenantId = '{{ tenant.id }}';
     const API_BASE = window.location.origin;
+    let currentEditProductId = null;
     
     async function loadMenu() {
         try {
@@ -87,14 +230,25 @@
                 return;
             }
             
-            let html = '<table><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Acciones</th></tr></thead><tbody>';
+            let html = '<table><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
             menu.forEach(item => {
+                const isAvailable = item.disponible !== false;
+                const rowClass = !isAvailable ? 'product-disabled' : '';
+                const statusBadge = isAvailable ? '<span class="badge badge-success">✅ Disponible</span>' : '<span class="badge badge-danger">❌ No disponible</span>';
+                const toggleText = isAvailable ? '🔴 Desactivar' : '🟢 Activar';
+                const toggleClass = isAvailable ? 'btn-toggle' : 'btn-toggle-off';
+                
                 html += `
-                    <tr>
+                    <tr id="row-${item.id}" class="${rowClass}">
                         <td><strong>${escapeHtml(item.nombre)}</strong></td>
                         <td>${escapeHtml(item.descripcion || '-')}</td>
                         <td>$${item.precio.toLocaleString()}</td>
-                        <td><button class="btn btn-danger btn-small" onclick="deleteProduct('${item.id}')">🗑️ Eliminar</button></td>
+                        <td>${statusBadge}</td>
+                        <td>
+                            <button class="btn btn-edit btn-small" onclick="openEditModal('${item.id}', '${escapeHtml(item.nombre)}', '${escapeHtml(item.descripcion || '')}', ${item.precio}, '${item.categoria || 'general'}', ${isAvailable})">✏️ Editar</button>
+                            <button class="btn ${toggleClass} btn-small" onclick="toggleProductStatus('${item.id}', ${!isAvailable})">${toggleText}</button>
+                            <button class="btn btn-danger btn-small" onclick="deleteProduct('${item.id}')">🗑️ Eliminar</button>
+                        </td>
                     </tr>
                 `;
             });
@@ -102,6 +256,78 @@
             document.getElementById('menuContainer').innerHTML = html;
         } catch (error) {
             document.getElementById('menuContainer').innerHTML = '<div class="alert alert-error">❌ Error al cargar el menú</div>';
+        }
+    }
+    
+    function openEditModal(id, nombre, descripcion, precio, categoria, disponible) {
+        currentEditProductId = id;
+        document.getElementById('editProductId').value = id;
+        document.getElementById('editNombre').value = nombre;
+        document.getElementById('editDescripcion').value = descripcion;
+        document.getElementById('editPrecio').value = precio;
+        document.getElementById('editCategoria').value = categoria;
+        document.getElementById('editDisponible').value = disponible ? 'true' : 'false';
+        document.getElementById('editModal').style.display = 'block';
+    }
+    
+    function closeModal() {
+        document.getElementById('editModal').style.display = 'none';
+        currentEditProductId = null;
+    }
+    
+    async function updateProduct() {
+        const productId = currentEditProductId;
+        const producto = {
+            nombre: document.getElementById('editNombre').value,
+            descripcion: document.getElementById('editDescripcion').value,
+            precio: parseInt(document.getElementById('editPrecio').value),
+            categoria: document.getElementById('editCategoria').value,
+            disponible: document.getElementById('editDisponible').value === 'true'
+        };
+        
+        const saveBtn = document.getElementById('saveEditBtn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Guardando...';
+        
+        try {
+            const response = await fetch(`${API_BASE}/admin/update_product/${tenantId}/${productId}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(producto)
+            });
+            
+            if (response.ok) {
+                showAlert('success', '✅ Producto actualizado correctamente');
+                closeModal();
+                loadMenu();
+            } else {
+                const result = await response.json();
+                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo actualizar'));
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión');
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = '💾 Guardar Cambios';
+        }
+    }
+    
+    async function toggleProductStatus(productId, newStatus) {
+        try {
+            const response = await fetch(`${API_BASE}/admin/toggle_product/${tenantId}/${productId}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ disponible: newStatus })
+            });
+            
+            if (response.ok) {
+                showAlert('success', newStatus ? '✅ Producto activado' : '❌ Producto desactivado');
+                loadMenu();
+            } else {
+                showAlert('error', '❌ Error al cambiar estado del producto');
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión');
         }
     }
     
@@ -125,7 +351,8 @@
             nombre: document.getElementById('nombre').value,
             descripcion: document.getElementById('descripcion').value,
             precio: parseInt(document.getElementById('precio').value),
-            categoria: document.getElementById('categoria').value
+            categoria: document.getElementById('categoria').value,
+            disponible: true
         };
         
         const submitBtn = e.target.querySelector('button');
@@ -205,6 +432,16 @@
         div.textContent = text;
         return div.innerHTML;
     }
+    
+    // Eventos del modal
+    document.querySelector('.close').onclick = closeModal;
+    document.getElementById('cancelEditBtn').onclick = closeModal;
+    document.getElementById('saveEditBtn').onclick = updateProduct;
+    window.onclick = function(event) {
+        if (event.target == document.getElementById('editModal')) {
+            closeModal();
+        }
+    };
     
     loadMenu();
     loadConfig();
