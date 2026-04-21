@@ -64,42 +64,103 @@ class SchemaManager:
         try:
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Quitar el filtro "disponible = true" para que traiga todos
                     cur.execute(f"SELECT id, nombre, descripcion, precio, categoria, disponible FROM {tenant_id}.productos ORDER BY categoria, nombre")
-                rows = cur.fetchall()
-                productos = []
-                for row in rows:
-                    productos.append({
-                        'id': row[0],
-                        'nombre': row[1],
-                        'descripcion': row[2],
-                        'precio': row[3],
-                        'categoria': row[4],
-                        'disponible': row[5]  # Incluir el estado disponible
-                    })
-                return productos
+                    rows = cur.fetchall()
+                    productos = []
+                    for row in rows:
+                        productos.append({
+                            'id': row[0],
+                            'nombre': row[1],
+                            'descripcion': row[2] if row[2] else '',
+                            'precio': row[3],
+                            'categoria': row[4] if row[4] else 'general',
+                            'disponible': row[5] if row[5] is not None else True
+                        })
+                    return productos
         except Exception as e:
             logger.error(f'Error obteniendo menú para {tenant_id}: {e}')
-        return []
-        
+            return []
+    
+    def get_product(self, tenant_id: str, product_id: str):
+        """Obtiene un producto específico por ID"""
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT * FROM {tenant_id}.productos WHERE id = %s", (product_id,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            'id': row[0],
+                            'nombre': row[1],
+                            'descripcion': row[2],
+                            'precio': row[3],
+                            'categoria': row[4],
+                            'disponible': row[5]
+                        }
+                    return None
+        except Exception as e:
+            logger.error(f'Error obteniendo producto {product_id}: {e}')
+            return None
+    
     def add_product(self, tenant_id: str, nombre: str, precio: int, descripcion: str = "", categoria: str = "general"):
         """Agrega un producto al menú del tenant"""
         try:
             product_id = str(uuid.uuid4())
-            logger.info(f'Conectando a tenant {tenant_id} para agregar producto')
-            
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
                         INSERT INTO {tenant_id}.productos (id, nombre, descripcion, precio, categoria)
                         VALUES (%s, %s, %s, %s, %s)
+                        RETURNING id
                     """, (product_id, nombre, descripcion, precio, categoria))
+                    result = cur.fetchone()
+                    product_id = result[0]
                 conn.commit()
-            
             logger.info(f'Producto agregado: {nombre} (ID: {product_id}) para tenant {tenant_id}')
             return product_id
         except Exception as e:
             logger.error(f'Error agregando producto para {tenant_id}: {e}')
+            raise
+    
+    def update_product(self, tenant_id: str, product_id: str, nombre: str = None, descripcion: str = None, 
+                      precio: int = None, categoria: str = None, disponible: bool = None):
+        """Actualiza un producto existente"""
+        try:
+            updates = []
+            params = []
+            
+            if nombre is not None:
+                updates.append("nombre = %s")
+                params.append(nombre)
+            if descripcion is not None:
+                updates.append("descripcion = %s")
+                params.append(descripcion)
+            if precio is not None:
+                updates.append("precio = %s")
+                params.append(precio)
+            if categoria is not None:
+                updates.append("categoria = %s")
+                params.append(categoria)
+            if disponible is not None:
+                updates.append("disponible = %s")
+                params.append(disponible)
+            
+            if not updates:
+                return False
+            
+            params.append(product_id)
+            query = f"UPDATE {tenant_id}.productos SET {', '.join(updates)} WHERE id = %s"
+            
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, params)
+                    updated = cur.rowcount
+                conn.commit()
+            
+            logger.info(f'Producto {product_id} actualizado para tenant {tenant_id}')
+            return updated > 0
+        except Exception as e:
+            logger.error(f'Error actualizando producto {product_id}: {e}')
             raise
     
     def delete_product(self, tenant_id: str, product_id: str):
