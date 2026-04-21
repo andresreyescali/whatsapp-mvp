@@ -3,11 +3,20 @@
 {% block title %}Dashboard - {{ usuario.nombre or usuario.email }}{% endblock %}
 
 {% block content %}
-<div class="card">
-    <h2>Bienvenido, {{ usuario.nombre or usuario.email }}</h2>
-    <p>Gestiona tus negocios y configura tu asistente de ventas.</p>
+<!-- Header con botón de logout -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <div>
+        <h1 style="margin: 0;">Bienvenido, {{ usuario.nombre or usuario.email }}</h1>
+        <p>Gestiona tus negocios y configura tu asistente de ventas.</p>
+    </div>
+    <div>
+        <button onclick="cerrarSesion()" class="btn-logout">
+            🚪 Cerrar Sesión
+        </button>
+    </div>
 </div>
 
+<!-- Resto del dashboard -->
 <div class="card">
     <h2>📋 Mis Negocios</h2>
     {% if negocios %}
@@ -19,16 +28,16 @@
             {% for n in negocios %}
             <tr>
                 <td><strong>{{ n.nombre }}</strong></strong></td>
-                <td><code>{{ n.phone_id }}</code></code></td>
-                <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %}</code></td>
-                <td>{% if n.rol == 'owner' %}👑 Propietario{% else %}👤 Colaborador{% endif %}</code></code></td>
+                <td><code>{{ n.phone_id }}</code></td>
+                <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %} </code></td>
+                <td>{% if n.rol == 'owner' %}👑 Propietario{% else %}👤 Colaborador{% endif %} </code></td>
                 <td>
                     <a href="/admin/menu?tenant_id={{ n.id }}" class="btn btn-small">🎛️ Gestionar</a>
                     {% if not n.verificado %}
                         <button class="btn btn-small" onclick="verificarNegocio('{{ n.id }}')">🔐 Verificar</button>
                     {% endif %}
-                </code>
-            </code>
+                </td>
+            </tr>
             {% endfor %}
         </tbody>
     </table>
@@ -92,16 +101,57 @@
 </div>
 
 <style>
+    .btn-logout {
+        background: #dc3545;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: bold;
+        transition: all 0.3s;
+    }
+    .btn-logout:hover {
+        background: #c82333;
+        transform: translateY(-1px);
+    }
     .badge { background: #e9ecef; padding: 3px 8px; border-radius: 12px; font-size: 11px; }
     .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
     .modal-content { background: white; border-radius: 10px; padding: 25px; max-width: 450px; width: 90%; }
     .close { float: right; font-size: 24px; cursor: pointer; color: #999; }
     .btn-small { padding: 5px 10px; font-size: 12px; margin: 2px; background: #25D366; color: white; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; }
     .btn-primary { background: #25D366; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+    .alert { padding: 12px; border-radius: 8px; margin-bottom: 15px; }
+    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+    .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; }
 </style>
 
 <script>
     let currentTenantId = null;
+    
+    async function cerrarSesion() {
+        if (!confirm('¿Estás seguro de que quieres cerrar sesión?')) return;
+        
+        try {
+            const response = await fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (response.ok) {
+                window.location.href = '/';
+            } else {
+                alert('Error al cerrar sesión');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error de conexión');
+        }
+    }
     
     function openRegistroNegocio() {
         document.getElementById('negocioModal').style.display = 'flex';
@@ -141,27 +191,18 @@
             const result = await response.json();
             
             if (result.success) {
+                alertDiv.className = 'alert alert-success';
                 alertDiv.style.display = 'block';
-                alertDiv.style.background = '#d4edda';
-                alertDiv.style.color = '#155724';
-                alertDiv.style.padding = '12px';
-                alertDiv.style.borderRadius = '8px';
                 alertDiv.innerHTML = '✅ Negocio registrado. Se ha enviado un código de verificación.';
                 setTimeout(() => { location.reload(); }, 2000);
             } else {
+                alertDiv.className = 'alert alert-error';
                 alertDiv.style.display = 'block';
-                alertDiv.style.background = '#f8d7da';
-                alertDiv.style.color = '#721c24';
-                alertDiv.style.padding = '12px';
-                alertDiv.style.borderRadius = '8px';
                 alertDiv.innerHTML = '❌ ' + result.error;
             }
         } catch (error) {
+            alertDiv.className = 'alert alert-error';
             alertDiv.style.display = 'block';
-            alertDiv.style.background = '#f8d7da';
-            alertDiv.style.color = '#721c24';
-            alertDiv.style.padding = '12px';
-            alertDiv.style.borderRadius = '8px';
             alertDiv.innerHTML = '❌ Error de conexión';
         }
     };
@@ -182,27 +223,18 @@
             const result = await response.json();
             
             if (result.success) {
+                alertDiv.className = 'alert alert-success';
                 alertDiv.style.display = 'block';
-                alertDiv.style.background = '#d4edda';
-                alertDiv.style.color = '#155724';
-                alertDiv.style.padding = '12px';
-                alertDiv.style.borderRadius = '8px';
                 alertDiv.innerHTML = '✅ Negocio verificado exitosamente.';
                 setTimeout(() => { location.reload(); }, 1500);
             } else {
+                alertDiv.className = 'alert alert-error';
                 alertDiv.style.display = 'block';
-                alertDiv.style.background = '#f8d7da';
-                alertDiv.style.color = '#721c24';
-                alertDiv.style.padding = '12px';
-                alertDiv.style.borderRadius = '8px';
                 alertDiv.innerHTML = '❌ ' + result.error;
             }
         } catch (error) {
+            alertDiv.className = 'alert alert-error';
             alertDiv.style.display = 'block';
-            alertDiv.style.background = '#f8d7da';
-            alertDiv.style.color = '#721c24';
-            alertDiv.style.padding = '12px';
-            alertDiv.style.borderRadius = '8px';
             alertDiv.innerHTML = '❌ Error de conexión';
         }
     };

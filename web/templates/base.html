@@ -8,63 +8,418 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f0f0; min-height: 100vh; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { background: #25D366; color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .header { 
+            background: linear-gradient(135deg, #25D366 0%, #128C7E 100%); 
+            color: white; 
+            padding: 20px; 
+            border-radius: 10px; 
+            margin-bottom: 20px;
+        }
         .header h1 { margin-bottom: 10px; }
-        .card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .card h2 { margin-bottom: 15px; color: #333; border-bottom: 2px solid #25D366; padding-bottom: 10px; }
-        .btn { background: #25D366; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; }
-        .btn:hover { background: #128C7E; }
-        .btn-danger { background: #e74c3c; }
-        .btn-danger:hover { background: #c0392b; }
-        .btn-small { padding: 5px 10px; font-size: 12px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background: #f5f5f5; font-weight: bold; }
-        .alert { padding: 12px; border-radius: 8px; margin-bottom: 15px; display: none; }
-        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .hidden { display: none; }
-        .loading { text-align: center; padding: 40px; color: #666; }
-        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; }
-        .stat-card .number { font-size: 32px; font-weight: bold; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, textarea, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; }
-        .nav { margin-bottom: 20px; }
-        .nav a { color: white; text-decoration: none; margin-right: 20px; }
-        .nav a:hover { text-decoration: underline; }
+        .nav { margin-top: 15px; display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }
+        .nav a { 
+            color: white; 
+            text-decoration: none; 
+            padding: 8px 16px;
+            border-radius: 20px;
+            transition: background 0.3s;
+        }
+        .nav a:hover { 
+            background: rgba(255,255,255,0.2); 
+            text-decoration: none;
+        }
+        .nav .btn-logout {
+            background: rgba(220, 53, 69, 0.8);
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .nav .btn-logout:hover {
+            background: #dc3545;
+        }
+        .card { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 10px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+        }
+        .card h2 { 
+            margin-bottom: 15px; 
+            color: #333; 
+            border-bottom: 2px solid #25D366; 
+            padding-bottom: 10px; 
+        }
+        .btn { 
+            background: #25D366; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            font-size: 14px; 
+            text-decoration: none; 
+            display: inline-block; 
+        }
+        .btn:hover { 
+            background: #128C7E; 
+        }
+        .btn-danger { 
+            background: #e74c3c; 
+        }
+        .btn-danger:hover { 
+            background: #c0392b; 
+        }
+        .btn-small { 
+            padding: 5px 10px; 
+            font-size: 12px; 
+        }
+        .btn-success {
+            background: #28a745;
+        }
+        .btn-success:hover {
+            background: #218838;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+        }
+        th, td { 
+            padding: 12px; 
+            text-align: left; 
+            border-bottom: 1px solid #ddd; 
+        }
+        th { 
+            background: #f5f5f5; 
+            font-weight: bold; 
+        }
+        .alert { 
+            padding: 12px; 
+            border-radius: 8px; 
+            margin-bottom: 15px; 
+            display: none; 
+        }
+        .alert-success { 
+            background: #d4edda; 
+            color: #155724; 
+            border: 1px solid #c3e6cb; 
+        }
+        .alert-error { 
+            background: #f8d7da; 
+            color: #721c24; 
+            border: 1px solid #f5c6cb; 
+        }
+        .hidden { 
+            display: none; 
+        }
+        .loading { 
+            text-align: center; 
+            padding: 40px; 
+            color: #666; 
+        }
+        .stats { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 15px; 
+            margin-bottom: 20px; 
+        }
+        .stat-card { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            padding: 20px; 
+            border-radius: 10px; 
+            text-align: center; 
+        }
+        .stat-card .number { 
+            font-size: 32px; 
+            font-weight: bold; 
+        }
+        .form-group { 
+            margin-bottom: 15px; 
+        }
+        label { 
+            display: block; 
+            margin-bottom: 5px; 
+            font-weight: bold; 
+            color: #555; 
+        }
+        input, textarea, select { 
+            width: 100%; 
+            padding: 10px; 
+            border: 1px solid #ddd; 
+            border-radius: 5px; 
+            font-size: 14px; 
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 12px;
+            border-top: 1px solid #ddd;
+            margin-top: 20px;
+        }
+        .footer a {
+            color: #25D366;
+            text-decoration: none;
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        @media (max-width: 768px) {
+            .nav { flex-direction: column; align-items: flex-start; }
+            .container { padding: 10px; }
+            table { font-size: 12px; }
+            th, td { padding: 8px; }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🍕 WhatsApp Bot SaaS</h1>
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <h1>🍕 WhatsApp Bot SaaS</h1>
+                    <p>Automatiza tus ventas por WhatsApp con IA</p>
+                </div>
+            </div>
             <div class="nav">
+                <a href="/">🏠 Inicio</a>
                 <a href="/admin/tenants">📋 Negocios</a>
-                <a href="/registro">➕ Registrar</a>
+                <a href="/registro">➕ Registrar Negocio (Manual)</a>
+                {% if session and session.usuario_id %}
+                    <a href="/dashboard">📊 Mi Dashboard</a>
+                    <a href="#" onclick="cerrarSesionGlobal()" class="btn-logout" style="background: rgba(220, 53, 69, 0.8); padding: 8px 16px; border-radius: 20px;">🚪 Cerrar Sesión</a>
+                {% else %}
+                    <a href="#" onclick="openLoginModal()">🔑 Iniciar Sesión</a>
+                    <a href="#" onclick="openRegisterModal()" style="background: rgba(255,255,255,0.2);">📝 Registrarse</a>
+                {% endif %}
             </div>
         </div>
         
         <div id="alert" class="alert hidden"></div>
         
         {% block content %}{% endblock %}
+        
+        <div class="footer">
+            <p>&copy; 2026 WhatsApp Bot SaaS - Todos los derechos reservados</p>
+            <p>
+                <a href="/terminos">Términos y Condiciones</a> | 
+                <a href="/privacidad">Política de Privacidad</a> |
+                <a href="/politicas-uso">Políticas de Uso</a>
+            </p>
+        </div>
     </div>
-    <script>
-    function showAlert(type, message) {
-        const alertDiv = document.getElementById('alert');
-        if (!alertDiv) {
-            console.log('Alert:', type, message);
-            return;
+
+    <!-- Modal de Login -->
+    <div id="loginModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close" onclick="closeLoginModal()">&times;</span>
+            <h2>Iniciar Sesión</h2>
+            <div id="loginAlert" class="alert" style="display:none"></div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="loginEmail" required>
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="loginPassword" required>
+                </div>
+                <button type="submit" class="btn" style="width: 100%;">Ingresar</button>
+            </form>
+            <p style="margin-top: 15px; text-align: center;">
+                ¿No tienes cuenta? <a href="#" onclick="closeLoginModal(); openRegisterModal()">Regístrate aquí</a>
+            </p>
+        </div>
+    </div>
+
+    <!-- Modal de Registro -->
+    <div id="registerModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close" onclick="closeRegisterModal()">&times;</span>
+            <h2>Crear Cuenta</h2>
+            <div id="registerAlert" class="alert" style="display:none"></div>
+            <form id="registerForm">
+                <div class="form-group">
+                    <label>Nombre completo</label>
+                    <input type="text" id="regNombre" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="regEmail" required>
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="tel" id="regTelefono">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="regPassword" required>
+                </div>
+                <div class="form-group">
+                    <label>Confirmar contraseña</label>
+                    <input type="password" id="regConfirmPassword" required>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="aceptaTerminos" required>
+                        Acepto los <a href="/terminos" target="_blank">términos y condiciones</a>
+                    </label>
+                </div>
+                <button type="submit" class="btn" style="width: 100%;">Registrarse</button>
+            </form>
+            <p style="margin-top: 15px; text-align: center;">
+                ¿Ya tienes cuenta? <a href="#" onclick="closeRegisterModal(); openLoginModal()">Inicia sesión aquí</a>
+            </p>
+        </div>
+    </div>
+
+    <style>
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
         }
-        alertDiv.className = `alert alert-${type}`;
-        alertDiv.innerHTML = message;
-        alertDiv.style.display = 'block';
-        setTimeout(() => {
-            alertDiv.style.display = 'none';
-        }, 3000);
-    }
+        .modal-content {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 450px;
+            width: 90%;
+            position: relative;
+        }
+        .close {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 28px;
+            cursor: pointer;
+            color: #999;
+        }
+        .close:hover {
+            color: #333;
+        }
+    </style>
+
+    <script>
+        // Funciones para los modales
+        function openLoginModal() { document.getElementById('loginModal').style.display = 'flex'; }
+        function closeLoginModal() { document.getElementById('loginModal').style.display = 'none'; }
+        function openRegisterModal() { document.getElementById('registerModal').style.display = 'flex'; }
+        function closeRegisterModal() { document.getElementById('registerModal').style.display = 'none'; }
+        
+        // Cerrar modales al hacer clic fuera
+        window.onclick = function(event) {
+            if (event.target == document.getElementById('loginModal')) closeLoginModal();
+            if (event.target == document.getElementById('registerModal')) closeRegisterModal();
+        }
+        
+        // Cerrar sesión global
+        function cerrarSesionGlobal() {
+            if (confirm('¿Estás seguro de que quieres cerrar sesión?')) {
+                fetch('/api/auth/logout', { method: 'POST' })
+                    .then(() => window.location.href = '/')
+                    .catch(() => window.location.href = '/');
+            }
+        }
+        
+        // Mostrar alertas
+        function showAlert(type, message) {
+            const alertDiv = document.getElementById('alert');
+            if (!alertDiv) return;
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = message;
+            alertDiv.style.display = 'block';
+            setTimeout(() => {
+                alertDiv.style.display = 'none';
+            }, 4000);
+        }
+        
+        // Login form
+        document.getElementById('loginForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const alertDiv = document.getElementById('loginAlert');
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('loginEmail').value,
+                        password: document.getElementById('loginPassword').value
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alertDiv.className = 'alert alert-success';
+                    alertDiv.style.display = 'block';
+                    alertDiv.innerHTML = '✅ Login exitoso. Redirigiendo...';
+                    setTimeout(() => { window.location.href = '/dashboard'; }, 1000);
+                } else {
+                    alertDiv.className = 'alert alert-error';
+                    alertDiv.style.display = 'block';
+                    alertDiv.innerHTML = '❌ ' + result.error;
+                }
+            } catch (error) {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ Error de conexión';
+            }
+        };
+        
+        // Register form
+        document.getElementById('registerForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const alertDiv = document.getElementById('registerAlert');
+            
+            const password = document.getElementById('regPassword').value;
+            const confirm = document.getElementById('regConfirmPassword').value;
+            
+            if (password !== confirm) {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ Las contraseñas no coinciden';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        nombre_completo: document.getElementById('regNombre').value,
+                        email: document.getElementById('regEmail').value,
+                        telefono: document.getElementById('regTelefono').value,
+                        password: password
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alertDiv.className = 'alert alert-success';
+                    alertDiv.style.display = 'block';
+                    alertDiv.innerHTML = '✅ Registro exitoso. Ya puedes iniciar sesión.';
+                    setTimeout(() => { closeRegisterModal(); openLoginModal(); }, 2000);
+                } else {
+                    alertDiv.className = 'alert alert-error';
+                    alertDiv.style.display = 'block';
+                    alertDiv.innerHTML = '❌ ' + result.error;
+                }
+            } catch (error) {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ Error de conexión';
+            }
+        };
     </script>
     {% block extra_js %}{% endblock %}
 </body>
