@@ -86,12 +86,11 @@
                 <option value="postres">🍰 Postres</option>
             </select>
         </div>
-        <div class="form-group">
-            <label>Disponible</label>
-            <select id="editDisponible">
-                <option value="true">✅ Disponible</option>
-                <option value="false">❌ No disponible</option>
-            </select>
+        <div style="display: flex; gap: 20px; margin-top: 15px; align-items: center;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="editDisponible">
+                <span>Producto disponible para venta</span>
+            </label>
         </div>
         <div style="display: flex; gap: 10px; margin-top: 20px;">
             <button id="saveEditBtn" class="btn btn-success">💾 Guardar Cambios</button>
@@ -124,20 +123,6 @@
     }
     .btn-edit:hover {
         background: #e0a800;
-    }
-    .btn-toggle {
-        background: #17a2b8;
-        color: white;
-    }
-    .btn-toggle:hover {
-        background: #138496;
-    }
-    .btn-toggle-off {
-        background: #6c757d;
-        color: white;
-    }
-    .btn-toggle-off:hover {
-        background: #5a6268;
     }
     .btn-success {
         background: #28a745;
@@ -210,6 +195,19 @@
         background: #dc3545;
         color: white;
     }
+    .toggle-checkbox {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+        margin: 0;
+    }
+    .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        margin: 0;
+    }
 </style>
 
 <script>
@@ -230,13 +228,11 @@
                 return;
             }
             
-            let html = '<table><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+            let html = '<table><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
             menu.forEach(item => {
                 const isAvailable = item.disponible !== false;
                 const rowClass = !isAvailable ? 'product-disabled' : '';
                 const statusBadge = isAvailable ? '<span class="badge badge-success">✅ Disponible</span>' : '<span class="badge badge-danger">❌ No disponible</span>';
-                const toggleText = isAvailable ? '🔴 Desactivar' : '🟢 Activar';
-                const toggleClass = isAvailable ? 'btn-toggle' : 'btn-toggle-off';
                 
                 html += `
                     <tr id="row-${item.id}" class="${rowClass}">
@@ -244,9 +240,16 @@
                         <td>${escapeHtml(item.descripcion || '-')}</td>
                         <td>$${item.precio.toLocaleString()}</td>
                         <td>${statusBadge}</td>
+                        <td style="text-align: center;">
+                            <label class="toggle-label">
+                                <input type="checkbox" class="toggle-checkbox" 
+                                       onchange="toggleProductStatus('${item.id}', this.checked)"
+                                       ${isAvailable ? 'checked' : ''}>
+                                <span style="font-size: 12px;">${isAvailable ? 'Activo' : 'Inactivo'}</span>
+                            </label>
+                        </td>
                         <td>
                             <button class="btn btn-edit btn-small" onclick="openEditModal('${item.id}', '${escapeHtml(item.nombre)}', '${escapeHtml(item.descripcion || '')}', ${item.precio}, '${item.categoria || 'general'}', ${isAvailable})">✏️ Editar</button>
-                            <button class="btn ${toggleClass} btn-small" onclick="toggleProductStatus('${item.id}', ${!isAvailable})">${toggleText}</button>
                             <button class="btn btn-danger btn-small" onclick="deleteProduct('${item.id}')">🗑️ Eliminar</button>
                         </td>
                     </tr>
@@ -266,7 +269,7 @@
         document.getElementById('editDescripcion').value = descripcion;
         document.getElementById('editPrecio').value = precio;
         document.getElementById('editCategoria').value = categoria;
-        document.getElementById('editDisponible').value = disponible ? 'true' : 'false';
+        document.getElementById('editDisponible').checked = disponible;
         document.getElementById('editModal').style.display = 'block';
     }
     
@@ -282,7 +285,7 @@
             descripcion: document.getElementById('editDescripcion').value,
             precio: parseInt(document.getElementById('editPrecio').value),
             categoria: document.getElementById('editCategoria').value,
-            disponible: document.getElementById('editDisponible').value === 'true'
+            disponible: document.getElementById('editDisponible').checked
         };
         
         const saveBtn = document.getElementById('saveEditBtn');
@@ -312,16 +315,17 @@
         }
     }
     
-    async function toggleProductStatus(productId, newStatus) {
+    async function toggleProductStatus(productId, isAvailable) {
         try {
             const response = await fetch(`${API_BASE}/admin/toggle_product/${tenantId}/${productId}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ disponible: newStatus })
+                body: JSON.stringify({ disponible: isAvailable })
             });
             
             if (response.ok) {
-                showAlert('success', newStatus ? '✅ Producto activado' : '❌ Producto desactivado');
+                const estado = isAvailable ? 'activado' : 'desactivado';
+                showAlert('success', `✅ Producto ${estado} correctamente`);
                 loadMenu();
             } else {
                 showAlert('error', '❌ Error al cambiar estado del producto');
@@ -409,7 +413,7 @@
     });
     
     window.deleteProduct = async (productId) => {
-        if (!confirm('¿Eliminar este producto del menú?')) return;
+        if (!confirm('¿Eliminar este producto del menú? Esta acción no se puede deshacer.')) return;
         
         try {
             const response = await fetch(`${API_BASE}/admin/delete_product/${tenantId}/${productId}`, { 
