@@ -51,8 +51,18 @@ class MessageHandler:
                     row = cur.fetchone()
                     
                     if row:
+                        menu_estructurado = row[0]
+                        # Manejar correctamente el JSONB
+                        if isinstance(menu_estructurado, str):
+                            try:
+                                menu_estructurado = json.loads(menu_estructurado)
+                            except:
+                                menu_estructurado = []
+                        elif menu_estructurado is None:
+                            menu_estructurado = []
+                        
                         return {
-                            'menu_estructurado': json.loads(row[0]) if row[0] else [],
+                            'menu_estructurado': menu_estructurado,
                             'instrucciones': row[1] or '',
                             'horario': row[2] or '',
                             'ubicacion': row[3] or '',
@@ -137,10 +147,8 @@ CONTEXTO DEL NEGOCIO:
         if contexto.get('instrucciones'):
             negocio_info += f"\n\nINSTRUCCIONES PERSONALIZADAS:\n{contexto['instrucciones']}"
         
-        # Agregar menú (priorizar menú estructurado del contexto si existe)
+        # Agregar menú
         menu_contexto = self._formatear_menu_para_ia(menu)
-        if contexto.get('menu_estructurado') and len(contexto['menu_estructurado']) > 0:
-            menu_contexto = self._formatear_menu_estructurado(contexto['menu_estructurado'])
         
         # Agregar pedidos pendientes
         pedidos_contexto = ""
@@ -175,39 +183,18 @@ MENÚ COMPLETO:
 {pedidos_contexto}
 {reglas}"""
     
-    def _formatear_menu_estructurado(self, menu: list) -> str:
-        """Formatea un menú estructurado (desde contexto entrenado)"""
-        if not menu:
-            return "No hay productos disponibles actualmente."
-        
-        # Agrupar por categoría
-        categorias = {}
-        for p in menu:
-            cat = p.get('categoria', 'general')
-            if cat not in categorias:
-                categorias[cat] = []
-            categorias[cat].append(p)
-        
-        resultado = ""
-        for categoria, productos in categorias.items():
-            resultado += f"\n{categoria.upper()}:\n"
-            for p in productos:
-                resultado += f"  - {p['nombre']}: ${p.get('precio', 0):,.0f}"
-                if p.get('descripcion'):
-                    resultado += f" - {p['descripcion'][:80]}"
-                resultado += "\n"
-        
-        return resultado
-    
     def _formatear_menu_para_ia(self, menu: list) -> str:
         """Formatea el menú para incluirlo en el prompt de IA"""
         if not menu:
             return "No hay productos disponibles actualmente."
         
-        # Agrupar por categoría
+        # Agrupar por categoría, manejando valores nulos
         categorias = {}
         for p in menu:
-            cat = p.get('categoria', 'general')
+            # Si categoria es None o vacío, usar "general"
+            cat = p.get('categoria')
+            if cat is None or cat == '':
+                cat = 'general'
             if cat not in categorias:
                 categorias[cat] = []
             categorias[cat].append(p)
@@ -226,16 +213,12 @@ MENÚ COMPLETO:
     def _detectar_y_crear_pedido(self, respuesta_ia: str, texto_original: str, tenant: dict, menu: list, numero: str) -> tuple:
         """Detecta si la IA quiere crear un pedido y lo ejecuta"""
         
-        # Buscar si la respuesta contiene indicación de pedido
         lineas = respuesta_ia.lower().split('\n')
         
         for linea in lineas:
-            # Buscar patrones de confirmación de pedido
             if any(palabra in linea for palabra in ['pedido confirmado', 'producto agregado', 'link de pago', 'paga aquí']):
-                # Intentar extraer el producto del texto original
                 for producto in menu:
                     if producto['nombre'].lower() in texto_original.lower():
-                        # Crear pedido
                         pedido = order_repo.create(
                             tenant['id'],
                             numero,
@@ -244,7 +227,6 @@ MENÚ COMPLETO:
                         )
                         link_pago = generar_link_pago(pedido['total'], pedido['id'])
                         
-                        # Reemplazar la respuesta con el formato correcto
                         respuesta_nueva = f"""✅ ¡Pedido confirmado!
 
 **Producto:** {producto['nombre']}
@@ -263,14 +245,12 @@ MENÚ COMPLETO:
         
         texto_lower = texto.lower()
         
-        # Detectar pedido básico
         for producto in menu:
             if producto['nombre'].lower() in texto_lower:
                 pedido = order_repo.create(tenant['id'], numero, producto['nombre'], producto['precio'])
                 link_pago = generar_link_pago(pedido['total'], pedido['id'])
                 return f"✅ Pedido: {producto['nombre']} - ${producto['precio']:,.0f}\n🔗 Paga aquí: {link_pago}"
         
-        # Comandos básicos
         if 'menu' in texto_lower:
             respuesta = "📋 *MENÚ*\n\n"
             for p in menu:
