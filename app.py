@@ -10,6 +10,9 @@ from tenants.schema_manager import schema_manager
 from flask import render_template
 from ai.training import trainer
 from ai.client import ai_client
+from auth.auth import auth_manager
+from flask import session
+import secrets
 
 setup_logging()
 
@@ -28,7 +31,116 @@ def after_request(response):
 db_manager.init_global_tables()
 register_webhook_routes(app)
 
+# Configuración de sesión
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+
+# ==================== AUTH ENDPOINTS ====================
+
+@app.route('/')
+def landing():
+    """Página de inicio"""
+    return render_template('landing.html')
+
+@app.route('/api/auth/register', methods=['POST'])
+def api_register():
+    """Registro de nuevo usuario"""
+    data = request.json
+    result = auth_manager.registrar_usuario(
+        email=data.get('email'),
+        password=data.get('password'),
+        nombre_completo=data.get('nombre_completo'),
+        telefono=data.get('telefono')
+    )
+    return jsonify(result)
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    """Login de usuario"""
+    data = request.json
+    result = auth_manager.login(data.get('email'), data.get('password'))
+    if result['success']:
+        session['usuario_id'] = result['usuario_id']
+        session['email'] = result['email']
+    return jsonify(result)
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    """Logout de usuario"""
+    session.clear()
+    return jsonify({'success': True})
+
+@app.route('/dashboard')
+def dashboard():
+    """Dashboard del usuario"""
+    if 'usuario_id' not in session:
+        return redirect('/')
+    
+    usuario = {
+        'id': session['usuario_id'],
+        'email': session['email']
+    }
+    negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
+    
+    return render_template('dashboard.html', usuario=usuario, negocios=negocios)
+
+@app.route('/api/negocio/registrar', methods=['POST'])
+def api_registrar_negocio():
+    """Registro de nuevo negocio por usuario autenticado"""
+    if 'usuario_id' not in session:
+        return jsonify({'success': False, 'error': 'No autenticado'}), 401
+    
+    data = request.json
+    result = auth_manager.crear_negocio(
+        usuario_id=session['usuario_id'],
+        nombre=data.get('nombre'),
+        phone_id=data.get('phone_id'),
+        token=data.get('token'),
+        tipo_negocio=data.get('tipo_negocio', 'restaurante')
+    )
+    return jsonify(result)
+
+@app.route('/api/negocio/verificar', methods=['POST'])
+def api_verificar_negocio():
+    """Verificación de negocio"""
+    if 'usuario_id' not in session:
+        return jsonify({'success': False, 'error': 'No autenticado'}), 401
+    
+    data = request.json
+    result = auth_manager.verificar_negocio(
+        tenant_id=data.get('tenant_id'),
+        codigo=data.get('codigo')
+    )
+    return jsonify(result)
+
+# ==================== PÁGINAS LEGALES ====================
+
+@app.route('/terminos')
+def terminos():
+    return render_template('terminos.html')
+
+@app.route('/privacidad')
+def privacidad():
+    return render_template('privacidad.html')
+
+@app.route('/politicas-uso')
+def politicas_uso():
+    return render_template('politicas-uso.html')
+
 # ==================== ENDPOINTS BÁSICOS ====================
+
+@app.route('/dashboard')
+def dashboard():
+    """Dashboard del usuario (múltiples negocios)"""
+    if 'usuario_id' not in session:
+        return redirect('/')
+    
+    usuario = {
+        'id': session['usuario_id'],
+        'email': session['email']
+    }
+    negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
+    
+    return render_template('dashboard_usuario.html', usuario=usuario, negocios=negocios)
 
 @app.route('/api/register', methods=['POST'])
 def api_register():

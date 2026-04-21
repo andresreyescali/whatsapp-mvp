@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - {{ usuario.nombre or usuario.email }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Bienvenido, {{ usuario.nombre or usuario.email }}</h2>
+    <p>Gestiona tus negocios y configura tu asistente de ventas.</p>
+</div>
+
+<div class="card">
+    <h2>📋 Mis Negocios</h2>
+    {% if negocios %}
+    <table style="width:100%">
+        <thead>
+            <tr><th>Nombre</th><th>WhatsApp</th><th>Verificado</th><th>Rol</th><th>Acciones</th></tr>
+        </thead>
+        <tbody>
+            {% for n in negocios %}
+            <tr>
+                <td><strong>{{ n.nombre }}</strong></strong></td>
+                <td><code>{{ n.phone_id }}</code></code></td>
+                <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %}</code></td>
+                <td>{% if n.rol == 'owner' %}👑 Propietario{% else %}👤 Colaborador{% endif %}</code></code></td>
+                <td>
+                    <a href="/admin/menu?tenant_id={{ n.id }}" class="btn btn-small">🎛️ Gestionar</a>
+                    {% if not n.verificado %}
+                        <button class="btn btn-small" onclick="verificarNegocio('{{ n.id }}')">🔐 Verificar</button>
+                    {% endif %}
+                </code>
+            </code>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No tienes negocios registrados.</p>
+    {% endif %}
+    
+    <button class="btn" onclick="openRegistroNegocio()" style="margin-top: 20px;">➕ Registrar Nuevo Negocio</button>
+</div>
+
+<!-- Modal de registro de negocio -->
+<div id="negocioModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeNegocioModal()">&times;</span>
+        <h2>Registrar Nuevo Negocio</h2>
+        <div id="negocioAlert" class="alert" style="display:none"></div>
+        <form id="negocioForm">
+            <div class="form-group">
+                <label>Nombre del negocio *</label>
+                <input type="text" id="negocioNombre" required placeholder="Ej: Pizzería Avars">
+                <small>Este nombre debe ser único</small>
+            </div>
+            <div class="form-group">
+                <label>Phone ID *</label>
+                <input type="text" id="negocioPhoneId" required placeholder="Ej: 946960701843409">
+            </div>
+            <div class="form-group">
+                <label>Token de WhatsApp *</label>
+                <input type="text" id="negocioToken" required placeholder="EAA...">
+            </div>
+            <div class="form-group">
+                <label>Tipo de negocio</label>
+                <select id="negocioTipo">
+                    <option value="restaurante">🍕 Restaurante</option>
+                    <option value="panaderia">🥖 Panadería</option>
+                    <option value="pasteleria">🎂 Pastelería</option>
+                    <option value="otros">📦 Otros</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%">Registrar Negocio</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal de verificación -->
+<div id="verificacionModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeVerificacionModal()">&times;</span>
+        <h2>Verificar Negocio</h2>
+        <p>Para verificar que este negocio te pertenece, ingresa el código de verificación.</p>
+        <div id="verificacionAlert" class="alert" style="display:none"></div>
+        <form id="verificacionForm">
+            <input type="hidden" id="verifTenantId">
+            <div class="form-group">
+                <label>Código de verificación</label>
+                <input type="text" id="verifCodigo" placeholder="Ej: ABC123" required>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%">Verificar</button>
+        </form>
+    </div>
+</div>
+
+<style>
+    .badge { background: #e9ecef; padding: 3px 8px; border-radius: 12px; font-size: 11px; }
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+    .modal-content { background: white; border-radius: 10px; padding: 25px; max-width: 450px; width: 90%; }
+    .close { float: right; font-size: 24px; cursor: pointer; color: #999; }
+    .btn-small { padding: 5px 10px; font-size: 12px; margin: 2px; background: #25D366; color: white; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; }
+    .btn-primary { background: #25D366; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+</style>
+
+<script>
+    let currentTenantId = null;
+    
+    function openRegistroNegocio() {
+        document.getElementById('negocioModal').style.display = 'flex';
+    }
+    
+    function closeNegocioModal() {
+        document.getElementById('negocioModal').style.display = 'none';
+        document.getElementById('negocioForm').reset();
+    }
+    
+    function verificarNegocio(tenantId) {
+        currentTenantId = tenantId;
+        document.getElementById('verifTenantId').value = tenantId;
+        document.getElementById('verificacionModal').style.display = 'flex';
+    }
+    
+    function closeVerificacionModal() {
+        document.getElementById('verificacionModal').style.display = 'none';
+        document.getElementById('verifCodigo').value = '';
+    }
+    
+    document.getElementById('negocioForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const alertDiv = document.getElementById('negocioAlert');
+        
+        try {
+            const response = await fetch('/api/negocio/registrar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nombre: document.getElementById('negocioNombre').value,
+                    phone_id: document.getElementById('negocioPhoneId').value,
+                    token: document.getElementById('negocioToken').value,
+                    tipo_negocio: document.getElementById('negocioTipo').value
+                })
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                alertDiv.style.display = 'block';
+                alertDiv.style.background = '#d4edda';
+                alertDiv.style.color = '#155724';
+                alertDiv.style.padding = '12px';
+                alertDiv.style.borderRadius = '8px';
+                alertDiv.innerHTML = '✅ Negocio registrado. Se ha enviado un código de verificación.';
+                setTimeout(() => { location.reload(); }, 2000);
+            } else {
+                alertDiv.style.display = 'block';
+                alertDiv.style.background = '#f8d7da';
+                alertDiv.style.color = '#721c24';
+                alertDiv.style.padding = '12px';
+                alertDiv.style.borderRadius = '8px';
+                alertDiv.innerHTML = '❌ ' + result.error;
+            }
+        } catch (error) {
+            alertDiv.style.display = 'block';
+            alertDiv.style.background = '#f8d7da';
+            alertDiv.style.color = '#721c24';
+            alertDiv.style.padding = '12px';
+            alertDiv.style.borderRadius = '8px';
+            alertDiv.innerHTML = '❌ Error de conexión';
+        }
+    };
+    
+    document.getElementById('verificacionForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const alertDiv = document.getElementById('verificacionAlert');
+        
+        try {
+            const response = await fetch('/api/negocio/verificar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tenant_id: document.getElementById('verifTenantId').value,
+                    codigo: document.getElementById('verifCodigo').value
+                })
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                alertDiv.style.display = 'block';
+                alertDiv.style.background = '#d4edda';
+                alertDiv.style.color = '#155724';
+                alertDiv.style.padding = '12px';
+                alertDiv.style.borderRadius = '8px';
+                alertDiv.innerHTML = '✅ Negocio verificado exitosamente.';
+                setTimeout(() => { location.reload(); }, 1500);
+            } else {
+                alertDiv.style.display = 'block';
+                alertDiv.style.background = '#f8d7da';
+                alertDiv.style.color = '#721c24';
+                alertDiv.style.padding = '12px';
+                alertDiv.style.borderRadius = '8px';
+                alertDiv.innerHTML = '❌ ' + result.error;
+            }
+        } catch (error) {
+            alertDiv.style.display = 'block';
+            alertDiv.style.background = '#f8d7da';
+            alertDiv.style.color = '#721c24';
+            alertDiv.style.padding = '12px';
+            alertDiv.style.borderRadius = '8px';
+            alertDiv.innerHTML = '❌ Error de conexión';
+        }
+    };
+    
+    // Cerrar modales al hacer clic fuera
+    window.onclick = function(event) {
+        if (event.target == document.getElementById('negocioModal')) {
+            closeNegocioModal();
+        }
+        if (event.target == document.getElementById('verificacionModal')) {
+            closeVerificacionModal();
+        }
+    }
+</script>
+{% endblock %}

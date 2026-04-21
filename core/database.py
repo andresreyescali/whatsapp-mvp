@@ -77,6 +77,48 @@ class DatabaseManager:
                 
                 # Índices
                 cur.execute('CREATE INDEX IF NOT EXISTS idx_tenants_phone_id ON public.tenants(phone_id)')
+                
+                # Tabla de usuarios
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS public.usuarios (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    email VARCHAR(200) UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    nombre_completo VARCHAR(200),
+                    telefono VARCHAR(50),
+                    email_verificado BOOLEAN DEFAULT false,
+                    codigo_verificacion VARCHAR(10),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    ultimo_acceso TIMESTAMP,
+                    activo BOOLEAN DEFAULT true
+                    );
+                ''')
+
+                # Tabla de relación usuario-tenant (negocios)
+                cur.execute('''
+                CREATE TABLE IF NOT EXISTS public.usuario_negocio (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    usuario_id UUID REFERENCES public.usuarios(id) ON DELETE CASCADE,
+                    tenant_id TEXT REFERENCES public.tenants(id) ON DELETE CASCADE,
+                    rol VARCHAR(50) DEFAULT 'owner',
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(usuario_id, tenant_id)
+                );
+                ''')
+
+                # Tabla de verificación de negocios
+                cur.execute('''
+                CREATE TABLE IF NOT EXISTS public.verificacion_negocio (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tenant_id TEXT REFERENCES public.tenants(id) ON DELETE CASCADE,
+                    metodo_verificacion VARCHAR(50),
+                    codigo_verificacion VARCHAR(10),
+                    codigo_enviado TIMESTAMP,
+                    verificado BOOLEAN DEFAULT false,
+                    fecha_verificacion TIMESTAMP,
+                    intentos_fallidos INTEGER DEFAULT 0
+                );
+                ''')
 
                 # Tabla de contexto IA por tenant
                 cur.execute('''

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot SaaS - Automatiza tus ventas por WhatsApp</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; }
+        
+        /* Header */
+        .header { background: linear-gradient(135deg, #25D366 0%, #128C7E 100%); color: white; padding: 20px 0; position: fixed; width: 100%; top: 0; z-index: 1000; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+        .nav { display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 24px; font-weight: bold; }
+        .logo span { color: #ffd700; }
+        .nav-links a { color: white; text-decoration: none; margin-left: 30px; font-weight: 500; }
+        .nav-links a:hover { text-decoration: underline; }
+        .btn { display: inline-block; padding: 12px 30px; border-radius: 30px; text-decoration: none; font-weight: bold; transition: all 0.3s; }
+        .btn-primary { background: white; color: #25D366; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+        .btn-outline { border: 2px solid white; color: white; background: transparent; }
+        .btn-outline:hover { background: white; color: #25D366; }
+        
+        /* Hero */
+        .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 120px 0 80px; text-align: center; }
+        .hero h1 { font-size: 48px; margin-bottom: 20px; }
+        .hero p { font-size: 20px; margin-bottom: 30px; opacity: 0.9; }
+        .hero-buttons { display: flex; gap: 20px; justify-content: center; }
+        
+        /* Features */
+        .features { padding: 80px 0; background: #f8f9fa; }
+        .section-title { text-align: center; font-size: 36px; margin-bottom: 50px; color: #333; }
+        .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }
+        .feature-card { background: white; padding: 30px; border-radius: 15px; text-align: center; box-shadow: 0 5px 20px rgba(0,0,0,0.1); transition: transform 0.3s; }
+        .feature-card:hover { transform: translateY(-5px); }
+        .feature-icon { font-size: 48px; margin-bottom: 20px; }
+        .feature-card h3 { margin-bottom: 15px; color: #333; }
+        .feature-card p { color: #666; }
+        
+        /* Pricing */
+        .pricing { padding: 80px 0; background: white; }
+        .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
+        .pricing-card { background: #f8f9fa; padding: 30px; border-radius: 15px; text-align: center; transition: transform 0.3s; }
+        .pricing-card:hover { transform: translateY(-5px); }
+        .pricing-card.featured { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; transform: scale(1.05); }
+        .pricing-card.featured .price { color: #ffd700; }
+        .pricing-card h3 { font-size: 24px; margin-bottom: 15px; }
+        .price { font-size: 36px; font-weight: bold; margin: 20px 0; }
+        .price span { font-size: 16px; font-weight: normal; }
+        .features-list { list-style: none; margin: 20px 0; text-align: left; }
+        .features-list li { padding: 8px 0; display: flex; align-items: center; gap: 10px; }
+        .features-list li:before { content: "✓"; color: #25D366; font-weight: bold; }
+        
+        /* CTA */
+        .cta { background: linear-gradient(135deg, #25D366 0%, #128C7E 100%); color: white; padding: 80px 0; text-align: center; }
+        .cta h2 { font-size: 36px; margin-bottom: 20px; }
+        .cta .btn-primary { background: white; color: #25D366; font-size: 18px; padding: 15px 40px; }
+        
+        /* Footer */
+        .footer { background: #1a1a2e; color: #999; padding: 40px 0; text-align: center; }
+        .footer a { color: #25D366; text-decoration: none; }
+        
+        /* Modal */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; justify-content: center; align-items: center; }
+        .modal-content { background: white; border-radius: 15px; padding: 30px; max-width: 400px; width: 90%; position: relative; }
+        .close { position: absolute; top: 15px; right: 20px; font-size: 28px; cursor: pointer; color: #999; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .error { color: #e74c3c; font-size: 12px; margin-top: 5px; display: none; }
+        .alert { padding: 12px; border-radius: 8px; margin-bottom: 15px; display: none; }
+        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 32px; }
+            .hero-buttons { flex-direction: column; align-items: center; }
+            .pricing-card.featured { transform: none; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <nav class="nav">
+                <div class="logo">WhatsApp<span>Bot</span>SaaS</div>
+                <div class="nav-links">
+                    <a href="#features">Características</a>
+                    <a href="#pricing">Precios</a>
+                    <a href="#" onclick="openLoginModal()">Iniciar Sesión</a>
+                    <a href="#" onclick="openRegisterModal()" class="btn btn-outline" style="padding: 8px 20px;">Registrarse</a>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <section class="hero">
+        <div class="container">
+            <h1>Automatiza tus ventas por WhatsApp con IA</h1>
+            <p>El asistente virtual que atiende a tus clientes 24/7, toma pedidos y aumenta tus ventas</p>
+            <div class="hero-buttons">
+                <a href="#" onclick="openRegisterModal()" class="btn btn-primary">Comenzar Ahora</a>
+                <a href="#features" class="btn btn-outline">Saber Más</a>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">¿Por qué elegirnos?</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>IA Entrenable</h3>
+                    <p>Sube una foto de tu menú y la IA aprende automáticamente tus productos y precios.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💬</div>
+                    <h3>Atención 24/7</h3>
+                    <p>Responde a tus clientes automáticamente incluso cuando duermes.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Dashboard Inteligente</h3>
+                    <p>Analiza tus ventas, productos populares y satisfacción del cliente.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔗</div>
+                    <h3>Pagos Integrados</h3>
+                    <p>Links de pago automáticos con Wompi, Nequi y más.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📈</div>
+                    <h3>Aumenta tus Ventas</h3>
+                    <p>Recupera pedidos perdidos y haz upselling automático.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h3>Seguro y Confiable</h3>
+                    <p>Datos encriptados y backups automáticos diarios.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="pricing" class="pricing">
+        <div class="container">
+            <h2 class="section-title">Planes diseñados para ti</h2>
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <h3>Básico</h3>
+                    <div class="price">$29<span>/mes</span></div>
+                    <ul class="features-list">
+                        <li>Hasta 500 conversaciones/mes</li>
+                        <li>IA básica</li>
+                        <li>Dashboard básico</li>
+                        <li>Soporte email</li>
+                    </ul>
+                    <a href="#" onclick="openRegisterModal()" class="btn btn-primary">Elegir Plan</a>
+                </div>
+                <div class="pricing-card featured">
+                    <h3>Pro</h3>
+                    <div class="price">$79<span>/mes</span></div>
+                    <ul class="features-list">
+                        <li>Conversaciones ilimitadas</li>
+                        <li>IA avanzada entrenable</li>
+                        <li>Dashboard completo</li>
+                        <li>Soporte prioritario 24/7</li>
+                        <li>Múltiples números</li>
+                    </ul>
+                    <a href="#" onclick="openRegisterModal()" class="btn btn-primary">Elegir Plan</a>
+                </div>
+                <div class="pricing-card">
+                    <h3>Empresa</h3>
+                    <div class="price">$199<span>/mes</span></div>
+                    <ul class="features-list">
+                        <li>Todo lo de Pro</li>
+                        <li>API personalizada</li>
+                        <li>Cuenta dedicada</li>
+                        <li>SLA 99.9%</li>
+                        <li>Entrenamiento personalizado</li>
+                    </ul>
+                    <a href="#" onclick="openRegisterModal()" class="btn btn-primary">Contactar</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta">
+        <div class="container">
+            <h2>¿Listo para vender más?</h2>
+            <p>Únete a más de 500 negocios que ya están usando WhatsApp Bot SaaS</p>
+            <a href="#" onclick="openRegisterModal()" class="btn btn-primary" style="margin-top: 20px;">Regístrate Gratis</a>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2026 WhatsApp Bot SaaS - Todos los derechos reservados</p>
+            <p style="margin-top: 10px;">
+                <a href="/terminos">Términos y Condiciones</a> | 
+                <a href="/privacidad">Política de Privacidad</a> |
+                <a href="/politicas-uso">Políticas de Uso</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Modal de Login -->
+    <div id="loginModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeLoginModal()">&times;</span>
+            <h2>Iniciar Sesión</h2>
+            <div id="loginAlert" class="alert"></div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="loginEmail" required>
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="loginPassword" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Ingresar</button>
+            </form>
+            <p style="margin-top: 15px; text-align: center;">
+                ¿No tienes cuenta? <a href="#" onclick="closeLoginModal(); openRegisterModal()">Regístrate aquí</a>
+            </p>
+        </div>
+    </div>
+
+    <!-- Modal de Registro -->
+    <div id="registerModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeRegisterModal()">&times;</span>
+            <h2>Crear Cuenta</h2>
+            <div id="registerAlert" class="alert"></div>
+            <form id="registerForm">
+                <div class="form-group">
+                    <label>Nombre completo</label>
+                    <input type="text" id="regNombre" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="regEmail" required>
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="tel" id="regTelefono">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="regPassword" required>
+                </div>
+                <div class="form-group">
+                    <label>Confirmar contraseña</label>
+                    <input type="password" id="regConfirmPassword" required>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="aceptaTerminos" required>
+                        Acepto los <a href="/terminos" target="_blank">términos y condiciones</a>
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Registrarse</button>
+            </form>
+            <p style="margin-top: 15px; text-align: center;">
+                ¿Ya tienes cuenta? <a href="#" onclick="closeRegisterModal(); openLoginModal()">Inicia sesión aquí</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Modal functions
+        function openLoginModal() { document.getElementById('loginModal').style.display = 'flex'; }
+        function closeLoginModal() { document.getElementById('loginModal').style.display = 'none'; }
+        function openRegisterModal() { document.getElementById('registerModal').style.display = 'flex'; }
+        function closeRegisterModal() { document.getElementById('registerModal').style.display = 'none'; }
+        
+        // Close modal clicking outside
+        window.onclick = function(event) {
+            if (event.target == document.getElementById('loginModal')) closeLoginModal();
+            if (event.target == document.getElementById('registerModal')) closeRegisterModal();
+        }
+        
+        // Login form
+        document.getElementById('loginForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const alertDiv = document.getElementById('loginAlert');
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('loginEmail').value,
+                        password: document.getElementById('loginPassword').value
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    localStorage.setItem('usuario_id', result.usuario_id);
+                    localStorage.setItem('email', result.email);
+                    alertDiv.className = 'alert alert-success';
+                    alertDiv.style.display = 'block';
+                    alertDiv.innerHTML = '✅ Login exitoso. Redirigiendo...';
+                    setTimeout(() => { window.location.href = '/dashboard'; }, 1500);
+                } else {
+                    alertDiv.className = 'alert alert-error';
+                    alertDiv.style.display = 'block';
+                    alertDiv.innerHTML = '❌ ' + result.error;
+                }
+            } catch (error) {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ Error de conexión';
+            }
+        };
+        
+        // Register form
+        document.getElementById('registerForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const alertDiv = document.getElementById('registerAlert');
+            
+            const password = document.getElementById('regPassword').value;
+            const confirm = document.getElementById('regConfirmPassword').value;
+            
+            if (password !== confirm) {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ Las contraseñas no coinciden';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        nombre_completo: document.getElementById('regNombre').value,
+                        email: document.getElementById('regEmail').value,
+                        telefono: document.getElementById('regTelefono').value,
+                        password: password
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alertDiv.className = 'alert alert-success';
+                    alertDiv.style.display = 'block';
+                    alertDiv.innerHTML = '✅ Registro exitoso. Revisa tu email para verificar tu cuenta.';
+                    setTimeout(() => { closeRegisterModal(); openLoginModal(); }, 2000);
+                } else {
+                    alertDiv.className = 'alert alert-error';
+                    alertDiv.style.display = 'block';
+                    alertDiv.innerHTML = '❌ ' + result.error;
+                }
+            } catch (error) {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ Error de conexión';
+            }
+        };
+    </script>
+</body>
+</html>
