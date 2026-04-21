@@ -13,7 +13,7 @@ def register_webhook_routes(app):
             token = request.args.get('hub.verify_token')
             challenge = request.args.get('hub.challenge')
             
-            verify_token = "EAAUn9pg7tjIBRX8YA5FtuZAFgpViSjzHzreonENpEnOhoAU9RYCYr6JIVaLA0tFvVzF15Iw4E6YEeZAnGoSEmhHqcBAPX6Cs2gkbkPoq0kxYfYzx1ZAS8SzLo9mjshwSxKTgeKjhi5YfRWrC8AiN4QuhwMPaSsD8wkYZCpCVuiG0ZAZA4kOI7hfv0T3404G8EZAGgQh31MNaQGlyiQJli1dtU49MmNWZC3W8ivaRRMDKEt8kHd7Ev34YZC3hnVyCZCQCsukGTwgmYDPeBqJdW32gKsDgZDZD"
+            verify_token = "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6"
             
             if mode == 'subscribe' and token == verify_token:
                 logger.info("✅ Webhook verificado correctamente")
