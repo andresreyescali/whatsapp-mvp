@@ -1,128 +1,30 @@
-{% extends "base.html" %}
-
-{% block title %}Negocios Registrados - WhatsApp Bot SaaS{% endblock %}
-
-{% block content %}
-<div class="card">
-    <h2>📋 Negocios Registrados</h2>
-    <p>Total: <strong id="totalCount">{{ tenants|length }}</strong> negocios</p>
+@app.route('/admin/update_tenant/<tenant_id>', methods=['PUT', 'OPTIONS'])
+def update_tenant(tenant_id):
+    """Actualiza los datos de un tenant"""
+    if request.method == 'OPTIONS':
+        return '', 200
     
-    <div style="overflow-x: auto;">
-        <table style="width: 100%;">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Nombre</th>
-                    <th>Phone ID</th>
-                    <th>Fecha</th>
-                    <th>Panel</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody id="tenantsTable">
-                {% for t in tenants %}
-                <tr id="row-{{ t.id }}">
-                    <td><code>{{ t.id }}</code></td>
-                    <td><strong>{{ t.nombre }}</strong></td>
-                    <td>{{ t.phone_id }}</td>
-                    <td>{{ t.created_at }}</td>
-                    <td>
-                        <a href="/admin/menu?tenant_id={{ t.id }}" class="btn btn-small">🎛️ Gestionar</a>
-                    </td>
-                    <td>
-                        <button class="btn btn-danger btn-small" onclick="confirmDelete('{{ t.id }}', '{{ t.nombre|escape }}')">🗑️ Eliminar</button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<!-- Diálogo de confirmación -->
-<div id="confirmDialog" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1000; min-width: 350px;">
-    <h3>⚠️ Confirmar eliminación</h3>
-    <p id="confirmMessage">¿Estás seguro de eliminar este negocio?</p>
-    <p style="color: red; font-size: 12px; margin-top: 10px;">Esta acción eliminará TODOS los datos del negocio (menú, pedidos, configuración). No se puede deshacer.</p>
-    <div style="margin-top: 20px; text-align: right;">
-        <button class="btn" onclick="closeDialog()">Cancelar</button>
-        <button class="btn btn-danger" id="confirmDeleteBtn">Eliminar</button>
-    </div>
-</div>
-<div id="overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"></div>
-
-<script>
-    let deleteTenantId = null;
-    
-    function confirmDelete(tenantId, tenantName) {
-        deleteTenantId = tenantId;
-        document.getElementById('confirmMessage').innerHTML = `¿Estás seguro de eliminar el negocio <strong>${tenantName}</strong>?`;
-        document.getElementById('overlay').style.display = 'block';
-        document.getElementById('confirmDialog').style.display = 'block';
-    }
-    
-    function closeDialog() {
-        deleteTenantId = null;
-        document.getElementById('overlay').style.display = 'none';
-        document.getElementById('confirmDialog').style.display = 'none';
-    }
-    
-    document.getElementById('confirmDeleteBtn').onclick = async function() {
-        if (!deleteTenantId) return;
+    try:
+        data = request.json
+        logger.info(f'Actualizando tenant {tenant_id}: {data}')
         
-        const btn = document.getElementById('confirmDeleteBtn');
-        const originalText = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = 'Eliminando...';
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    UPDATE public.tenants 
+                    SET nombre = %s, phone_id = %s, token = %s, usar_ia = %s
+                    WHERE id = %s
+                ''', (
+                    data.get('nombre'),
+                    data.get('phone_id'),
+                    data.get('token'),
+                    data.get('usar_ia', False),
+                    tenant_id
+                ))
+                conn.commit()
         
-        try {
-            console.log('Eliminando tenant:', deleteTenantId);
-            
-            const response = await fetch(`/admin/delete_tenant/${deleteTenantId}`, {
-                method: 'DELETE',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            console.log('Response status:', response.status);
-            
-            // Verificar si la respuesta es JSON
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                const result = await response.json();
-                
-                if (response.ok) {
-                    // Eliminar la fila de la tabla
-                    const row = document.getElementById(`row-${deleteTenantId}`);
-                    if (row) row.remove();
-                    
-                    // Actualizar contador
-                    const totalRows = document.querySelectorAll('#tenantsTable tr').length;
-                    document.getElementById('totalCount').innerText = totalRows;
-                    
-                    showAlert('success', '✅ Negocio eliminado correctamente');
-                } else {
-                    showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
-                }
-            } else {
-                // Si no es JSON, mostrar el error como texto
-                const text = await response.text();
-                console.error('Respuesta no JSON:', text.substring(0, 200));
-                showAlert('error', '❌ Error del servidor. Revisa los logs.');
-            }
-        } catch (error) {
-            console.error('Error en la petición:', error);
-            showAlert('error', '❌ Error de conexión: ' + error.message);
-        } finally {
-            btn.disabled = false;
-            btn.textContent = originalText;
-            closeDialog();
-        }
-    };
-    
-    // Cerrar diálogo al hacer clic en overlay
-    document.getElementById('overlay').onclick = closeDialog;
-</script>
-{% endblock %}
+        return jsonify({'status': 'ok', 'message': 'Tenant actualizado'}), 200
+        
+    except Exception as e:
+        logger.error(f'Error actualizando tenant: {str(e)}')
+        return jsonify({'error': str(e)}), 500
