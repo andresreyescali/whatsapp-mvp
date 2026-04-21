@@ -60,28 +60,28 @@ class SchemaManager:
             ''')
     
     def get_menu(self, tenant_id: str):
-        """Obtiene el menú completo de un tenant - Sin dict_row"""
+        """Obtiene el menú completo del tenant (incluyendo no disponibles)"""
         try:
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"SELECT id, nombre, descripcion, precio, categoria, disponible FROM {tenant_id}.productos WHERE disponible = true ORDER BY categoria, nombre")
-                    rows = cur.fetchall()
-                    # Convertir manualmente a lista de diccionarios
-                    productos = []
-                    for row in rows:
-                        productos.append({
-                            'id': row[0],
-                            'nombre': row[1],
-                            'descripcion': row[2],
-                            'precio': row[3],
-                            'categoria': row[4],
-                            'disponible': row[5]
-                        })
-                    return productos
+                    # Quitar el filtro "disponible = true" para que traiga todos
+                    cur.execute(f"SELECT id, nombre, descripcion, precio, categoria, disponible FROM {tenant_id}.productos ORDER BY categoria, nombre")
+                rows = cur.fetchall()
+                productos = []
+                for row in rows:
+                    productos.append({
+                        'id': row[0],
+                        'nombre': row[1],
+                        'descripcion': row[2],
+                        'precio': row[3],
+                        'categoria': row[4],
+                        'disponible': row[5]  # Incluir el estado disponible
+                    })
+                return productos
         except Exception as e:
             logger.error(f'Error obteniendo menú para {tenant_id}: {e}')
-            return []
-    
+        return []
+        
     def add_product(self, tenant_id: str, nombre: str, precio: int, descripcion: str = "", categoria: str = "general"):
         """Agrega un producto al menú del tenant"""
         try:
