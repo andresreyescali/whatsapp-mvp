@@ -15,7 +15,7 @@ def register_webhook_routes(app):
             
             logger.info(f"GET params - mode: {mode}, token: {token[:20] if token else 'None'}..., challenge: {challenge}")
             
-            verify_token = "EAAUn9pg7tjIBRbEZCLyIZBybdyra8ZAnKZB07QnmtU4UOUkibalwR2f049diZBZBxZAUisdC83gJ9e0kby9FHVN9NeRDSmKiGVhfYNmCkj6ZCcVZAlvSHZAWkGSwhfeKhHgQY0RZAbEjf1t4UB7md7nXsdOnPJh1aYT7NA2WgZAxOmAQusyD6ZAL0Plr70oC2Bni0IkOq8AZDZD"
+            verify_token = "EAAUn9pg7tjIBRAIeJcCwfuS8npQDT4bZCTFZCQjLz9ge6ZAcQPHCZAZCaPWkglZBf7FgvRCYVlgZCjJCpdNZBZAA23l95ABJhE1mnq8eFjy7jBC6kDZCSR7VzC2mZB7x5ZBe8pzpjg3wQGkji4flEjZBuAxnSdUs3r1yNhcZA0ZBJXx0DyWtbmxNP47X5mzTZBP0bXZCjDevZAoyPO9BwheuhbPVZC0jlspVpWafQ6mVcZBM06quFtv6"
             
             # Solo responder a la verificación de Meta
             if mode == 'subscribe' and token is not None and token == verify_token:
