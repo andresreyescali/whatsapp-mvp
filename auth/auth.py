@@ -1,5 +1,5 @@
-import hashlib
 import uuid
+import hashlib
 import secrets
 import re
 from datetime import datetime
@@ -50,24 +50,30 @@ class AuthManager:
         # Crear usuario
         usuario_id = str(uuid.uuid4())
         password_hash = self.hash_password(password)
-        codigo_verificacion = secrets.token_hex(4)
+        codigo_verificacion = secrets.token_hex(4).upper()
         
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    INSERT INTO public.usuarios (id, email, password_hash, nombre_completo, telefono, codigo_verificacion)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                ''', (usuario_id, email, password_hash, nombre_completo, telefono, codigo_verificacion))
-            conn.commit()
-        
-        logger.info(f'Nuevo usuario registrado: {email}')
-        
-        return {
-            'success': True,
-            'usuario_id': usuario_id,
-            'email': email,
-            'codigo_verificacion': codigo_verificacion
-        }
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('''
+                        INSERT INTO public.usuarios (id, email, password_hash, nombre_completo, telefono, codigo_verificacion)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    ''', (usuario_id, email, password_hash, nombre_completo, telefono, codigo_verificacion))
+                conn.commit()
+            
+            logger.info(f'Nuevo usuario registrado: {email}')
+            
+            return {
+                'success': True,
+                'usuario_id': usuario_id,
+                'email': email,
+                'codigo_verificacion': codigo_verificacion
+            }
+        except Exception as e:
+            logger.error(f'Error registrando usuario: {e}')
+            if 'unique constraint' in str(e).lower() or 'duplicate key' in str(e).lower():
+                return {'success': False, 'error': 'El email ya está registrado'}
+            return {'success': False, 'error': f'Error al registrar usuario'}
     
     def login(self, email: str, password: str) -> dict:
         """Autentica un usuario"""
@@ -111,14 +117,14 @@ class AuthManager:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('''
-                    SELECT t.id, t.nombre, t.phone_id, un.rol, vn.verificado
+                    SELECT t.id, t.nombre, t.phone_id, un.rol, COALESCE(vn.verificado, false) as verificado
                     FROM public.usuario_negocio un
                     JOIN public.tenants t ON un.tenant_id = t.id
                     LEFT JOIN public.verificacion_negocio vn ON t.id = vn.tenant_id
                     WHERE un.usuario_id = %s
                 ''', (usuario_id,))
                 rows = cur.fetchall()
-                return [{'id': r[0], 'nombre': r[1], 'phone_id': r[2], 'rol': r[3], 'verificado': r[4] or False} for r in rows]
+                return [{'id': r[0], 'nombre': r[1], 'phone_id': r[2], 'rol': r[3], 'verificado': r[4]} for r in rows]
     
     def crear_negocio(self, usuario_id: str, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante') -> dict:
         """Crea un nuevo negocio para un usuario con verificación pendiente"""
@@ -198,7 +204,8 @@ class AuthManager:
                         WHERE tenant_id = %s
                     ''', (tenant_id,))
                     conn.commit()
-                    return {'success': False, 'error': f'Código incorrecto. Te quedan {4 - intentos} intentos.'}
+                    restantes = 4 - intentos
+                    return {'success': False, 'error': f'Código incorrecto. Te quedan {restantes} intentos.'}
     
     def cambiar_password(self, usuario_id: str, password_actual: str, password_nueva: str) -> dict:
         """Cambia la contraseña del usuario"""
