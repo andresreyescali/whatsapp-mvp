@@ -33,7 +33,7 @@
                         <input type="text" class="edit-input" value="{{ t.phone_id }}" style="display:none; width:100%;">
                     </td>
                     <td class="tenant-token">
-                        <span class="display-value" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; display:inline-block;">{{ t.token[:30] }}...</span>
+                        <span class="display-value" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; display:inline-block;">{{ t.token[:30] if t.token else 'N/A' }}...</span>
                         <input type="text" class="edit-input" value="{{ t.token }}" style="display:none; width:250px;">
                     </td>
                     <td class="tenant-created_at">{{ t.created_at }}</td>
@@ -44,10 +44,12 @@
                             <option value="false" {% if not t.usar_ia %}selected{% endif %}>Desactivada</option>
                         </select>
                     </td>
-                    <td>
+                    <td class="tenant-actions">
                         <button class="btn-edit btn-small" onclick="editRow(this)">✏️ Editar</button>
                         <button class="btn-save btn-small btn-success" onclick="saveRow(this)" style="display:none;">💾 Guardar</button>
                         <button class="btn-cancel btn-small" onclick="cancelEdit(this)" style="display:none;">❌ Cancelar</button>
+                        <a href="/admin/menu?tenant_id={{ t.id }}" class="btn-menu btn-small">🎛️ Menú</a>
+                        <a href="/admin/train/{{ t.id }}" class="btn-train btn-small">🤖 Entrenar</a>
                         <button class="btn-delete btn-danger btn-small" onclick="confirmDelete('{{ t.id }}', '{{ t.nombre|escape }}')">🗑️ Eliminar</button>
                     </td>
                 </tr>
@@ -77,6 +79,8 @@
         border: none;
         border-radius: 5px;
         cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
     }
     .btn-edit {
         background: #ffc107;
@@ -99,6 +103,20 @@
     .btn-cancel:hover {
         background: #5a6268;
     }
+    .btn-menu {
+        background: #25D366;
+        color: white;
+    }
+    .btn-menu:hover {
+        background: #128C7E;
+    }
+    .btn-train {
+        background: #667eea;
+        color: white;
+    }
+    .btn-train:hover {
+        background: #5a67d8;
+    }
     .btn-delete {
         background: #dc3545;
         color: white;
@@ -112,7 +130,7 @@
     .editing .edit-input {
         display: inline-block !important;
     }
-    .editing .btn-edit, .editing .btn-delete {
+    .editing .btn-edit, .editing .btn-menu, .editing .btn-train, .editing .btn-delete {
         display: none;
     }
     .editing .btn-save, .editing .btn-cancel {
@@ -125,6 +143,9 @@
         padding: 5px;
         border: 1px solid #ddd;
         border-radius: 4px;
+    }
+    .tenant-actions {
+        white-space: nowrap;
     }
 </style>
 
@@ -264,6 +285,7 @@
         }
     };
     
+    // Cerrar diálogo al hacer clic en overlay
     document.getElementById('overlay').onclick = closeDialog;
 </script>
 {% endblock %}

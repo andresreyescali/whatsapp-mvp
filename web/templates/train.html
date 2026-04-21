@@ -3,9 +3,12 @@
 {% block title %}Entrenar IA - {{ tenant_id }}{% endblock %}
 
 {% block content %}
-<div class="card">
-    <h2>🤖 Entrenar Asistente IA</h2>
-    <p>Sube una imagen de tu menú o escribe la información de tu negocio para que la IA aprenda a atender pedidos correctamente.</p>
+<div class="card" style="margin-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">🤖 Entrenar Asistente IA</h2>
+        <a href="/admin/menu?tenant_id={{ tenant_id }}" class="btn">📋 Volver al Menú</a>
+    </div>
+    <p style="margin-top: 10px;">Sube una imagen de tu menú o escribe la información de tu negocio para que la IA aprenda a atender pedidos correctamente.</p>
 </div>
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">

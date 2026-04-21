@@ -15,7 +15,12 @@
 </div>
 
 <div class="card">
-    <h2>➕ Agregar Producto</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="margin: 0;">➕ Agregar Producto</h2>
+        <a href="/admin/train/{{ tenant.id }}" class="btn" style="background: #667eea;">
+            🤖 Entrenar IA
+        </a>
+    </div>
     <form id="productForm">
         <div class="form-group">
             <label>Nombre del producto *</label>
@@ -44,7 +49,12 @@
 </div>
 
 <div class="card">
-    <h2>📋 Mi Menú</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="margin: 0;">📋 Mi Menú</h2>
+        <a href="/admin/train/{{ tenant.id }}" class="btn" style="background: #667eea;">
+            🤖 Entrenar IA
+        </a>
+    </div>
     <div id="menuContainer" class="loading">Cargando menú...</div>
 </div>
 
