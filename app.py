@@ -101,13 +101,6 @@ def super_admin_delete_usuario(usuario_id):
     result = auth_manager.eliminar_usuario(usuario_id)
     return jsonify(result)
 
-@app.route('/super/admin/dashboard')
-def super_admin_dashboard():
-    """Panel de super administrador"""
-    if session.get('rol_sistema') != 'super_admin':
-        return redirect('/')
-    
-    return render_template('super_admin.html')
 
 # ==================== AUTH ENDPOINTS ====================
 
