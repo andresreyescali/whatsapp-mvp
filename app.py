@@ -2,6 +2,7 @@ import os
 import json
 import secrets
 import time
+import requests
 from flask import Flask, jsonify, request, render_template, session, redirect
 from core.config import config
 from core.database import db_manager
@@ -729,7 +730,48 @@ def debug_session():
         'usuario_id': session.get('usuario_id')
     })
 
+@app.route('/debug/send-test-message', methods=['GET'])
+def send_test_message():
+    """Envía un mensaje de prueba al número configurado"""
+    # Obtener el primer tenant
+    tenants = tenant_repo.get_all()
+    if not tenants:
+        return jsonify({'error': 'No hay tenants'}), 404
+    
+    tenant = tenants[0]
+    numero = "573155692656"  # Tu número de prueba
+    
+    from whatsapp.client import whatsapp_client
+    result = whatsapp_client.send_message(tenant, numero, "Este es un mensaje de prueba desde el sistema")
+    
+    return jsonify({
+        'success': result,
+        'tenant': tenant['nombre'],
+        'phone_id': tenant['phone_id'],
+        'numero_enviado': numero
+    })
 
+@app.route('/debug/check-token/<tenant_id>', methods=['GET'])
+def check_token(tenant_id):
+    """Verifica si el token de WhatsApp es válido"""
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant no encontrado'}), 404
+    
+    # Probar obtener información del número
+    url = f"https://graph.facebook.com/v18.0/{tenant['phone_id']}"
+    headers = {"Authorization": f"Bearer {tenant['token']}"}
+    
+    try:
+        response = requests.get(url, headers=headers)
+        return jsonify({
+            'status_code': response.status_code,
+            'response': response.json() if response.status_code == 200 else response.text,
+            'token_valido': response.status_code == 200
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)

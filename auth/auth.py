@@ -211,55 +211,33 @@ class AuthManager:
         }
     
     def enviar_codigo_whatsapp(self, phone_id: str, token: str, codigo: str, telefono_cliente: str) -> bool:
-        """Envía el código de verificación por WhatsApp al número del negocio"""
-        # Formatear el teléfono correctamente
-        telefono_formateado = self.formatear_telefono(telefono_cliente)
-        if not telefono_formateado:
-            logger.error(f'Teléfono inválido: {telefono_cliente}')
-            return False
+        """Envía el código de verificación por WhatsApp"""
+        from whatsapp.client import whatsapp_client
         
-        logger.info(f'Enviando código a teléfono formateado: {telefono_formateado}')
-        
-        url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
+        # Crear un objeto tenant simulado para el envío
+        tenant = {
+            'phone_id': phone_id,
+            'token': token
         }
         
         mensaje = f"""*🔐 CÓDIGO DE VERIFICACIÓN*
 
-Hola, gracias por registrar tu negocio en WhatsApp Bot SaaS.
+    Hola, gracias por registrar tu negocio en WhatsApp Bot SaaS.
 
-Tu código de verificación es:
+    Tu código de verificación es:
 
-*{codigo}*
+    *{codigo}*
 
-Ingresa este código en el panel de control para activar tu asistente de ventas.
+    Ingresa este código en el panel de control para activar tu asistente de ventas.
 
-Este código expira en 10 minutos.
+    Este código expira en 10 minutos.
 
-¿No solicitaste este código? Ignora este mensaje.
+    ¿No solicitaste este código? Ignora este mensaje.
 
-© WhatsApp Bot SaaS - Automatiza tus ventas"""
+    © WhatsApp Bot SaaS - Automatiza tus ventas"""
         
-        data = {
-            "messaging_product": "whatsapp",
-            "to": telefono_formateado,
-            "type": "text",
-            "text": {"body": mensaje}
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=data, timeout=30)
-            if response.status_code == 200:
-                logger.info(f'Código de verificación enviado a {telefono_formateado}')
-                return True
-            else:
-                logger.error(f'Error enviando código: {response.status_code} - {response.text}')
-                return False
-        except Exception as e:
-            logger.error(f'Error enviando código por WhatsApp: {e}')
-            return False
+        # Enviar el mensaje
+        return whatsapp_client.send_message(tenant, telefono_cliente, mensaje)
     
     def verificar_negocio(self, tenant_id: str, codigo: str) -> dict:
         """Verifica el código ingresado por el usuario (con expiración)"""
