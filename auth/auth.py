@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from core.database import db_manager
 from core.logger import logger
+import requests
 
 class AuthManager:
     """Gestión de autenticación de usuarios"""
@@ -32,6 +33,50 @@ class AuthManager:
         patron = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         return re.match(patron, email) is not None
     
+    def enviar_codigo_whatsapp(self, phone_id: str, token: str, codigo: str, telefono_cliente: str) -> bool:
+        """Envía el código de verificación por WhatsApp al número del negocio"""
+        url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+                }
+    
+        # Mensaje con el código de verificación
+        mensaje = f"""*🔐 CÓDIGO DE VERIFICACIÓN*
+
+        Hola, gracias por registrar tu negocio en WhatsApp Bot SaaS.
+
+        Tu código de verificación es:
+
+        *{codigo}*
+
+        Ingresa este código en el panel de control para activar tu asistente de ventas.
+
+        Este código expirará en 10 minutos.
+
+        ¿No solicitaste este código? Ignora este mensaje.
+
+        © WhatsApp Bot SaaS - Automatiza tus ventas"""
+    
+        data = {
+            "messaging_product": "whatsapp",
+            "to": telefono_cliente,
+            "type": "text",
+            "text": {"body": mensaje}
+                }
+    
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            if response.status_code == 200:
+                logger.info(f'Código de verificación enviado a {telefono_cliente}')
+                return True
+            else:
+               logger.error(f'Error enviando código: {response.status_code} - {response.text}')
+            return False
+        except Exception as e:
+            logger.error(f'Error enviando código por WhatsApp: {e}')
+        return False
+
     def registrar_usuario(self, email: str, password: str, nombre_completo: str = None, telefono: str = None) -> dict:
         """Registra un nuevo usuario"""
         if not self.validar_email(email):
@@ -39,6 +84,24 @@ class AuthManager:
         
         if len(password) < 6:
             return {'success': False, 'error': 'La contraseña debe tener al menos 6 caracteres'}
+        
+        # ========== PASO 7: Validar que el teléfono sea obligatorio ==========
+        if not telefono:
+            return {'success': False, 'error': 'El número de teléfono es obligatorio para la verificación del negocio'}
+        
+        # Limpiar y validar formato de teléfono
+        telefono_limpio = telefono.strip().replace(' ', '').replace('-', '')
+        if not telefono_limpio.startswith('+'):
+            # Si no tiene código de país, asumir Colombia (+57)
+            if telefono_limpio.startswith('3'):
+                telefono_limpio = '+57' + telefono_limpio
+            else:
+                telefono_limpio = '+' + telefono_limpio
+        
+        # Validar longitud mínima (10 dígitos + código país)
+        if len(telefono_limpio) < 10:
+            return {'success': False, 'error': 'El número de teléfono no es válido'}
+        # ======================================================================
         
         # Verificar si el email ya existe
         with db_manager.get_connection() as conn:
@@ -58,10 +121,10 @@ class AuthManager:
                     cur.execute('''
                         INSERT INTO public.usuarios (id, email, password_hash, nombre_completo, telefono, codigo_verificacion)
                         VALUES (%s, %s, %s, %s, %s, %s)
-                    ''', (usuario_id, email, password_hash, nombre_completo, telefono, codigo_verificacion))
+                    ''', (usuario_id, email, password_hash, nombre_completo, telefono_limpio, codigo_verificacion))
                 conn.commit()
             
-            logger.info(f'Nuevo usuario registrado: {email}')
+            logger.info(f'Nuevo usuario registrado: {email} con teléfono {telefono_limpio}')
             
             return {
                 'success': True,
@@ -74,6 +137,7 @@ class AuthManager:
             if 'unique constraint' in str(e).lower() or 'duplicate key' in str(e).lower():
                 return {'success': False, 'error': 'El email ya está registrado'}
             return {'success': False, 'error': f'Error al registrar usuario'}
+    
     
     def login(self, email: str, password: str) -> dict:
         """Autentica un usuario"""
@@ -130,65 +194,103 @@ class AuthManager:
         """Crea un nuevo negocio para un usuario con verificación pendiente"""
         from tenants.repository import tenant_repo
         from tenants.schema_manager import schema_manager
-        
+    
         # Verificar que el nombre del negocio no existe
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id FROM public.tenants WHERE nombre = %s", (nombre,))
                 if cur.fetchone():
                     return {'success': False, 'error': 'Ya existe un negocio con ese nombre'}
-        
+    
         # Crear tenant
         tenant = tenant_repo.create(nombre, phone_id, token, tipo_negocio)
         schema_manager.create_tenant_schema(tenant['id'], tipo_negocio)
-        
+    
         # Asociar usuario al negocio
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
+                # Obtener rol owner
+                cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
+                rol_owner_id = cur.fetchone()[0]
+            
                 cur.execute('''
-                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol)
-                    VALUES (%s, %s, %s)
-                ''', (usuario_id, tenant['id'], 'owner'))
-            conn.commit()
-        
-        # Crear registro de verificación
-        codigo_verificacion = secrets.token_hex(3).upper()
+                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por)
+                    VALUES (%s, %s, %s, %s)
+                    ''', (usuario_id, tenant['id'], rol_owner_id, usuario_id))
+                conn.commit()
+    
+        # Crear registro de verificación con código
+        import secrets
+        codigo_verificacion = secrets.token_hex(3).upper()  # Ej: "A3F9K2"
+    
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('''
-                    INSERT INTO public.verificacion_negocio (tenant_id, metodo_verificacion, codigo_verificacion, codigo_enviado)
+                    INSERT INTO public.verificacion_negocio 
+                    (tenant_id, metodo_verificacion, codigo_verificacion, codigo_enviado)
                     VALUES (%s, %s, %s, NOW())
-                ''', (tenant['id'], 'codigo_verificacion', codigo_verificacion))
+                ''', (tenant['id'], 'whatsapp', codigo_verificacion))
             conn.commit()
+    
+        # Obtener el teléfono del usuario (dueño del negocio)
+        telefono_usuario = None
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT telefono FROM public.usuarios WHERE id = %s", (usuario_id,))
+                row = cur.fetchone()
+                if row:
+                    telefono_usuario = row[0]
+    
+        # Enviar código por WhatsApp (si tenemos el token y el teléfono)
+        codigo_enviado = False
+        if telefono_usuario and token and phone_id:
+            # Formatear número (asegurar que tenga código de país)
+            if not telefono_usuario.startswith('+'):
+                telefono_usuario = '+' + telefono_usuario
         
+            codigo_enviado = self.enviar_codigo_whatsapp(phone_id, token, codigo_verificacion, telefono_usuario)
+    
         logger.info(f'Nuevo negocio creado: {nombre} por usuario {usuario_id}')
-        
+    
         return {
-            'success': True,
-            'tenant_id': tenant['id'],
-            'nombre': nombre,
-            'codigo_verificacion': codigo_verificacion
-        }
+        'success': True,
+        'tenant_id': tenant['id'],
+        'nombre': nombre,
+        'codigo_verificacion': codigo_verificacion,
+        'codigo_enviado': codigo_enviado,
+        'mensaje': 'Código de verificación enviado a tu WhatsApp' if codigo_enviado else 'Código de verificación generado. Por favor, ingrésalo manualmente.'
+    }
     
     def verificar_negocio(self, tenant_id: str, codigo: str) -> dict:
-        """Verifica que el negocio pertenece al usuario"""
+        """Verifica el código ingresado por el usuario (con expiración)"""
+        from datetime import datetime, timedelta
+    
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('''
-                    SELECT id, intentos_fallidos, codigo_verificacion, codigo_enviado
+                    SELECT id, intentos_fallidos, codigo_verificacion, verificado, codigo_enviado
                     FROM public.verificacion_negocio WHERE tenant_id = %s
                 ''', (tenant_id,))
                 row = cur.fetchone()
-                
+            
                 if not row:
                     return {'success': False, 'error': 'Negocio no encontrado'}
-                
-                intentos = row[1]
+            
+                intentos = row[1] or 0
                 codigo_guardado = row[2]
-                
+                ya_verificado = row[3]
+                fecha_envio = row[4]
+            
+                if ya_verificado:
+                    return {'success': False, 'error': 'El negocio ya está verificado'}
+            
+                # Verificar expiración (10 minutos)
+                if fecha_envio and datetime.now() - fecha_envio > timedelta(minutes=10):
+                    return {'success': False, 'error': 'El código ha expirado. Por favor, solicita uno nuevo.'}
+            
                 if intentos >= 5:
-                    return {'success': False, 'error': 'Demasiados intentos fallidos. Contacta a soporte.'}
-                
+                    return {'success': False, 'error': 'Demasiados intentos fallidos. Solicita un nuevo código.'}
+            
                 if codigo.upper() == codigo_guardado:
                     cur.execute('''
                         UPDATE public.verificacion_negocio 
@@ -198,14 +300,16 @@ class AuthManager:
                     conn.commit()
                     return {'success': True, 'message': 'Negocio verificado exitosamente'}
                 else:
+                    nuevos_intentos = intentos + 1
                     cur.execute('''
                         UPDATE public.verificacion_negocio 
-                        SET intentos_fallidos = intentos_fallidos + 1
+                        SET intentos_fallidos = %s
                         WHERE tenant_id = %s
-                    ''', (tenant_id,))
+                    ''', (nuevos_intentos, tenant_id))
                     conn.commit()
-                    restantes = 4 - intentos
-                    return {'success': False, 'error': f'Código incorrecto. Te quedan {restantes} intentos.'}
+                
+                    restantes = 5 - nuevos_intentos
+                    return {'success': False, 'error': f'Código incorrecto. Te quedan {restantes} intentos.'}    
     
     def cambiar_password(self, usuario_id: str, password_actual: str, password_nueva: str) -> dict:
         """Cambia la contraseña del usuario"""

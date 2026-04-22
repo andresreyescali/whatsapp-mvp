@@ -101,21 +101,25 @@
     </div>
 </div>
 
-<!-- Modal de verificación -->
+<!-- Modal de verificación actualizado -->
 <div id="verificacionModal" class="modal">
     <div class="modal-content">
         <span class="close" onclick="closeVerificacionModal()">&times;</span>
         <h2>Verificar Negocio</h2>
-        <p>Para verificar que este negocio te pertenece, ingresa el código de verificación.</p>
+        <p>Hemos enviado un código de verificación a tu WhatsApp. Ingresa el código a continuación.</p>
         <div id="verificacionAlert" class="alert" style="display:none"></div>
         <form id="verificacionForm">
             <input type="hidden" id="verifTenantId">
             <div class="form-group">
                 <label>Código de verificación</label>
-                <input type="text" id="verifCodigo" placeholder="Ej: ABC123" required>
+                <input type="text" id="verifCodigo" placeholder="Ej: A3F9K2" required autocomplete="off">
+                <small>El código expira en 10 minutos</small>
             </div>
             <button type="submit" class="btn btn-primary" style="width:100%">Verificar</button>
         </form>
+        <div style="text-align: center; margin-top: 15px;">
+            <a href="#" onclick="reenviarCodigo()" id="reenviarLink">¿No recibiste el código? Reenviar</a>
+        </div>
     </div>
 </div>
 
@@ -377,12 +381,137 @@
         currentTenantId = tenantId;
         document.getElementById('verifTenantId').value = tenantId;
         document.getElementById('verificacionModal').style.display = 'flex';
+        document.getElementById('verifCodigo').value = '';
     }
     
     function closeVerificacionModal() {
         document.getElementById('verificacionModal').style.display = 'none';
         document.getElementById('verifCodigo').value = '';
         document.getElementById('verificacionAlert').style.display = 'none';
+    }
+    
+    // ==================== REGISTRO DE NEGOCIO (PASO 6 INCLUIDO) ====================
+    
+    document.getElementById('negocioForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const alertDiv = document.getElementById('negocioAlert');
+        
+        try {
+            const response = await fetch('/api/negocio/registrar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nombre: document.getElementById('negocioNombre').value,
+                    phone_id: document.getElementById('negocioPhoneId').value,
+                    token: document.getElementById('negocioToken').value,
+                    tipo_negocio: document.getElementById('negocioTipo').value
+                })
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                alertDiv.className = 'alert alert-success';
+                alertDiv.style.display = 'block';
+                
+                // Mensaje según si se envió el código por WhatsApp
+                if (result.codigo_enviado) {
+                    alertDiv.innerHTML = '✅ Negocio registrado. Hemos enviado un código de verificación a tu WhatsApp.';
+                } else {
+                    alertDiv.innerHTML = `✅ Negocio registrado. Código de verificación: <strong>${result.codigo_verificacion}</strong>`;
+                }
+                
+                setTimeout(() => { location.reload(); }, 3000);
+            } else {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ ' + result.error;
+            }
+        } catch (error) {
+            alertDiv.className = 'alert alert-error';
+            alertDiv.style.display = 'block';
+            alertDiv.innerHTML = '❌ Error de conexión';
+        }
+    };
+    
+    // ==================== VERIFICACIÓN DE NEGOCIO ====================
+    
+    document.getElementById('verificacionForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const alertDiv = document.getElementById('verificacionAlert');
+        
+        try {
+            const response = await fetch('/api/negocio/verificar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tenant_id: document.getElementById('verifTenantId').value,
+                    codigo: document.getElementById('verifCodigo').value
+                })
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                alertDiv.className = 'alert alert-success';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '✅ Negocio verificado exitosamente.';
+                setTimeout(() => { location.reload(); }, 1500);
+            } else {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ ' + result.error;
+            }
+        } catch (error) {
+            alertDiv.className = 'alert alert-error';
+            alertDiv.style.display = 'block';
+            alertDiv.innerHTML = '❌ Error de conexión';
+        }
+    };
+    
+    // ==================== REENVÍO DE CÓDIGO ====================
+    
+    async function reenviarCodigo() {
+        if (!currentTenantId) return;
+        
+        const link = document.getElementById('reenviarLink');
+        if (!link) return;
+        
+        const originalText = link.textContent;
+        link.textContent = 'Enviando...';
+        link.style.pointerEvents = 'none';
+        
+        try {
+            const response = await fetch(`/api/negocio/reenviar_codigo/${currentTenantId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const result = await response.json();
+            
+            const alertDiv = document.getElementById('verificacionAlert');
+            if (result.success) {
+                alertDiv.className = 'alert alert-success';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '✅ Código reenviado. Revisa tu WhatsApp.';
+            } else {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ ' + result.error;
+            }
+            setTimeout(() => {
+                alertDiv.style.display = 'none';
+            }, 3000);
+        } catch (error) {
+            console.error('Error:', error);
+            const alertDiv = document.getElementById('verificacionAlert');
+            alertDiv.className = 'alert alert-error';
+            alertDiv.style.display = 'block';
+            alertDiv.innerHTML = '❌ Error de conexión';
+            setTimeout(() => {
+                alertDiv.style.display = 'none';
+            }, 3000);
+        } finally {
+            link.textContent = originalText;
+            link.style.pointerEvents = 'auto';
+        }
     }
     
     // ==================== GESTIÓN DE EQUIPO ====================
@@ -457,10 +586,12 @@
             const data = await response.json();
             
             const invitarSection = document.getElementById('invitarSection');
-            if (!data.permisos.invitar_usuarios) {
-                invitarSection.style.display = 'none';
-            } else {
-                invitarSection.style.display = 'block';
+            if (invitarSection) {
+                if (!data.permisos.invitar_usuarios) {
+                    invitarSection.style.display = 'none';
+                } else {
+                    invitarSection.style.display = 'block';
+                }
             }
         } catch (error) {
             console.error('Error verificando permisos:', error);
@@ -519,7 +650,7 @@
                 await cargarUsuarios();
             } else {
                 showEquipoAlert('error', result.error);
-                await cargarUsuarios(); // Recargar para restaurar el select
+                await cargarUsuarios();
             }
         } catch (error) {
             console.error('Error:', error);
@@ -551,6 +682,7 @@
     
     function showEquipoAlert(type, message) {
         const alertDiv = document.getElementById('equipoAlert');
+        if (!alertDiv) return;
         alertDiv.className = `alert alert-${type}`;
         alertDiv.innerHTML = message;
         alertDiv.style.display = 'block';
@@ -558,74 +690,6 @@
             alertDiv.style.display = 'none';
         }, 3000);
     }
-    
-    // ==================== REGISTRO DE NEGOCIO ====================
-    
-    document.getElementById('negocioForm').onsubmit = async (e) => {
-        e.preventDefault();
-        const alertDiv = document.getElementById('negocioAlert');
-        
-        try {
-            const response = await fetch('/api/negocio/registrar', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    nombre: document.getElementById('negocioNombre').value,
-                    phone_id: document.getElementById('negocioPhoneId').value,
-                    token: document.getElementById('negocioToken').value,
-                    tipo_negocio: document.getElementById('negocioTipo').value
-                })
-            });
-            const result = await response.json();
-            
-            if (result.success) {
-                alertDiv.className = 'alert alert-success';
-                alertDiv.style.display = 'block';
-                alertDiv.innerHTML = '✅ Negocio registrado. Se ha enviado un código de verificación.';
-                setTimeout(() => { location.reload(); }, 2000);
-            } else {
-                alertDiv.className = 'alert alert-error';
-                alertDiv.style.display = 'block';
-                alertDiv.innerHTML = '❌ ' + result.error;
-            }
-        } catch (error) {
-            alertDiv.className = 'alert alert-error';
-            alertDiv.style.display = 'block';
-            alertDiv.innerHTML = '❌ Error de conexión';
-        }
-    };
-    
-    document.getElementById('verificacionForm').onsubmit = async (e) => {
-        e.preventDefault();
-        const alertDiv = document.getElementById('verificacionAlert');
-        
-        try {
-            const response = await fetch('/api/negocio/verificar', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    tenant_id: document.getElementById('verifTenantId').value,
-                    codigo: document.getElementById('verifCodigo').value
-                })
-            });
-            const result = await response.json();
-            
-            if (result.success) {
-                alertDiv.className = 'alert alert-success';
-                alertDiv.style.display = 'block';
-                alertDiv.innerHTML = '✅ Negocio verificado exitosamente.';
-                setTimeout(() => { location.reload(); }, 1500);
-            } else {
-                alertDiv.className = 'alert alert-error';
-                alertDiv.style.display = 'block';
-                alertDiv.innerHTML = '❌ ' + result.error;
-            }
-        } catch (error) {
-            alertDiv.className = 'alert alert-error';
-            alertDiv.style.display = 'block';
-            alertDiv.innerHTML = '❌ Error de conexión';
-        }
-    };
     
     // Cerrar modales al hacer clic fuera
     window.onclick = function(event) {
@@ -640,4 +704,5 @@
         }
     }
 </script>
+
 {% endblock %}
