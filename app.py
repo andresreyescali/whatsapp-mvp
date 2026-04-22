@@ -772,6 +772,19 @@ def check_token(tenant_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
+@app.route('/debug/test-email', methods=['GET'])
+def test_email():
+    """Prueba de envío de email"""
+    from utils.email_hostgator import email_sender
+    
+    result = email_sender.enviar_codigo_verificacion(
+        email_to="areyescali@hotmail.com",
+        codigo="123456",
+        nombre_negocio="Test"
+    )
+    
+    return jsonify({'success': result})
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)
