@@ -32,6 +32,69 @@ def after_request(response):
 db_manager.init_global_tables()
 register_webhook_routes(app)
 
+# ==================== SUPER ADMIN ENDPOINTS ====================
+
+@app.route('/super/admin/login', methods=['POST'])
+def super_admin_login():
+    """Login especial para super admin (con credenciales especiales)"""
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    
+    # Verificar credenciales de super admin (puedes poner un email específico)
+    if email == 'admin@whatsappbotsaas.com' and password == os.environ.get('SUPER_ADMIN_PASSWORD', 'Admin123!'):
+        session['usuario_id'] = 'super_admin'
+        session['email'] = email
+        session['rol_sistema'] = 'super_admin'
+        return jsonify({'success': True, 'rol': 'super_admin'})
+    
+    return jsonify({'success': False, 'error': 'Credenciales incorrectas'})
+
+@app.route('/super/admin/usuarios', methods=['GET'])
+def super_admin_usuarios():
+    """Lista todos los usuarios (solo super_admin)"""
+    if session.get('rol_sistema') != 'super_admin':
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    usuarios = auth_manager.get_all_usuarios()
+    return jsonify(usuarios)
+
+@app.route('/super/admin/negocios', methods=['GET'])
+def super_admin_negocios():
+    """Lista todos los negocios (solo super_admin)"""
+    if session.get('rol_sistema') != 'super_admin':
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    negocios = auth_manager.get_all_negocios()
+    return jsonify(negocios)
+
+@app.route('/super/admin/usuario/<usuario_id>', methods=['PUT'])
+def super_admin_update_usuario(usuario_id):
+    """Actualiza un usuario (solo super_admin)"""
+    if session.get('rol_sistema') != 'super_admin':
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    data = request.json
+    result = auth_manager.actualizar_usuario(usuario_id, data)
+    return jsonify(result)
+
+@app.route('/super/admin/usuario/<usuario_id>', methods=['DELETE'])
+def super_admin_delete_usuario(usuario_id):
+    """Elimina un usuario (solo super_admin)"""
+    if session.get('rol_sistema') != 'super_admin':
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    result = auth_manager.eliminar_usuario(usuario_id)
+    return jsonify(result)
+
+@app.route('/super/admin/dashboard')
+def super_admin_dashboard():
+    """Panel de super administrador"""
+    if session.get('rol_sistema') != 'super_admin':
+        return redirect('/')
+    
+    return render_template('super_admin.html')
+
 # ==================== AUTH ENDPOINTS ====================
 
 @app.route('/')

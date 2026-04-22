@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Admin - WhatsApp Bot SaaS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; min-height: 100vh; }
+        .header { background: #16213e; color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .card h2 { margin-bottom: 15px; color: #333; border-bottom: 2px solid #e74c3c; padding-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f5f5f5; font-weight: bold; }
+        .btn { padding: 6px 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 12px; }
+        .btn-edit { background: #ffc107; color: #333; }
+        .btn-delete { background: #e74c3c; color: white; }
+        .btn-save { background: #27ae60; color: white; }
+        .btn-cancel { background: #95a5a6; color: white; }
+        .badge { padding: 3px 8px; border-radius: 12px; font-size: 11px; }
+        .badge-active { background: #27ae60; color: white; }
+        .badge-inactive { background: #e74c3c; color: white; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: white; border-radius: 10px; padding: 25px; max-width: 500px; width: 90%; }
+        .close { float: right; font-size: 24px; cursor: pointer; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; background: #e0e0e0; cursor: pointer; border-radius: 8px; }
+        .tab.active { background: #e74c3c; color: white; }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 20px; }
+        .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; }
+        .stat-card .number { font-size: 32px; font-weight: bold; }
+        .logout-btn { background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔐 Panel de Super Administrador</h1>
+        <button class="logout-btn" onclick="cerrarSesion()">Cerrar Sesión</button>
+    </div>
+    
+    <div class="container">
+        <div class="stats" id="stats">
+            <div class="stat-card"><div class="number" id="totalUsuarios">-</div><div>Usuarios</div></div>
+            <div class="stat-card"><div class="number" id="totalNegocios">-</div><div>Negocios</div></div>
+            <div class="stat-card"><div class="number" id="totalVerificados">-</div><div>Verificados</div></div>
+            <div class="stat-card"><div class="number" id="totalActivos">-</div><div>Activos</div></div>
+        </div>
+        
+        <div class="tabs">
+            <div class="tab active" onclick="mostrarTab('usuarios')">👥 Usuarios</div>
+            <div class="tab" onclick="mostrarTab('negocios')">🏢 Negocios</div>
+        </div>
+        
+        <div id="tabUsuarios" class="card">
+            <h2>👥 Usuarios Registrados</h2>
+            <div style="overflow-x: auto;">
+                <table id="usuariosTable">
+                    <thead>
+                        <tr><th>ID</th><th>Email</th><th>Nombre</th><th>Teléfono</th><th>Rol</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div id="tabNegocios" class="card" style="display:none;">
+            <h2>🏢 Negocios Registrados</h2>
+            <div style="overflow-x: auto;">
+                <table id="negociosTable">
+                    <thead>
+                        <tr><th>ID</th><th>Nombre</th><th>Dueño</th><th>WhatsApp</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal de edición -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeEditModal()">&times;</span>
+            <h2>Editar Usuario</h2>
+            <input type="hidden" id="editUserId">
+            <div class="form-group">
+                <label>Nombre</label>
+                <input type="text" id="editNombre" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="editEmail" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Teléfono</label>
+                <input type="text" id="editTelefono" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Rol</label>
+                <select id="editRol" class="form-control">
+                    <option value="super_admin">Super Administrador</option>
+                    <option value="admin_cliente">Administrador Cliente</option>
+                    <option value="viewer">Visualizador</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Estado</label>
+                <select id="editActivo" class="form-control">
+                    <option value="true">Activo</option>
+                    <option value="false">Inactivo</option>
+                </select>
+            </div>
+            <button onclick="guardarUsuario()" class="btn btn-save">Guardar Cambios</button>
+        </div>
+    </div>
+
+    <style>
+        .form-group { margin-bottom: 15px; }
+        .form-control { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; }
+        .btn-edit, .btn-delete { padding: 4px 8px; margin: 2px; font-size: 11px; }
+    </style>
+
+    <script>
+        let currentTab = 'usuarios';
+        
+        async function cargarUsuarios() {
+            const response = await fetch('/super/admin/usuarios');
+            const usuarios = await response.json();
+            
+            const tbody = document.querySelector('#usuariosTable tbody');
+            tbody.innerHTML = '';
+            
+            document.getElementById('totalUsuarios').innerText = usuarios.length;
+            let activos = 0;
+            
+            usuarios.forEach(u => {
+                if (u.activo) activos++;
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><code>${u.id.substring(0, 8)}...</code></td>
+                    <td>${u.email}</td>
+                    <td>${u.nombre || '-'}</td>
+                    <td>${u.telefono || '-'}</td>
+                    <td><span class="badge ${u.rol === 'super_admin' ? 'badge-active' : ''}">${u.rol}</span></td>
+                    <td><span class="badge ${u.activo ? 'badge-active' : 'badge-inactive'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
+                    <td>${new Date(u.created_at).toLocaleDateString()}</td>
+                    <td>
+                        <button class="btn btn-edit" onclick="editarUsuario('${u.id}', '${u.nombre || ''}', '${u.email}', '${u.telefono || ''}', '${u.rol}', ${u.activo})">✏️</button>
+                        <button class="btn btn-delete" onclick="eliminarUsuario('${u.id}', '${u.email}')">🗑️</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            document.getElementById('totalActivos').innerText = activos;
+        }
+        
+        async function cargarNegocios() {
+            const response = await fetch('/super/admin/negocios');
+            const negocios = await response.json();
+            
+            const tbody = document.querySelector('#negociosTable tbody');
+            tbody.innerHTML = '';
+            
+            document.getElementById('totalNegocios').innerText = negocios.length;
+            let verificados = 0;
+            
+            negocios.forEach(n => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><code>${n.id.substring(0, 8)}...</code></td>
+                    <td><strong>${n.nombre}</strong></td>
+                    <td>${n.dueno_nombre || n.dueno_email}</td>
+                    <td>${n.phone_id}</td>
+                    <td><span class="badge ${n.activo ? 'badge-active' : 'badge-inactive'}">${n.activo ? 'Activo' : 'Inactivo'}</span></td>
+                    <td>${new Date(n.created_at).toLocaleDateString()}</td>
+                    <td>
+                        <a href="/admin/menu?tenant_id=${n.id}" target="_blank" class="btn btn-edit">🎛️</a>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            document.getElementById('totalVerificados').innerText = verificados;
+        }
+        
+        let currentEditUserId = null;
+        
+        function editarUsuario(id, nombre, email, telefono, rol, activo) {
+            currentEditUserId = id;
+            document.getElementById('editUserId').value = id;
+            document.getElementById('editNombre').value = nombre;
+            document.getElementById('editEmail').value = email;
+            document.getElementById('editTelefono').value = telefono;
+            document.getElementById('editRol').value = rol;
+            document.getElementById('editActivo').value = activo ? 'true' : 'false';
+            document.getElementById('editModal').style.display = 'flex';
+        }
+        
+        function closeEditModal() {
+            document.getElementById('editModal').style.display = 'none';
+            currentEditUserId = null;
+        }
+        
+        async function guardarUsuario() {
+            const data = {
+                nombre: document.getElementById('editNombre').value,
+                email: document.getElementById('editEmail').value,
+                telefono: document.getElementById('editTelefono').value,
+                rol_sistema: document.getElementById('editRol').value,
+                activo: document.getElementById('editActivo').value === 'true'
+            };
+            
+            const response = await fetch(`/super/admin/usuario/${currentEditUserId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                alert('✅ Usuario actualizado');
+                closeEditModal();
+                cargarUsuarios();
+            } else {
+                alert('❌ Error: ' + result.error);
+            }
+        }
+        
+        async function eliminarUsuario(id, email) {
+            if (!confirm(`¿Eliminar usuario ${email}? Esta acción no se puede deshacer.`)) return;
+            
+            const response = await fetch(`/super/admin/usuario/${id}`, {
+                method: 'DELETE'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                alert('✅ Usuario eliminado');
+                cargarUsuarios();
+            } else {
+                alert('❌ Error: ' + result.error);
+            }
+        }
+        
+        function mostrarTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            if (tab === 'usuarios') {
+                document.getElementById('tabUsuarios').style.display = 'block';
+                document.getElementById('tabNegocios').style.display = 'none';
+                cargarUsuarios();
+            } else {
+                document.getElementById('tabUsuarios').style.display = 'none';
+                document.getElementById('tabNegocios').style.display = 'block';
+                cargarNegocios();
+            }
+        }
+        
+        async function cerrarSesion() {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.href = '/';
+        }
+        
+        // Cargar datos iniciales
+        cargarUsuarios();
+        cargarNegocios();
+    </script>
+</body>
+</html>

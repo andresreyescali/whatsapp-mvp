@@ -63,24 +63,45 @@ class DatabaseManager:
                 )
                 ''')
                 
-                # Tabla de roles por negocio
+                # Tabla de roles de sistema
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS public.roles_sistema (
+            id SERIAL PRIMARY KEY,
+            nombre VARCHAR(50) UNIQUE NOT NULL
+        );
+        ''')
+
+        # Insertar roles por defecto
+        cur.execute('''
+        INSERT INTO public.roles_sistema (nombre) VALUES 
+            ('super_admin'), ('admin_cliente'), ('viewer')
+        ON CONFLICT (nombre) DO NOTHING;
+        ''')
+
+        # Agregar columna rol_sistema a la tabla usuarios
+        cur.execute('''
+        ALTER TABLE public.usuarios 
+        ADD COLUMN IF NOT EXISTS rol_sistema_id INTEGER REFERENCES public.roles_sistema(id) DEFAULT 2;
+        ''')
+
+                    # Tabla de roles por negocio
                
-                cur.execute('''
-                CREATE TABLE IF NOT EXISTS public.roles_negocio (
+        cur.execute('''
+                    CREATE TABLE IF NOT EXISTS public.roles_negocio (
                     id SERIAL PRIMARY KEY,
                     nombre VARCHAR(50) UNIQUE NOT NULL
-                );
-                ''')
+                    );
+                    ''')
 
                 # Insertar roles por defecto
-                cur.execute('''
+        cur.execute('''
                 INSERT INTO public.roles_negocio (nombre) VALUES 
                     ('owner'), ('admin'), ('editor'), ('viewer')
                 ON CONFLICT (nombre) DO NOTHING;
                 ''')
 
                 # Modificar tabla usuario_negocio para incluir rol
-                cur.execute('''
+        cur.execute('''
                 ALTER TABLE public.usuario_negocio 
                 ADD COLUMN IF NOT EXISTS rol_id INTEGER REFERENCES public.roles_negocio(id),
                 ADD COLUMN IF NOT EXISTS invitado_por UUID REFERENCES public.usuarios(id),
@@ -89,7 +110,7 @@ class DatabaseManager:
                 ''')
 
                 # Tabla de métricas
-                cur.execute('''
+        cur.execute('''
                 CREATE TABLE IF NOT EXISTS public.metricas_tenants (
                     id SERIAL PRIMARY KEY,
                     tenant_id TEXT,
@@ -101,10 +122,10 @@ class DatabaseManager:
                 ''')
                 
                 # Índices
-                cur.execute('CREATE INDEX IF NOT EXISTS idx_tenants_phone_id ON public.tenants(phone_id)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_tenants_phone_id ON public.tenants(phone_id)')
                 
                 # Tabla de usuarios
-                cur.execute('''
+        cur.execute('''
                     CREATE TABLE IF NOT EXISTS public.usuarios (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     email VARCHAR(200) UNIQUE NOT NULL,
@@ -120,7 +141,7 @@ class DatabaseManager:
                 ''')
 
                 # Tabla de relación usuario-tenant (negocios)
-                cur.execute('''
+        cur.execute('''
                 CREATE TABLE IF NOT EXISTS public.usuario_negocio (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     usuario_id UUID REFERENCES public.usuarios(id) ON DELETE CASCADE,
@@ -132,7 +153,7 @@ class DatabaseManager:
                 ''')
 
                 # Tabla de verificación de negocios
-                cur.execute('''
+        cur.execute('''
                 CREATE TABLE IF NOT EXISTS public.verificacion_negocio (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     tenant_id TEXT REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -146,7 +167,7 @@ class DatabaseManager:
                 ''')
 
                 # Tabla de contexto IA por tenant
-                cur.execute('''
+        cur.execute('''
                     CREATE TABLE IF NOT EXISTS public.tenant_context (
                     tenant_id TEXT PRIMARY KEY,
                     menu_estructurado JSONB DEFAULT '[]',
@@ -159,7 +180,7 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT NOW()
                     );
                 ''')                
-            conn.commit()
+        conn.commit()
         
         logger.info('Tablas globales listas')
 
