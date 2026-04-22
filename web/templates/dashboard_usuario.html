@@ -20,27 +20,46 @@
 <div class="card">
     <h2>📋 Mis Negocios</h2>
     {% if negocios %}
-    <table style="width:100%">
-        <thead>
-            <tr><th>Nombre</th><th>WhatsApp</th><th>Verificado</th><th>Rol</th><th>Acciones</th></tr>
-        </thead>
-        <tbody>
-            {% for n in negocios %}
-            <tr>
-                <td><strong>{{ n.nombre }}</strong></strong></td>
-                <td><code>{{ n.phone_id }}</code></td>
-                <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %} </code></td>
-                <td>{% if n.rol == 'owner' %}👑 Propietario{% else %}👤 Colaborador{% endif %} </code></td>
-                <td>
-                    <a href="/admin/menu?tenant_id={{ n.id }}" class="btn btn-small">🎛️ Gestionar</a>
-                    {% if not n.verificado %}
-                        <button class="btn btn-small" onclick="verificarNegocio('{{ n.id }}')">🔐 Verificar</button>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div style="overflow-x: auto;">
+        <table style="width:100%">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>WhatsApp</th>
+                    <th>Verificado</th>
+                    <th>Mi Rol</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for n in negocios %}
+                <tr id="row-{{ n.id }}">
+                    <td><strong>{{ n.nombre }}</strong></td>
+                    <td><code>{{ n.phone_id }}</code></td>
+                    <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %} </code></td>
+                    <td>
+                        {% if n.rol == 'owner' %}
+                            <span class="badge-owner">👑 Propietario</span>
+                        {% elif n.rol == 'admin' %}
+                            <span class="badge-admin">🛡️ Administrador</span>
+                        {% elif n.rol == 'editor' %}
+                            <span class="badge-editor">✏️ Editor</span>
+                        {% else %}
+                            <span class="badge-viewer">👁️ Visualizador</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="/admin/menu?tenant_id={{ n.id }}" class="btn-small">🎛️ Gestionar</a>
+                        <button class="btn-small btn-team" onclick="verEquipo('{{ n.id }}', '{{ n.nombre|escape }}')">👥 Equipo</button>
+                        {% if not n.verificado %}
+                            <button class="btn-small btn-verify" onclick="verificarNegocio('{{ n.id }}')">🔐 Verificar</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% else %}
     <p>No tienes negocios registrados.</p>
     {% endif %}
@@ -100,6 +119,41 @@
     </div>
 </div>
 
+<!-- Modal de gestión de equipo -->
+<div id="equipoModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+        <span class="close" onclick="closeEquipoModal()">&times;</span>
+        <h2 id="equipoModalTitle">Gestión de Equipo</h2>
+        <div id="equipoAlert" class="alert" style="display:none"></div>
+        
+        <div id="invitarSection" style="margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #eee;">
+            <h3 style="margin-bottom: 15px;">👥 Invitar usuario</h3>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <input type="email" id="invitarEmail" placeholder="Email del usuario" style="flex: 2; min-width: 200px;">
+                <select id="invitarRol" style="flex: 1; min-width: 130px;">
+                    <option value="admin">🛡️ Administrador</option>
+                    <option value="editor">✏️ Editor</option>
+                    <option value="viewer">👁️ Solo lectura</option>
+                </select>
+                <button onclick="invitarUsuario()" class="btn">Invitar</button>
+            </div>
+            <p class="hint">El usuario debe tener una cuenta en la plataforma para ser invitado.</p>
+        </div>
+        
+        <div id="usuariosList">
+            <h3 style="margin-bottom: 15px;">👥 Miembros del equipo</h3>
+            <div style="overflow-x: auto;">
+                <table style="width:100%">
+                    <thead>
+                        <tr><th>Usuario</th><th>Rol</th><th>Acciones</th></tr>
+                    </thead>
+                    <tbody id="usuariosTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 <style>
     .btn-logout {
         background: #dc3545;
@@ -116,22 +170,178 @@
         background: #c82333;
         transform: translateY(-1px);
     }
-    .badge { background: #e9ecef; padding: 3px 8px; border-radius: 12px; font-size: 11px; }
-    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
-    .modal-content { background: white; border-radius: 10px; padding: 25px; max-width: 450px; width: 90%; }
-    .close { float: right; font-size: 24px; cursor: pointer; color: #999; }
-    .btn-small { padding: 5px 10px; font-size: 12px; margin: 2px; background: #25D366; color: white; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; }
-    .btn-primary { background: #25D366; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
-    .alert { padding: 12px; border-radius: 8px; margin-bottom: 15px; }
-    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-    .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-    .form-group { margin-bottom: 15px; }
-    .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
-    .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; }
+    .btn-small {
+        padding: 5px 10px;
+        font-size: 12px;
+        margin: 2px;
+        background: #25D366;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+    }
+    .btn-team {
+        background: #17a2b8;
+    }
+    .btn-team:hover {
+        background: #138496;
+    }
+    .btn-verify {
+        background: #ffc107;
+        color: #333;
+    }
+    .btn-verify:hover {
+        background: #e0a800;
+    }
+    .btn-danger-small {
+        background: #dc3545;
+        color: white;
+        border: none;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 11px;
+    }
+    .btn-danger-small:hover {
+        background: #c82333;
+    }
+    .badge-owner {
+        background: #ffd700;
+        color: #333;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+    .badge-admin {
+        background: #17a2b8;
+        color: white;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+    }
+    .badge-editor {
+        background: #28a745;
+        color: white;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+    }
+    .badge-viewer {
+        background: #6c757d;
+        color: white;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+    }
+    .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 1000;
+        justify-content: center;
+        align-items: center;
+    }
+    .modal-content {
+        background: white;
+        border-radius: 10px;
+        padding: 25px;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+    .close {
+        float: right;
+        font-size: 24px;
+        cursor: pointer;
+        color: #999;
+    }
+    .close:hover {
+        color: #333;
+    }
+    .btn-primary {
+        background: #25D366;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    .btn-primary:hover {
+        background: #128C7E;
+    }
+    .alert {
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 15px;
+    }
+    .alert-success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    .alert-error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    .form-group {
+        margin-bottom: 15px;
+    }
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+    }
+    .form-group input, .form-group select {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }
+    .hint {
+        font-size: 11px;
+        color: #999;
+        margin-top: 8px;
+    }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    th, td {
+        padding: 10px;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+    }
+    th {
+        background: #f8f9fa;
+        font-weight: bold;
+    }
+    select.rol-select {
+        padding: 4px 8px;
+        font-size: 12px;
+        border-radius: 4px;
+        border: 1px solid #ddd;
+    }
+    .current-user-badge {
+        background: #e9ecef;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-size: 10px;
+        margin-left: 5px;
+    }
 </style>
 
 <script>
     let currentTenantId = null;
+    let currentTenantEquipo = null;
     
     async function cerrarSesion() {
         if (!confirm('¿Estás seguro de que quieres cerrar sesión?')) return;
@@ -160,6 +370,7 @@
     function closeNegocioModal() {
         document.getElementById('negocioModal').style.display = 'none';
         document.getElementById('negocioForm').reset();
+        document.getElementById('negocioAlert').style.display = 'none';
     }
     
     function verificarNegocio(tenantId) {
@@ -171,7 +382,184 @@
     function closeVerificacionModal() {
         document.getElementById('verificacionModal').style.display = 'none';
         document.getElementById('verifCodigo').value = '';
+        document.getElementById('verificacionAlert').style.display = 'none';
     }
+    
+    // ==================== GESTIÓN DE EQUIPO ====================
+    
+    async function verEquipo(tenantId, tenantNombre) {
+        currentTenantEquipo = tenantId;
+        document.getElementById('equipoModalTitle').innerHTML = `👥 Equipo - ${tenantNombre}`;
+        document.getElementById('equipoModal').style.display = 'flex';
+        await cargarUsuarios();
+        await verificarPermisosEquipo();
+    }
+    
+    function closeEquipoModal() {
+        document.getElementById('equipoModal').style.display = 'none';
+        document.getElementById('equipoAlert').style.display = 'none';
+        currentTenantEquipo = null;
+    }
+    
+    async function cargarUsuarios() {
+        if (!currentTenantEquipo) return;
+        
+        try {
+            const response = await fetch(`/api/negocio/${currentTenantEquipo}/usuarios`);
+            const data = await response.json();
+            
+            const tbody = document.getElementById('usuariosTable');
+            tbody.innerHTML = '';
+            
+            if (!data.usuarios || data.usuarios.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center;">No hay miembros en el equipo</td></tr>';
+                return;
+            }
+            
+            data.usuarios.forEach(u => {
+                const tr = document.createElement('tr');
+                const esUsuarioActual = u.id === '{{ session.usuario_id }}';
+                const esOwner = u.rol === 'owner';
+                const puedeEditar = !esOwner && !esUsuarioActual && data.puedo_invitar;
+                
+                tr.innerHTML = `
+                    <td>
+                        ${u.nombre || u.email}
+                        ${esUsuarioActual ? '<span class="current-user-badge">(tú)</span>' : ''}
+                    </td>
+                    <td>
+                        <select class="rol-select" onchange="cambiarRol('${u.id}', this.value)" 
+                                ${!data.puedo_invitar || esOwner || esUsuarioActual ? 'disabled' : ''}>
+                            <option value="admin" ${u.rol === 'admin' ? 'selected' : ''}>🛡️ Administrador</option>
+                            <option value="editor" ${u.rol === 'editor' ? 'selected' : ''}>✏️ Editor</option>
+                            <option value="viewer" ${u.rol === 'viewer' ? 'selected' : ''}>👁️ Visualizador</option>
+                        </select>
+                    </td>
+                    <td>
+                        ${puedeEditar ? 
+                            `<button onclick="removerUsuario('${u.id}')" class="btn-danger-small">🗑️ Remover</button>` : 
+                            (esOwner ? '<span class="badge-owner" style="font-size:10px;">Propietario</span>' : '—')}
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (error) {
+            console.error('Error cargando usuarios:', error);
+            showEquipoAlert('error', 'Error al cargar los usuarios');
+        }
+    }
+    
+    async function verificarPermisosEquipo() {
+        if (!currentTenantEquipo) return;
+        
+        try {
+            const response = await fetch(`/api/negocio/${currentTenantEquipo}/permisos`);
+            const data = await response.json();
+            
+            const invitarSection = document.getElementById('invitarSection');
+            if (!data.permisos.invitar_usuarios) {
+                invitarSection.style.display = 'none';
+            } else {
+                invitarSection.style.display = 'block';
+            }
+        } catch (error) {
+            console.error('Error verificando permisos:', error);
+        }
+    }
+    
+    async function invitarUsuario() {
+        const email = document.getElementById('invitarEmail').value.trim();
+        const rol = document.getElementById('invitarRol').value;
+        
+        if (!email) {
+            showEquipoAlert('error', 'Ingresa un email válido');
+            return;
+        }
+        
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Enviando...';
+        
+        try {
+            const response = await fetch(`/api/negocio/${currentTenantEquipo}/invitar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email, rol: rol })
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                showEquipoAlert('success', result.message);
+                document.getElementById('invitarEmail').value = '';
+                await cargarUsuarios();
+            } else {
+                showEquipoAlert('error', result.error);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showEquipoAlert('error', 'Error de conexión');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+    
+    async function cambiarRol(usuarioId, nuevoRol) {
+        try {
+            const response = await fetch(`/api/negocio/${currentTenantEquipo}/usuarios/${usuarioId}/rol`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rol: nuevoRol })
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                showEquipoAlert('success', result.message);
+                await cargarUsuarios();
+            } else {
+                showEquipoAlert('error', result.error);
+                await cargarUsuarios(); // Recargar para restaurar el select
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showEquipoAlert('error', 'Error de conexión');
+            await cargarUsuarios();
+        }
+    }
+    
+    async function removerUsuario(usuarioId) {
+        if (!confirm('¿Estás seguro de que quieres remover a este usuario del negocio?')) return;
+        
+        try {
+            const response = await fetch(`/api/negocio/${currentTenantEquipo}/usuarios/${usuarioId}`, {
+                method: 'DELETE'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                showEquipoAlert('success', result.message);
+                await cargarUsuarios();
+            } else {
+                showEquipoAlert('error', result.error);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showEquipoAlert('error', 'Error de conexión');
+        }
+    }
+    
+    function showEquipoAlert(type, message) {
+        const alertDiv = document.getElementById('equipoAlert');
+        alertDiv.className = `alert alert-${type}`;
+        alertDiv.innerHTML = message;
+        alertDiv.style.display = 'block';
+        setTimeout(() => {
+            alertDiv.style.display = 'none';
+        }, 3000);
+    }
+    
+    // ==================== REGISTRO DE NEGOCIO ====================
     
     document.getElementById('negocioForm').onsubmit = async (e) => {
         e.preventDefault();
@@ -246,6 +634,9 @@
         }
         if (event.target == document.getElementById('verificacionModal')) {
             closeVerificacionModal();
+        }
+        if (event.target == document.getElementById('equipoModal')) {
+            closeEquipoModal();
         }
     }
 </script>

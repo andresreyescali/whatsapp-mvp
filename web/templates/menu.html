@@ -219,6 +219,38 @@
     const API_BASE = window.location.origin;
     let currentEditProductId = null;
     
+    async function verificarPermisos() {
+    try {
+        const response = await fetch(`/api/negocio/${tenantId}/permisos`);
+        const data = await response.json();
+        
+        // Ocultar botones según permisos
+        if (!data.permisos.editar_menu) {
+            document.getElementById('productForm').style.display = 'none';
+            document.querySelector('.btn-edit')?.remove();
+            document.querySelector('.btn-danger')?.remove();
+            document.querySelector('.toggle-checkbox')?.remove();
+        }
+        
+        if (!data.permisos.entrenar_ia) {
+            document.querySelector('.btn-train')?.remove();
+        }
+        
+        // Mostrar rol del usuario
+        if (data.mi_rol) {
+            const rolBadge = document.createElement('div');
+            rolBadge.className = 'rol-badge';
+            rolBadge.innerHTML = `👤 Tu rol: ${data.mi_rol.rol.toUpperCase()}`;
+            document.querySelector('.stats').prepend(rolBadge);
+        }
+    } catch (error) {
+        console.error('Error verificando permisos:', error);
+    }
+}
+
+// Llamar a verificarPermisos junto con loadMenu
+verificarPermisos();
+
     async function loadMenu() {
         try {
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/menu`);

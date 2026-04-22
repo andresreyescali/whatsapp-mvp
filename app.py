@@ -110,6 +110,83 @@ def api_verificar_negocio():
     )
     return jsonify(result)
 
+# ==================== ENDPOINTS DE ROLES Y USUARIOS ====================
+
+@app.route('/api/negocio/<tenant_id>/usuarios', methods=['GET'])
+def get_usuarios_negocio(tenant_id):
+    """Obtiene todos los usuarios de un negocio"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    usuarios = auth_manager.get_usuarios_negocio(tenant_id, session['usuario_id'])
+    mi_rol = auth_manager.get_rol_negocio(session['usuario_id'], tenant_id)
+    
+    return jsonify({
+        'usuarios': usuarios,
+        'mi_rol': mi_rol,
+        'puedo_invitar': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'invitar_usuarios')
+    })
+
+@app.route('/api/negocio/<tenant_id>/invitar', methods=['POST'])
+def invitar_usuario(tenant_id):
+    """Invita a un usuario a un negocio"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    data = request.json
+    result = auth_manager.invitar_usuario(
+        session['usuario_id'],
+        tenant_id,
+        data.get('email'),
+        data.get('rol', 'viewer')
+    )
+    return jsonify(result)
+
+@app.route('/api/negocio/<tenant_id>/usuarios/<usuario_id>', methods=['DELETE'])
+def remover_usuario(tenant_id, usuario_id):
+    """Remueve un usuario de un negocio"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    result = auth_manager.remover_usuario(session['usuario_id'], tenant_id, usuario_id)
+    return jsonify(result)
+
+@app.route('/api/negocio/<tenant_id>/usuarios/<usuario_id>/rol', methods=['PUT'])
+def cambiar_rol_usuario(tenant_id, usuario_id):
+    """Cambia el rol de un usuario en un negocio"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    data = request.json
+    result = auth_manager.cambiar_rol_usuario(
+        session['usuario_id'],
+        tenant_id,
+        usuario_id,
+        data.get('rol')
+    )
+    return jsonify(result)
+
+@app.route('/api/negocio/<tenant_id>/permisos', methods=['GET'])
+def verificar_permisos(tenant_id):
+    """Verifica los permisos del usuario actual en el negocio"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    permisos = {
+        'editar_negocio': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'editar_negocio'),
+        'invitar_usuarios': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'invitar_usuarios'),
+        'editar_menu': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'editar_menu'),
+        'ver_reportes': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'ver_reportes'),
+        'entrenar_ia': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'entrenar_ia'),
+        'ver_pedidos': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'ver_pedidos'),
+        'eliminar_negocio': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'eliminar_negocio')
+    }
+    mi_rol = auth_manager.get_rol_negocio(session['usuario_id'], tenant_id)
+    
+    return jsonify({
+        'permisos': permisos,
+        'mi_rol': mi_rol
+    })
 # ==================== PÁGINAS LEGALES ====================
 
 @app.route('/terminos')

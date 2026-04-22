@@ -63,6 +63,31 @@ class DatabaseManager:
                 )
                 ''')
                 
+                # Tabla de roles por negocio
+               
+                cur.execute('''
+                CREATE TABLE IF NOT EXISTS public.roles_negocio (
+                    id SERIAL PRIMARY KEY,
+                    nombre VARCHAR(50) UNIQUE NOT NULL
+                );
+                ''')
+
+                # Insertar roles por defecto
+                cur.execute('''
+                INSERT INTO public.roles_negocio (nombre) VALUES 
+                    ('owner'), ('admin'), ('editor'), ('viewer')
+                ON CONFLICT (nombre) DO NOTHING;
+                ''')
+
+                # Modificar tabla usuario_negocio para incluir rol
+                cur.execute('''
+                ALTER TABLE public.usuario_negocio 
+                ADD COLUMN IF NOT EXISTS rol_id INTEGER REFERENCES public.roles_negocio(id),
+                ADD COLUMN IF NOT EXISTS invitado_por UUID REFERENCES public.usuarios(id),
+                ADD COLUMN IF NOT EXISTS invitado_en TIMESTAMP DEFAULT NOW(),
+                ADD COLUMN IF NOT EXISTS invitacion_aceptada BOOLEAN DEFAULT true;
+                ''')
+
                 # Tabla de métricas
                 cur.execute('''
                 CREATE TABLE IF NOT EXISTS public.metricas_tenants (
