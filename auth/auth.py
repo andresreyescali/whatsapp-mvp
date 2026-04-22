@@ -3,10 +3,11 @@ import hashlib
 import secrets
 import re
 import requests
-from utils.email_hostgator import email_sender  # en lugar de email_sender
+# from utils.email_hostgator import email_sender  # en lugar de email_sender
 from datetime import datetime, timedelta
 from core.database import db_manager
 from core.logger import logger
+from utils.email_brevo import email_sender
 
 class AuthManager:
     """Gestión de autenticación de usuarios"""
