@@ -126,16 +126,32 @@ def super_admin_negocios():
     negocios = auth_manager.get_all_negocios()
     return jsonify(negocios)
 
-@app.route('/super/admin/usuario/<usuario_id>', methods=['PUT'])
+@app.route('/super/admin/usuario/<usuario_id>', methods=['PUT', 'OPTIONS'])
 def super_admin_update_usuario(usuario_id):
     """Actualiza un usuario (solo super_admin)"""
-    if session.get('rol_sistema') != 'super_admin':
-        return jsonify({'error': 'No autorizado'}), 403
+    if request.method == 'OPTIONS':
+        return '', 200
     
-    data = request.json
-    result = auth_manager.actualizar_usuario(usuario_id, data)
-    return jsonify(result)
-
+    # Verificar autenticación de super admin
+    if session.get('rol_sistema') != 'super_admin':
+        logger.warning(f'Intento no autorizado de actualización: session={dict(session)}')
+        return jsonify({'error': 'No autorizado. Debes iniciar sesión como Super Administrador.'}), 403
+    
+    try:
+        data = request.json
+        logger.info(f'Super Admin actualizando usuario {usuario_id}: {data}')
+        
+        result = auth_manager.actualizar_usuario(usuario_id, data)
+        
+        if result.get('success'):
+            return jsonify({'success': True, 'message': result.get('message', 'Usuario actualizado')})
+        else:
+            return jsonify({'success': False, 'error': result.get('error', 'Error al actualizar')}), 400
+            
+    except Exception as e:
+        logger.error(f'Error actualizando usuario: {e}')
+        return jsonify({'error': str(e)}), 500
+    
 @app.route('/super/admin/usuario/<usuario_id>', methods=['DELETE'])
 def super_admin_delete_usuario(usuario_id):
     """Elimina un usuario (solo super_admin)"""
@@ -699,6 +715,20 @@ def webhook_info():
         'webhook_url': 'https://whatsapp-mvp-docker.onrender.com/webhook',
         'tenants_registrados': [{'nombre': t['nombre'], 'phone_id': t['phone_id']} for t in tenants]
     }
+
+
+@app.route('/super/admin/debug-session', methods=['GET'])
+def debug_session():
+    """Muestra la sesión actual (solo para diagnóstico)"""
+    if session.get('rol_sistema') != 'super_admin':
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    return jsonify({
+        'session': dict(session),
+        'rol_sistema': session.get('rol_sistema'),
+        'usuario_id': session.get('usuario_id')
+    })
+
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
