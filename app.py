@@ -1,6 +1,7 @@
 import os
 import json
 import secrets
+import time
 from flask import Flask, jsonify, request, render_template, session, redirect
 from core.config import config
 from core.database import db_manager
@@ -28,8 +29,21 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
     return response
 
-# Inicializar base de datos
-db_manager.init_global_tables()
+# Inicializar base de datos con reintentos
+max_retries = 5
+for i in range(max_retries):
+    try:
+        db_manager.init_global_tables()
+        logger.info('Base de datos inicializada correctamente')
+        break
+    except Exception as e:
+        logger.error(f'Intento {i+1} de {max_retries} falló: {e}')
+        if i < max_retries - 1:
+            time.sleep(3)
+        else:
+            logger.error('No se pudo conectar a la base de datos')
+            raise
+
 register_webhook_routes(app)
 
 # ==================== SUPER ADMIN ENDPOINTS ====================
@@ -41,7 +55,7 @@ def super_admin_login():
     email = data.get('email')
     password = data.get('password')
     
-    # Verificar credenciales de super admin (puedes poner un email específico)
+    # Verificar credenciales de super admin
     if email == 'admin@whatsappbotsaas.com' and password == os.environ.get('SUPER_ADMIN_PASSWORD', 'Admin123!'):
         session['usuario_id'] = 'super_admin'
         session['email'] = email
@@ -119,9 +133,10 @@ def api_auth_login():
     """Login de usuario"""
     data = request.json
     result = auth_manager.login(data.get('email'), data.get('password'))
-    if result['success']:
+    if result.get('success'):
         session['usuario_id'] = result['usuario_id']
         session['email'] = result['email']
+        session['nombre'] = result.get('nombre')
     return jsonify(result)
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -138,7 +153,8 @@ def dashboard():
     
     usuario = {
         'id': session['usuario_id'],
-        'email': session['email']
+        'email': session['email'],
+        'nombre': session.get('nombre')
     }
     negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
     
@@ -240,7 +256,7 @@ def get_usuarios_negocio(tenant_id):
     if 'usuario_id' not in session:
         return jsonify({'error': 'No autenticado'}), 401
     
-    usuarios = auth_manager.get_usuarios_negocio(tenant_id, session['usuario_id'])
+    usuarios = auth_manager.get_usuarios_negocio(tenant_id)
     mi_rol = auth_manager.get_rol_negocio(session['usuario_id'], tenant_id)
     
     return jsonify({
@@ -309,6 +325,7 @@ def verificar_permisos(tenant_id):
         'permisos': permisos,
         'mi_rol': mi_rol
     })
+
 # ==================== PÁGINAS LEGALES ====================
 
 @app.route('/terminos')
