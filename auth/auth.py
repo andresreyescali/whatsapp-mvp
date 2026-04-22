@@ -347,54 +347,54 @@ Este código expira en 10 minutos.
                 return [dict(zip(columns, row)) for row in rows]
     
     def actualizar_usuario(self, usuario_id: str, datos: dict) -> dict:
-    """Actualiza datos de un usuario (solo super_admin)"""
-    try:
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                updates = []
-                params = []
-                
-                if datos.get('nombre'):
-                    updates.append("nombre_completo = %s")
-                    params.append(datos['nombre'])
-                
-                if datos.get('email'):
-                    # Verificar que el email no esté en uso por otro usuario
-                    cur.execute("SELECT id FROM public.usuarios WHERE email = %s AND id != %s", 
-                               (datos['email'], usuario_id))
-                    if cur.fetchone():
-                        return {'success': False, 'error': 'El email ya está en uso'}
-                    updates.append("email = %s")
-                    params.append(datos['email'])
-                
-                if datos.get('telefono'):
-                    telefono_formateado = self.formatear_telefono(datos['telefono'])
-                    updates.append("telefono = %s")
-                    params.append(telefono_formateado)
-                
-                if datos.get('activo') is not None:
-                    updates.append("activo = %s")
-                    params.append(datos['activo'])
-                
-                if datos.get('rol_sistema'):
-                    cur.execute("SELECT id FROM public.roles_sistema WHERE nombre = %s", (datos['rol_sistema'],))
-                    rol_row = cur.fetchone()
-                    if rol_row:
-                        updates.append("rol_sistema_id = %s")
-                        params.append(rol_row[0])
-                
-                if not updates:
-                    return {'success': False, 'error': 'No hay datos para actualizar'}
-                
-                params.append(usuario_id)
-                query = f"UPDATE public.usuarios SET {', '.join(updates)} WHERE id = %s"
-                cur.execute(query, params)
-            conn.commit()
-        
-        return {'success': True, 'message': 'Usuario actualizado'}
-    except Exception as e:
-        logger.error(f'Error actualizando usuario: {e}')
-        return {'success': False, 'error': str(e)}
+        """Actualiza datos de un usuario (solo super_admin)"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    updates = []
+                    params = []
+                    
+                    if datos.get('nombre'):
+                        updates.append("nombre_completo = %s")
+                        params.append(datos['nombre'])
+                    
+                    if datos.get('email'):
+                        # Verificar que el email no esté en uso por otro usuario
+                        cur.execute("SELECT id FROM public.usuarios WHERE email = %s AND id != %s", 
+                                (datos['email'], usuario_id))
+                        if cur.fetchone():
+                            return {'success': False, 'error': 'El email ya está en uso'}
+                        updates.append("email = %s")
+                        params.append(datos['email'])
+                    
+                    if datos.get('telefono'):
+                        telefono_formateado = self.formatear_telefono(datos['telefono'])
+                        updates.append("telefono = %s")
+                        params.append(telefono_formateado)
+                    
+                    if datos.get('activo') is not None:
+                        updates.append("activo = %s")
+                        params.append(datos['activo'])
+                    
+                    if datos.get('rol_sistema'):
+                        cur.execute("SELECT id FROM public.roles_sistema WHERE nombre = %s", (datos['rol_sistema'],))
+                        rol_row = cur.fetchone()
+                        if rol_row:
+                            updates.append("rol_sistema_id = %s")
+                            params.append(rol_row[0])
+                    
+                    if not updates:
+                        return {'success': False, 'error': 'No hay datos para actualizar'}
+                    
+                    params.append(usuario_id)
+                    query = f"UPDATE public.usuarios SET {', '.join(updates)} WHERE id = %s"
+                    cur.execute(query, params)
+                conn.commit()
+            
+            return {'success': True, 'message': 'Usuario actualizado'}
+        except Exception as e:
+            logger.error(f'Error actualizando usuario: {e}')
+            return {'success': False, 'error': str(e)}
     
     def eliminar_usuario(self, usuario_id: str) -> dict:
         """Elimina un usuario y todos sus datos (solo super_admin)"""
