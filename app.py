@@ -812,6 +812,45 @@ def test_delete():
     """Endpoint de prueba para verificar que la API funciona"""
     return jsonify({'status': 'ok', 'message': 'API de eliminación funciona'})
 
+# ==================== SUPER USER ENDPOINTS ====================
+
+@app.route('/super/admin/login', methods=['POST'])
+def super_admin_login():
+    """Login especial para super admin (con credenciales especiales)"""
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    
+    # Verificar credenciales de super admin
+    super_admin_email = os.environ.get('SUPER_ADMIN_EMAIL', 'admin@whatsappbotsaas.com')
+    super_admin_password = os.environ.get('SUPER_ADMIN_PASSWORD', 'Admin123!')
+    
+    if email == super_admin_email and password == super_admin_password:
+        session.clear()  # Limpiar sesión anterior
+        session['usuario_id'] = 'super_admin'
+        session['email'] = email
+        session['rol_sistema'] = 'super_admin'
+        session['nombre'] = 'Super Administrador'
+        return jsonify({'success': True, 'rol': 'super_admin'})
+    
+    return jsonify({'success': False, 'error': 'Credenciales incorrectas'})
+
+@app.route('/super/admin/check-auth', methods=['GET'])
+def super_admin_check_auth():
+    """Verifica si el usuario actual es super admin"""
+    if session.get('rol_sistema') == 'super_admin':
+        return jsonify({'authenticated': True, 'email': session.get('email')})
+    return jsonify({'authenticated': False})
+
+@app.route('/super/admin/dashboard')
+def super_admin_dashboard():
+    """Panel de super administrador"""
+    # Si no está autenticado como super admin, redirigir al login
+    if session.get('rol_sistema') != 'super_admin':
+        return redirect('/super/admin/login-page')
+    
+    return render_template('super_admin.html')
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)
