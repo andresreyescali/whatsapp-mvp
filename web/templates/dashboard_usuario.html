@@ -31,12 +31,13 @@
                     <th>Acciones</th>
                 </tr>
             </thead>
+            <code>
             <tbody>
                 {% for n in negocios %}
                 <tr id="row-{{ n.id }}">
                     <td><strong>{{ n.nombre }}</strong></strong></td>
                     <td><code>{{ n.phone_id }}</code></td>
-                    <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %} </code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></td>
+                    <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %} </td>
                     <td>
                         {% if n.rol == 'owner' %}
                             <span class="badge-owner">👑 Propietario</span>
@@ -47,7 +48,7 @@
                         {% else %}
                             <span class="badge-viewer">👁️ Visualizador</span>
                         {% endif %}
-                    </code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></td>
+                    </td>
                     <td>
                         <a href="/admin/menu?tenant_id={{ n.id }}" class="btn-small">🎛️ Gestionar</a>
                         <a href="/panel/{{ n.id }}" class="btn-small" style="background: #9C27B0;">📊 Panel</a>
@@ -55,8 +56,8 @@
                         {% if not n.verificado %}
                             <button class="btn-small btn-verify" onclick="verificarNegocio('{{ n.id }}')">🔐 Verificar</button>
                         {% endif %}
-                    </code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></td>
-                </code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></td>
+                    </td>
+                </td>
                 {% endfor %}
             </tbody>
         </code>
