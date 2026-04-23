@@ -1001,6 +1001,88 @@ def enviar_notificacion_email(tenant, pedido_id):
                 email_to = row[0]
                 email_sender.enviar_notificacion_pedido(email_to, pedido_id, tenant['nombre'])
 
+# Endpoint temporal para arreglar - agrégalo en app.py
+@app.route('/debug/asignar_negocio', methods=['GET'])
+def asignar_negocio():
+    """Asigna un negocio existente al usuario actual (solo para debugging)"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    # Obtener el primer tenant disponible
+    tenants = tenant_repo.get_all()
+    if not tenants:
+        return jsonify({'error': 'No hay negocios disponibles'}), 404
+    
+    tenant = tenants[0]
+    
+    # Verificar si ya está asociado
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id FROM public.usuario_negocio 
+                WHERE usuario_id = %s AND tenant_id = %s
+            """, (session['usuario_id'], tenant['id']))
+            if cur.fetchone():
+                return jsonify({'message': 'El negocio ya está asociado a este usuario'})
+            
+            # Asociar como owner
+            cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
+            rol_owner_id = cur.fetchone()[0]
+            
+            cur.execute("""
+                INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por)
+                VALUES (%s, %s, %s, %s)
+            """, (session['usuario_id'], tenant['id'], rol_owner_id, session['usuario_id']))
+        conn.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': f'Negocio {tenant["nombre"]} asignado al usuario {session["email"]}'
+    })
+
+@app.route('/debug/asignar_negocio', methods=['GET'])
+def debug_asignar_negocio():
+    """Asigna el primer negocio disponible al usuario actual"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    # Obtener el primer tenant disponible
+    tenants = tenant_repo.get_all()
+    if not tenants:
+        return jsonify({'error': 'No hay negocios disponibles'}), 404
+    
+    tenant = tenants[0]
+    
+    # Verificar si ya está asociado
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id FROM public.usuario_negocio 
+                WHERE usuario_id = %s AND tenant_id = %s
+            """, (session['usuario_id'], tenant['id']))
+            if cur.fetchone():
+                return jsonify({'message': f'El negocio {tenant["nombre"]} ya está asociado a este usuario'})
+            
+            # Obtener rol owner
+            cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
+            rol_row = cur.fetchone()
+            if not rol_row:
+                return jsonify({'error': 'No se encontró el rol owner'}), 500
+            rol_owner_id = rol_row[0]
+            
+            # Asociar usuario al negocio
+            cur.execute("""
+                INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por)
+                VALUES (%s, %s, %s, %s)
+            """, (session['usuario_id'], tenant['id'], rol_owner_id, session['usuario_id']))
+        conn.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': f'Negocio "{tenant["nombre"]}" asignado al usuario {session["email"]}',
+        'tenant_id': tenant['id']
+    })
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)
