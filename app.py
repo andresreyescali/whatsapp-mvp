@@ -778,7 +778,7 @@ def test_email_only():
     from utils.email_brevo import email_sender
     
     result = email_sender.enviar_codigo_verificacion(
-        email_to="tu-email@gmail.com",  # Cambia por tu email
+        email_to="areyescali@hotmail.com",  # Cambia por tu email
         codigo="123456",
         nombre_negocio="Test Negocio"
     )
