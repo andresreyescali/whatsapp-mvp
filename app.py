@@ -717,31 +717,41 @@ def get_pedidos_tenant(tenant_id):
     estado = request.args.get('estado', 'todos')
     cliente = request.args.get('cliente', '')
     
-    with db_manager.get_connection(tenant_id) as conn:
-        with conn.cursor() as cur:
-            query = "SELECT * FROM pedidos"
-            params = []
-            
-            condiciones = []
-            if estado != 'todos':
-                condiciones.append("estado = %s")
-                params.append(estado)
-            if cliente:
-                condiciones.append("cliente_numero LIKE %s")
-                params.append(f'%{cliente}%')
-            
-            if condiciones:
-                query += " WHERE " + " AND ".join(condiciones)
-            
-            query += " ORDER BY created_at DESC"
-            
-            cur.execute(query, params)
-            rows = cur.fetchall()
-            columns = [desc[0] for desc in cur.description]
-            pedidos = [dict(zip(columns, row)) for row in rows]
-            
-            return jsonify(pedidos)
-
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                query = "SELECT * FROM pedidos"
+                params = []
+                
+                condiciones = []
+                if estado != 'todos':
+                    condiciones.append("estado = %s")
+                    params.append(estado)
+                if cliente:
+                    condiciones.append("cliente_numero LIKE %s")
+                    params.append(f'%{cliente}%')
+                
+                if condiciones:
+                    query += " WHERE " + " AND ".join(condiciones)
+                
+                query += " ORDER BY created_at DESC"
+                
+                cur.execute(query, params)
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+                pedidos = []
+                for row in rows:
+                    pedido = dict(zip(columns, row))
+                    # Asegurar que siempre hay nombre
+                    if not pedido.get('cliente_nombre'):
+                        pedido['cliente_nombre'] = pedido['cliente_numero']
+                    pedidos.append(pedido)
+                
+                return jsonify(pedidos)
+    except Exception as e:
+        logger.error(f'Error cargando pedidos: {e}')
+        return jsonify([])
+    
 @app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
 def cambiar_estado_pedido(pedido_id):
     """Cambia el estado de un pedido"""
@@ -798,7 +808,7 @@ def cambiar_estado_pedido(pedido_id):
 
 @app.route('/api/pedido/<pedido_id>/detalle', methods=['GET'])
 def detalle_pedido(pedido_id):
-    """Obtiene detalle de un pedido"""
+    """Obtiene detalle de un pedido con nombre del cliente"""
     if 'usuario_id' not in session:
         return jsonify({'error': 'No autenticado'}), 401
     
@@ -812,6 +822,11 @@ def detalle_pedido(pedido_id):
                 if row:
                     columns = [desc[0] for desc in cur.description]
                     pedido = dict(zip(columns, row))
+                    
+                    # Si no hay nombre, usar el teléfono
+                    if not pedido.get('cliente_nombre'):
+                        pedido['cliente_nombre'] = pedido['cliente_numero']
+                    
                     return jsonify(pedido)
     
     return jsonify({'error': 'Pedido no encontrado'}), 404
@@ -819,27 +834,38 @@ def detalle_pedido(pedido_id):
 @app.route('/api/tenant/<tenant_id>/conversaciones', methods=['GET'])
 def get_conversaciones(tenant_id):
     """Obtiene resumen de conversaciones por cliente"""
-    # Agrupar pedidos por cliente
-    with db_manager.get_connection(tenant_id) as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT cliente_numero, cliente_nombre, MAX(created_at) as ultimo_mensaje,
-                       COUNT(*) as total_pedidos
-                FROM pedidos
-                GROUP BY cliente_numero, cliente_nombre
-                ORDER BY ultimo_mensaje DESC
-                LIMIT 50
-            """)
-            rows = cur.fetchall()
-            conversaciones = []
-            for row in rows:
-                conversaciones.append({
-                    'cliente_numero': row[0],
-                    'cliente_nombre': row[1],
-                    'ultimo_mensaje': row[2],
-                    'total_pedidos': row[3]
-                })
-            return jsonify(conversaciones)
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        cliente_numero, 
+                        MAX(cliente_nombre) as cliente_nombre,
+                        MAX(created_at) as ultimo_mensaje,
+                        COUNT(*) as total_pedidos,
+                        MAX(estado) as ultimo_estado
+                    FROM pedidos
+                    GROUP BY cliente_numero
+                    ORDER BY ultimo_mensaje DESC
+                    LIMIT 50
+                """)
+                rows = cur.fetchall()
+                conversaciones = []
+                for row in rows:
+                    conversaciones.append({
+                        'cliente_numero': row[0],
+                        'cliente_nombre': row[1] or row[0],  # Si no hay nombre, usar teléfono
+                        'ultimo_mensaje': row[2],
+                        'total_pedidos': row[3],
+                        'ultimo_estado': row[4]
+                    })
+                return jsonify(conversaciones)
+    except Exception as e:
+        logger.error(f'Error cargando conversaciones: {e}')
+        return jsonify([])
 
 @app.route('/api/tenant/<tenant_id>/configuracion', methods=['GET', 'PUT'])
 def tenant_configuracion(tenant_id):
