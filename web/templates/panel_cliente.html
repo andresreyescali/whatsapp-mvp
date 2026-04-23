@@ -1,0 +1,543 @@
+{% extends "base.html" %}
+
+{% block title %}Panel de Control - {{ tenant.nombre }}{% endblock %}
+
+{% block content %}
+<style>
+    .tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #e0e0e0;
+        padding-bottom: 10px;
+    }
+    .tab {
+        padding: 10px 20px;
+        cursor: pointer;
+        border-radius: 8px;
+        transition: all 0.3s;
+    }
+    .tab.active {
+        background: #25D366;
+        color: white;
+    }
+    .tab:hover:not(.active) {
+        background: #f0f0f0;
+    }
+    .pedido-card {
+        background: white;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        transition: transform 0.2s;
+    }
+    .pedido-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+    .pedido-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+    }
+    .pedido-id {
+        font-weight: bold;
+        color: #25D366;
+    }
+    .estado-badge {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    .estado-nuevo { background: #2196F3; color: white; }
+    .estado-procesado { background: #FF9800; color: white; }
+    .estado-pagado { background: #4CAF50; color: white; }
+    .estado-enviado { background: #9C27B0; color: white; }
+    .estado-cancelado { background: #f44336; color: white; }
+    .pedido-items {
+        margin: 10px 0;
+        padding: 10px;
+        background: #f9f9f9;
+        border-radius: 8px;
+    }
+    .pedido-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+        flex-wrap: wrap;
+    }
+    .btn-sm {
+        padding: 5px 12px;
+        font-size: 12px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    .btn-pagado { background: #4CAF50; color: white; }
+    .btn-enviado { background: #9C27B0; color: white; }
+    .btn-cancelar { background: #f44336; color: white; }
+    .btn-detalle { background: #2196F3; color: white; }
+    .btn-chat { background: #25D366; color: white; }
+    .filtros {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+    .filtro-select {
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }
+    .alert-badge {
+        position: relative;
+        display: inline-block;
+    }
+    .alert-count {
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        background: #f44336;
+        color: white;
+        border-radius: 50%;
+        padding: 2px 6px;
+        font-size: 10px;
+    }
+    .conversacion-mensaje {
+        padding: 10px;
+        margin: 5px 0;
+        border-radius: 8px;
+        background: #f5f5f5;
+    }
+    .mensaje-cliente {
+        background: #e3f2fd;
+        border-left: 3px solid #2196F3;
+    }
+    .mensaje-bot {
+        background: #e8f5e9;
+        border-left: 3px solid #4CAF50;
+    }
+    .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 1000;
+        justify-content: center;
+        align-items: center;
+    }
+    .modal-content {
+        background: white;
+        border-radius: 10px;
+        padding: 20px;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+    .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    .stat-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+    }
+    .stat-card .number {
+        font-size: 28px;
+        font-weight: bold;
+    }
+</style>
+
+<div class="tabs">
+    <div class="tab active" onclick="mostrarTab('pedidos')">📦 Pedidos</div>
+    <div class="tab" onclick="mostrarTab('conversaciones')">💬 Conversaciones</div>
+    <div class="tab" onclick="mostrarTab('configuracion')">⚙️ Configuración</div>
+</div>
+
+<!-- Tab: Pedidos -->
+<div id="tabPedidos">
+    <div class="stats" id="statsPedidos">
+        <div class="stat-card"><div class="number" id="totalNuevos">0</div><div>Nuevos</div></div>
+        <div class="stat-card"><div class="number" id="totalProcesados">0</div><div>Procesados</div></div>
+        <div class="stat-card"><div class="number" id="totalPagados">0</div><div>Pagados</div></div>
+        <div class="stat-card"><div class="number" id="totalEnviados">0</div><div>Enviados</div></div>
+    </div>
+
+    <div class="filtros">
+        <select id="filtroEstado" class="filtro-select" onchange="cargarPedidos()">
+            <option value="todos">Todos los estados</option>
+            <option value="nuevo">🆕 Nuevos</option>
+            <option value="procesado">🔄 Procesados</option>
+            <option value="pagado">✅ Pagados</option>
+            <option value="enviado">🚚 Enviados</option>
+            <option value="cancelado">❌ Cancelados</option>
+        </select>
+        <input type="text" id="filtroCliente" placeholder="Buscar por cliente..." class="filtro-select" onkeyup="cargarPedidos()">
+        <button class="btn" onclick="cargarPedidos()">🔍 Buscar</button>
+    </div>
+
+    <div id="pedidosContainer">
+        <div class="loading">Cargando pedidos...</div>
+    </div>
+</div>
+
+<!-- Tab: Conversaciones -->
+<div id="tabConversaciones" style="display:none;">
+    <div class="card">
+        <h2>💬 Últimas conversaciones</h2>
+        <div id="conversacionesContainer">
+            <div class="loading">Cargando conversaciones...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Tab: Configuración -->
+<div id="tabConfiguracion" style="display:none;">
+    <div class="card">
+        <h2>⚙️ Configuración del negocio</h2>
+        <form id="configForm">
+            <div class="form-group">
+                <label>Nombre del negocio</label>
+                <input type="text" id="configNombre" value="{{ tenant.nombre }}">
+            </div>
+            <div class="form-group">
+                <label>Horario de atención</label>
+                <input type="text" id="configHorario" placeholder="Ej: Lunes a Domingo 12pm a 10pm">
+            </div>
+            <div class="form-group">
+                <label>Ubicación / Dirección</label>
+                <input type="text" id="configUbicacion" placeholder="Ej: Calle 123, Cali">
+            </div>
+            <div class="form-group">
+                <label>Políticas de entrega</label>
+                <textarea id="configPoliticas" rows="3" placeholder="Tiempo de entrega, mínimo de pedido, etc."></textarea>
+            </div>
+            <button type="submit" class="btn">💾 Guardar Configuración</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal de detalle de pedido -->
+<div id="detalleModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="cerrarModal()">&times;</span>
+        <h2 id="detalleTitulo">Detalle del Pedido</h2>
+        <div id="detalleContent"></div>
+        <div class="pedido-actions" id="detalleActions"></div>
+    </div>
+</div>
+
+<script>
+    const tenantId = '{{ tenant.id }}';
+    const API_BASE = window.location.origin;
+    let audioNotificacion = null;
+    
+    // Inicializar sonido de notificación
+    try {
+        audioNotificacion = new Audio('/static/notification.mp3');
+    } catch(e) { console.log('Audio no soportado'); }
+    
+    function mostrarTab(tab) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        event.target.classList.add('active');
+        
+        document.getElementById('tabPedidos').style.display = tab === 'pedidos' ? 'block' : 'none';
+        document.getElementById('tabConversaciones').style.display = tab === 'conversaciones' ? 'block' : 'none';
+        document.getElementById('tabConfiguracion').style.display = tab === 'configuracion' ? 'block' : 'none';
+        
+        if (tab === 'pedidos') cargarPedidos();
+        if (tab === 'conversaciones') cargarConversaciones();
+        if (tab === 'configuracion') cargarConfiguracion();
+    }
+    
+    async function cargarPedidos() {
+        const estado = document.getElementById('filtroEstado').value;
+        const cliente = document.getElementById('filtroCliente').value;
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}&cliente=${cliente}`);
+            const pedidos = await response.json();
+            
+            actualizarStats(pedidos);
+            
+            if (pedidos.length === 0) {
+                document.getElementById('pedidosContainer').innerHTML = '<div class="card">📭 No hay pedidos</div>';
+                return;
+            }
+            
+            let html = '';
+            pedidos.forEach(p => {
+                const estadoClass = getEstadoClass(p.estado);
+                const estadoTexto = getEstadoTexto(p.estado);
+                const items = p.items ? (Array.isArray(p.items) ? p.items : JSON.parse(p.items)) : [];
+                
+                html += `
+                    <div class="pedido-card" id="pedido-${p.id}">
+                        <div class="pedido-header">
+                            <span class="pedido-id">🆔 ${p.id.substring(0, 8)}...</span>
+                            <span class="estado-badge ${estadoClass}">${estadoTexto}</span>
+                        </div>
+                        <div><strong>📱 Cliente:</strong> ${p.cliente_nombre || p.cliente_numero}</div>
+                        <div><strong>🛒 Items:</strong> ${items.map(i => `${i.cantidad || 1}x ${i.nombre}`).join(', ')}</div>
+                        <div><strong>💰 Total:</strong> $${p.total.toLocaleString()}</div>
+                        <div><strong>🕒 Fecha:</strong> ${new Date(p.created_at).toLocaleString()}</div>
+                        <div class="pedido-actions">
+                            <button class="btn-sm btn-detalle" onclick="verDetalle('${p.id}')">📋 Ver detalle</button>
+                            <button class="btn-sm btn-chat" onclick="verConversacion('${p.cliente_numero}')">💬 Conversación</button>
+                            ${p.estado === 'pagado' ? `<button class="btn-sm btn-enviado" onclick="cambiarEstado('${p.id}', 'enviado')">🚚 Marcar enviado</button>` : ''}
+                            ${p.estado === 'nuevo' ? `<button class="btn-sm btn-pagado" onclick="cambiarEstado('${p.id}', 'pagado')">✅ Marcar pagado</button>` : ''}
+                            ${p.estado === 'procesado' ? `<button class="btn-sm btn-pagado" onclick="cambiarEstado('${p.id}', 'pagado')">✅ Marcar pagado</button>` : ''}
+                            ${p.estado !== 'cancelado' && p.estado !== 'enviado' ? `<button class="btn-sm btn-cancelar" onclick="cambiarEstado('${p.id}', 'cancelado')">❌ Cancelar</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            document.getElementById('pedidosContainer').innerHTML = html;
+            
+            // Verificar nuevos pedidos para notificación
+            const nuevos = pedidos.filter(p => p.estado === 'nuevo');
+            if (nuevos.length > 0 && document.getElementById('tabPedidos').style.display !== 'none') {
+                notificarNuevosPedidos(nuevos.length);
+            }
+            
+        } catch (error) {
+            console.error('Error:', error);
+            document.getElementById('pedidosContainer').innerHTML = '<div class="card">❌ Error al cargar pedidos</div>';
+        }
+    }
+    
+    function actualizarStats(pedidos) {
+        const stats = {
+            nuevo: pedidos.filter(p => p.estado === 'nuevo').length,
+            procesado: pedidos.filter(p => p.estado === 'procesado').length,
+            pagado: pedidos.filter(p => p.estado === 'pagado').length,
+            enviado: pedidos.filter(p => p.estado === 'enviado').length
+        };
+        document.getElementById('totalNuevos').innerText = stats.nuevo;
+        document.getElementById('totalProcesados').innerText = stats.procesado;
+        document.getElementById('totalPagados').innerText = stats.pagado;
+        document.getElementById('totalEnviados').innerText = stats.enviado;
+    }
+    
+    function notificarNuevosPedidos(cantidad) {
+        if (Notification.permission === 'granted') {
+            new Notification('📦 Nuevo pedido', {
+                body: `Tienes ${cantidad} pedido(s) nuevo(s)`,
+                icon: '/static/icon.png'
+            });
+        } else if (Notification.permission !== 'denied') {
+            Notification.requestPermission();
+        }
+        
+        if (audioNotificacion) {
+            audioNotificacion.play().catch(e => console.log('Audio no permitido'));
+        }
+        
+        showAlert('success', `📦 Tienes ${cantidad} pedido(s) nuevo(s)`, 5000);
+    }
+    
+    async function cambiarEstado(pedidoId, nuevoEstado) {
+        if (!confirm(`¿Cambiar estado del pedido a ${getEstadoTexto(nuevoEstado)}?`)) return;
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/estado`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ estado: nuevoEstado })
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                showAlert('success', `✅ Pedido ${result.mensaje}`);
+                cargarPedidos();
+            } else {
+                showAlert('error', '❌ ' + result.error);
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión');
+        }
+    }
+    
+    async function verDetalle(pedidoId) {
+        try {
+            const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/detalle`);
+            const pedido = await response.json();
+            
+            const items = pedido.items ? (Array.isArray(pedido.items) ? pedido.items : JSON.parse(pedido.items)) : [];
+            const estadoClass = getEstadoClass(pedido.estado);
+            
+            document.getElementById('detalleTitulo').innerHTML = `📋 Pedido ${pedido.id.substring(0, 8)}...`;
+            document.getElementById('detalleContent').innerHTML = `
+                <div class="pedido-header">
+                    <span class="estado-badge ${estadoClass}">${getEstadoTexto(pedido.estado)}</span>
+                </div>
+                <p><strong>📱 Cliente:</strong> ${pedido.cliente_nombre || pedido.cliente_numero}</p>
+                <p><strong>🕒 Fecha:</strong> ${new Date(pedido.created_at).toLocaleString()}</p>
+                ${pedido.pagado_at ? `<p><strong>✅ Pagado el:</strong> ${new Date(pedido.pagado_at).toLocaleString()}</p>` : ''}
+                ${pedido.enviado_at ? `<p><strong>🚚 Enviado el:</strong> ${new Date(pedido.enviado_at).toLocaleString()}</p>` : ''}
+                <div class="pedido-items">
+                    <strong>🛒 Productos:</strong>
+                    <ul>
+                        ${items.map(i => `<li>${i.cantidad || 1}x ${i.nombre} - $${(i.precio * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
+                    </ul>
+                </div>
+                <p><strong>💰 Total:</strong> $${pedido.total.toLocaleString()}</p>
+                ${pedido.notas ? `<p><strong>📝 Notas:</strong> ${pedido.notas}</p>` : ''}
+            `;
+            
+            let actionsHtml = `<button class="btn-sm btn-chat" onclick="verConversacion('${pedido.cliente_numero}')">💬 Ver conversación</button>`;
+            if (pedido.estado === 'pagado') {
+                actionsHtml += `<button class="btn-sm btn-enviado" onclick="cambiarEstado('${pedido.id}', 'enviado')">🚚 Marcar enviado</button>`;
+            }
+            if (pedido.estado === 'nuevo' || pedido.estado === 'procesado') {
+                actionsHtml += `<button class="btn-sm btn-pagado" onclick="cambiarEstado('${pedido.id}', 'pagado')">✅ Marcar pagado</button>`;
+            }
+            if (pedido.estado !== 'cancelado' && pedido.estado !== 'enviado') {
+                actionsHtml += `<button class="btn-sm btn-cancelar" onclick="cambiarEstado('${pedido.id}', 'cancelado')">❌ Cancelar</button>`;
+            }
+            document.getElementById('detalleActions').innerHTML = actionsHtml;
+            
+            document.getElementById('detalleModal').style.display = 'flex';
+        } catch (error) {
+            showAlert('error', 'Error al cargar detalle');
+        }
+    }
+    
+    function cerrarModal() {
+        document.getElementById('detalleModal').style.display = 'none';
+    }
+    
+    async function cargarConversaciones() {
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/conversaciones`);
+            const conversaciones = await response.json();
+            
+            if (conversaciones.length === 0) {
+                document.getElementById('conversacionesContainer').innerHTML = '<div class="card">💬 No hay conversaciones aún</div>';
+                return;
+            }
+            
+            let html = '';
+            conversaciones.forEach(conv => {
+                html += `
+                    <div class="card">
+                        <div class="pedido-header">
+                            <span><strong>📱 ${conv.cliente_nombre || conv.cliente_numero}</strong></span>
+                            <span>🕒 ${new Date(conv.ultimo_mensaje).toLocaleString()}</span>
+                        </div>
+                        <div class="conversacion-mensaje mensaje-${conv.ultimo_mensaje_tipo || 'bot'}">
+                            ${conv.ultimo_mensaje || 'Sin mensajes'}
+                        </div>
+                        <div class="pedido-actions">
+                            <button class="btn-sm btn-chat" onclick="abrirChat('${conv.cliente_numero}')">💬 Abrir conversación</button>
+                            <button class="btn-sm" onclick="verPedidosCliente('${conv.cliente_numero}')">📦 Ver pedidos</button>
+                        </div>
+                    </div>
+                `;
+            });
+            document.getElementById('conversacionesContainer').innerHTML = html;
+        } catch (error) {
+            document.getElementById('conversacionesContainer').innerHTML = '<div class="card">❌ Error al cargar conversaciones</div>';
+        }
+    }
+    
+    function verConversacion(clienteNumero) {
+        window.open(`https://wa.me/${clienteNumero}`, '_blank');
+    }
+    
+    function abrirChat(clienteNumero) {
+        verConversacion(clienteNumero);
+    }
+    
+    async function verPedidosCliente(clienteNumero) {
+        document.getElementById('filtroCliente').value = clienteNumero;
+        mostrarTab('pedidos');
+        cargarPedidos();
+    }
+    
+    async function cargarConfiguracion() {
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/configuracion`);
+            const config = await response.json();
+            document.getElementById('configHorario').value = config.horario || '';
+            document.getElementById('configUbicacion').value = config.ubicacion || '';
+            document.getElementById('configPoliticas').value = config.politicas || '';
+        } catch (error) {
+            console.error('Error cargando config:', error);
+        }
+    }
+    
+    document.getElementById('configForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const data = {
+            horario: document.getElementById('configHorario').value,
+            ubicacion: document.getElementById('configUbicacion').value,
+            politicas: document.getElementById('configPoliticas').value
+        };
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/configuracion`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            if (response.ok) {
+                showAlert('success', '✅ Configuración guardada');
+            } else {
+                showAlert('error', '❌ Error al guardar');
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión');
+        }
+    };
+    
+    function getEstadoClass(estado) {
+        const classes = {
+            'nuevo': 'estado-nuevo',
+            'procesado': 'estado-procesado',
+            'pagado': 'estado-pagado',
+            'enviado': 'estado-enviado',
+            'cancelado': 'estado-cancelado'
+        };
+        return classes[estado] || 'estado-nuevo';
+    }
+    
+    function getEstadoTexto(estado) {
+        const textos = {
+            'nuevo': '🆕 Nuevo',
+            'procesado': '🔄 Procesado',
+            'pagado': '✅ Pagado',
+            'enviado': '🚚 Enviado',
+            'cancelado': '❌ Cancelado'
+        };
+        return textos[estado] || estado;
+    }
+    
+    // Cargar datos iniciales
+    cargarPedidos();
+    
+    // Recargar pedidos cada 30 segundos
+    setInterval(cargarPedidos, 30000);
+    
+    // Cerrar modal al hacer clic fuera
+    window.onclick = function(event) {
+        if (event.target == document.getElementById('detalleModal')) {
+            cerrarModal();
+        }
+    }
+</script>
+{% endblock %}

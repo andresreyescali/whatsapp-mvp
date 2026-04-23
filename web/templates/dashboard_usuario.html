@@ -34,9 +34,9 @@
             <tbody>
                 {% for n in negocios %}
                 <tr id="row-{{ n.id }}">
-                    <td><strong>{{ n.nombre }}</strong></td>
+                    <td><strong>{{ n.nombre }}</strong></strong></td>
                     <td><code>{{ n.phone_id }}</code></td>
-                    <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %} </code></td>
+                    <td>{% if n.verificado %}✅ Verificado{% else %}⏳ Pendiente{% endif %} </code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></td>
                     <td>
                         {% if n.rol == 'owner' %}
                             <span class="badge-owner">👑 Propietario</span>
@@ -47,18 +47,19 @@
                         {% else %}
                             <span class="badge-viewer">👁️ Visualizador</span>
                         {% endif %}
-                    </td>
+                    </code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></td>
                     <td>
                         <a href="/admin/menu?tenant_id={{ n.id }}" class="btn-small">🎛️ Gestionar</a>
+                        <a href="/panel/{{ n.id }}" class="btn-small" style="background: #9C27B0;">📊 Panel</a>
                         <button class="btn-small btn-team" onclick="verEquipo('{{ n.id }}', '{{ n.nombre|escape }}')">👥 Equipo</button>
                         {% if not n.verificado %}
                             <button class="btn-small btn-verify" onclick="verificarNegocio('{{ n.id }}')">🔐 Verificar</button>
                         {% endif %}
-                    </td>
-                </tr>
+                    </code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></td>
+                </code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></code></td>
                 {% endfor %}
             </tbody>
-        </table>
+        </code>
     </div>
     {% else %}
     <p>No tienes negocios registrados.</p>
@@ -390,7 +391,7 @@
         document.getElementById('verificacionAlert').style.display = 'none';
     }
     
-    // ==================== REGISTRO DE NEGOCIO (PASO 6 INCLUIDO) ====================
+    // ==================== REGISTRO DE NEGOCIO ====================
     
     document.getElementById('negocioForm').onsubmit = async (e) => {
         e.preventDefault();
@@ -413,7 +414,6 @@
                 alertDiv.className = 'alert alert-success';
                 alertDiv.style.display = 'block';
                 
-                // Mensaje según si se envió el código por WhatsApp
                 if (result.codigo_enviado) {
                     alertDiv.innerHTML = '✅ Negocio registrado. Hemos enviado un código de verificación a tu WhatsApp.';
                 } else {

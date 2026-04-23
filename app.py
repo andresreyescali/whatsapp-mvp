@@ -694,6 +694,179 @@ def get_tenant_context(tenant_id):
     except Exception as e:
         return jsonify({}), 500
 
+# ==================== PANEL DEL CLIENTE ====================
+
+@app.route('/panel/<tenant_id>')
+def panel_cliente(tenant_id):
+    """Panel de control del cliente (tenant)"""
+    if 'usuario_id' not in session:
+        return redirect('/')
+    
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if not tenant:
+        return "Tenant no encontrado", 404
+    
+    return render_template('panel_cliente.html', tenant=tenant)
+
+@app.route('/api/tenant/<tenant_id>/pedidos', methods=['GET'])
+def get_pedidos_tenant(tenant_id):
+    """Obtiene pedidos del tenant con filtros"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    estado = request.args.get('estado', 'todos')
+    cliente = request.args.get('cliente', '')
+    
+    with db_manager.get_connection(tenant_id) as conn:
+        with conn.cursor() as cur:
+            query = "SELECT * FROM pedidos"
+            params = []
+            
+            condiciones = []
+            if estado != 'todos':
+                condiciones.append("estado = %s")
+                params.append(estado)
+            if cliente:
+                condiciones.append("cliente_numero LIKE %s")
+                params.append(f'%{cliente}%')
+            
+            if condiciones:
+                query += " WHERE " + " AND ".join(condiciones)
+            
+            query += " ORDER BY created_at DESC"
+            
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description]
+            pedidos = [dict(zip(columns, row)) for row in rows]
+            
+            return jsonify(pedidos)
+
+@app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
+def cambiar_estado_pedido(pedido_id):
+    """Cambia el estado de un pedido"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    data = request.json
+    nuevo_estado = data.get('estado')
+    
+    # Buscar en qué tenant está el pedido
+    tenants = tenant_repo.get_all()
+    for t in tenants:
+        with db_manager.get_connection(t['id']) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT tenant_id FROM pedidos WHERE id = %s", (pedido_id,))
+                row = cur.fetchone()
+                if row:
+                    tenant_id = row[0]
+                    break
+    
+    if not tenant_id:
+        return jsonify({'error': 'Pedido no encontrado'}), 404
+    
+    # Actualizar estado
+    fecha_campo = {
+        'pagado': 'pagado_at',
+        'enviado': 'enviado_at',
+        'cancelado': 'cancelado_at'
+    }.get(nuevo_estado)
+    
+    with db_manager.get_connection(tenant_id) as conn:
+        with conn.cursor() as cur:
+            if fecha_campo:
+                cur.execute(f"""
+                    UPDATE pedidos 
+                    SET estado = %s, updated_at = NOW(), {fecha_campo} = NOW()
+                    WHERE id = %s
+                """, (nuevo_estado, pedido_id))
+            else:
+                cur.execute("""
+                    UPDATE pedidos 
+                    SET estado = %s, updated_at = NOW()
+                    WHERE id = %s
+                """, (nuevo_estado, pedido_id))
+        conn.commit()
+    
+    # Si el pedido es nuevo, enviar notificación por email
+    if nuevo_estado == 'pagado':
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if tenant:
+            enviar_notificacion_email(tenant, pedido_id)
+    
+    return jsonify({'success': True, 'mensaje': f'Pedido {nuevo_estado}'})
+
+@app.route('/api/pedido/<pedido_id>/detalle', methods=['GET'])
+def detalle_pedido(pedido_id):
+    """Obtiene detalle de un pedido"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    # Buscar en qué tenant está el pedido
+    tenants = tenant_repo.get_all()
+    for t in tenants:
+        with db_manager.get_connection(t['id']) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM pedidos WHERE id = %s", (pedido_id,))
+                row = cur.fetchone()
+                if row:
+                    columns = [desc[0] for desc in cur.description]
+                    pedido = dict(zip(columns, row))
+                    return jsonify(pedido)
+    
+    return jsonify({'error': 'Pedido no encontrado'}), 404
+
+@app.route('/api/tenant/<tenant_id>/conversaciones', methods=['GET'])
+def get_conversaciones(tenant_id):
+    """Obtiene resumen de conversaciones por cliente"""
+    # Agrupar pedidos por cliente
+    with db_manager.get_connection(tenant_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT cliente_numero, cliente_nombre, MAX(created_at) as ultimo_mensaje,
+                       COUNT(*) as total_pedidos
+                FROM pedidos
+                GROUP BY cliente_numero, cliente_nombre
+                ORDER BY ultimo_mensaje DESC
+                LIMIT 50
+            """)
+            rows = cur.fetchall()
+            conversaciones = []
+            for row in rows:
+                conversaciones.append({
+                    'cliente_numero': row[0],
+                    'cliente_nombre': row[1],
+                    'ultimo_mensaje': row[2],
+                    'total_pedidos': row[3]
+                })
+            return jsonify(conversaciones)
+
+@app.route('/api/tenant/<tenant_id>/configuracion', methods=['GET', 'PUT'])
+def tenant_configuracion(tenant_id):
+    """Obtiene o actualiza configuración del tenant"""
+    if 'usuario_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    if request.method == 'GET':
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT configuracion FROM public.tenants WHERE id = %s", (tenant_id,))
+                row = cur.fetchone()
+                config = row[0] if row and row[0] else {}
+                return jsonify(config)
+    
+    if request.method == 'PUT':
+        data = request.json
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE public.tenants 
+                    SET configuracion = configuracion || %s
+                    WHERE id = %s
+                """, (json.dumps(data), tenant_id))
+            conn.commit()
+        return jsonify({'success': True})
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
@@ -784,6 +957,23 @@ def test_email_only():
     )
     
     return jsonify({'success': result})
+
+def enviar_notificacion_email(tenant, pedido_id):
+    """Envía notificación de nuevo pedido por email"""
+    from utils.email_brevo import email_sender
+    
+    # Obtener email del dueño del negocio
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT u.email FROM public.usuarios u
+                JOIN public.usuario_negocio un ON u.id = un.usuario_id
+                WHERE un.tenant_id = %s AND un.rol_id = 1
+            """, (tenant['id'],))
+            row = cur.fetchone()
+            if row:
+                email_to = row[0]
+                email_sender.enviar_notificacion_pedido(email_to, pedido_id, tenant['nombre'])
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')

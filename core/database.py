@@ -187,6 +187,25 @@ class DatabaseManager:
                         updated_at TIMESTAMP DEFAULT NOW()
                     )
                     ''')
+
+                    # Tabla de pedidos mejorada
+                    cur.execute('''
+                    CREATE TABLE IF NOT EXISTS public.pedidos (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT REFERENCES public.tenants(id) ON DELETE CASCADE,
+                        cliente_numero TEXT NOT NULL,
+                        cliente_nombre TEXT,
+                        items JSONB NOT NULL,
+                        total INTEGER NOT NULL,
+                        estado VARCHAR(50) DEFAULT 'nuevo',
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        pagado_at TIMESTAMP,
+                        enviado_at TIMESTAMP,
+                        cancelado_at TIMESTAMP,
+                        notas TEXT
+                    );
+                    ''')
                     
                     # Índices
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_tenants_phone_id ON public.tenants(phone_id)')
