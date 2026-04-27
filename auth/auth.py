@@ -160,68 +160,68 @@ class AuthManager:
                 return [{'id': r[0], 'nombre': r[1], 'phone_id': r[2], 'rol': r[3], 'verificado': r[4]} for r in rows]
     
     def crear_negocio(self, usuario_id: str, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante') -> dict:
-    from tenants.repository import tenant_repo
-    from tenants.schema_manager import schema_manager
-    from utils.email_brevo import email_sender
-    
-    # Verificar nombre único
-    with db_manager.get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM public.tenants WHERE nombre = %s", (nombre,))
-            if cur.fetchone():
-                return {'success': False, 'error': 'Ya existe un negocio con ese nombre'}
-    
-    # Crear tenant
-    tenant = tenant_repo.create(nombre, phone_id, token, tipo_negocio)
-    schema_manager.create_tenant_schema(tenant['id'], tipo_negocio)
-    
-    # Asociar usuario como owner
-    with db_manager.get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
-            rol_owner_id = cur.fetchone()[0]
-            cur.execute('''
-                INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por)
-                VALUES (%s, %s, %s, %s)
-            ''', (usuario_id, tenant['id'], rol_owner_id, usuario_id))
-        conn.commit()
-    
-    # Generar código de verificación
-    import secrets
-    codigo_verificacion = secrets.token_hex(3).upper()
-    
-    # Guardar en base de datos
-    with db_manager.get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('''
-                INSERT INTO public.verificacion_negocio (tenant_id, metodo_verificacion, codigo_verificacion, codigo_enviado)
-                VALUES (%s, %s, %s, NOW())
-            ''', (tenant['id'], 'email', codigo_verificacion))
-        conn.commit()
-    
-    # Obtener email del usuario
-    email_usuario = None
-    with db_manager.get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT email FROM public.usuarios WHERE id = %s", (usuario_id,))
-            row = cur.fetchone()
-            if row:
-                email_usuario = row[0]
-    
-    # Enviar código por EMAIL (no WhatsApp)
-    email_enviado = False
-    if email_usuario:
-        email_enviado = email_sender.enviar_codigo_verificacion(email_usuario, codigo_verificacion, nombre)
-    
-    return {
-        'success': True,
-        'tenant_id': tenant['id'],
-        'nombre': nombre,
-        'codigo_verificacion': codigo_verificacion,
-        'email_enviado': email_enviado,
-        'mensaje': f'Código enviado a {email_usuario}' if email_enviado else f'Código: {codigo_verificacion}'
-    }
-    
+        from tenants.repository import tenant_repo
+        from tenants.schema_manager import schema_manager
+        from utils.email_brevo import email_sender
+        
+        # Verificar nombre único
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM public.tenants WHERE nombre = %s", (nombre,))
+                if cur.fetchone():
+                    return {'success': False, 'error': 'Ya existe un negocio con ese nombre'}
+        
+        # Crear tenant
+        tenant = tenant_repo.create(nombre, phone_id, token, tipo_negocio)
+        schema_manager.create_tenant_schema(tenant['id'], tipo_negocio)
+        
+        # Asociar usuario como owner
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
+                rol_owner_id = cur.fetchone()[0]
+                cur.execute('''
+                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por)
+                    VALUES (%s, %s, %s, %s)
+                ''', (usuario_id, tenant['id'], rol_owner_id, usuario_id))
+            conn.commit()
+        
+        # Generar código de verificación
+        import secrets
+        codigo_verificacion = secrets.token_hex(3).upper()
+        
+        # Guardar en base de datos
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    INSERT INTO public.verificacion_negocio (tenant_id, metodo_verificacion, codigo_verificacion, codigo_enviado)
+                    VALUES (%s, %s, %s, NOW())
+                ''', (tenant['id'], 'email', codigo_verificacion))
+            conn.commit()
+        
+        # Obtener email del usuario
+        email_usuario = None
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT email FROM public.usuarios WHERE id = %s", (usuario_id,))
+                row = cur.fetchone()
+                if row:
+                    email_usuario = row[0]
+        
+        # Enviar código por EMAIL (no WhatsApp)
+        email_enviado = False
+        if email_usuario:
+            email_enviado = email_sender.enviar_codigo_verificacion(email_usuario, codigo_verificacion, nombre)
+        
+        return {
+            'success': True,
+            'tenant_id': tenant['id'],
+            'nombre': nombre,
+            'codigo_verificacion': codigo_verificacion,
+            'email_enviado': email_enviado,
+            'mensaje': f'Código enviado a {email_usuario}' if email_enviado else f'Código: {codigo_verificacion}'
+        }
+        
     def enviar_codigo_whatsapp(self, phone_id: str, token: str, codigo: str, telefono_cliente: str) -> bool:
         """Envía el código de verificación por WhatsApp"""
         from whatsapp.client import whatsapp_client
