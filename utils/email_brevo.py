@@ -7,7 +7,8 @@ class BrevoEmailSender:
     
     def __init__(self):
         self.api_key = os.environ.get('BREVO_API_KEY')
-        self.from_email = os.environ.get('EMAIL_FROM', 'no-reply@tudominio.com')
+        # CORREGIDO: usar el email que usaste para registrar Brevo (debe estar verificado)
+        self.from_email = os.environ.get('EMAIL_FROM', 'no-reply@avarstechnology.com')
         self.from_name = os.environ.get('EMAIL_FROM_NAME', 'WhatsApp Bot SaaS')
     
     def enviar_codigo_verificacion(self, email_to: str, codigo: str, nombre_negocio: str) -> bool:
@@ -17,9 +18,13 @@ class BrevoEmailSender:
             logger.error("BREVO_API_KEY no configurada")
             return False
         
+        # Si el email remitente no está configurado, usar el de la API (Brevo asigna uno por defecto)
+        if not self.from_email or self.from_email == 'tu-email-registrado@gmail.com':
+            # Brevo asigna un remitente por defecto si no especificas uno verificado
+            self.from_email = None
+        
         subject = f"🔐 Código de verificación - {nombre_negocio}"
         
-        # Versión HTML del email
         html_content = f"""
 <!DOCTYPE html>
 <html>
@@ -32,7 +37,6 @@ class BrevoEmailSender:
         .content {{ padding: 20px; background: #f9f9f9; }}
         .code {{ font-size: 32px; font-weight: bold; color: #25D366; text-align: center; padding: 20px; letter-spacing: 5px; background: white; border-radius: 10px; }}
         .footer {{ font-size: 12px; color: #666; text-align: center; margin-top: 20px; }}
-        .btn {{ background: #25D366; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }}
     </style>
 </head>
 <body>
@@ -50,14 +54,12 @@ class BrevoEmailSender:
         </div>
         <div class="footer">
             <p>© 2026 WhatsApp Bot SaaS - Automatiza tus ventas</p>
-            <p><a href="https://whatsapp-mvp-docker.onrender.com/terminos">Términos y condiciones</a></p>
         </div>
     </div>
 </body>
 </html>
         """
         
-        # Versión texto plano
         text_content = f"""
 Código de verificación: {codigo}
 
@@ -73,13 +75,17 @@ Ingresa este código en el panel de control para activar tu asistente de ventas.
             "content-type": "application/json"
         }
         
+        # Configurar datos del email
         data = {
-            "sender": {"name": self.from_name, "email": self.from_email},
             "to": [{"email": email_to}],
             "subject": subject,
             "htmlContent": html_content,
             "textContent": text_content
         }
+        
+        # Solo incluir sender si está configurado
+        if self.from_email:
+            data["sender"] = {"name": self.from_name, "email": self.from_email}
         
         try:
             response = requests.post(url, headers=headers, json=data, timeout=30)
