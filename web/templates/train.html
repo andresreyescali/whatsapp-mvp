@@ -3,12 +3,9 @@
 {% block title %}Entrenar IA - {{ tenant_id }}{% endblock %}
 
 {% block content %}
-<div class="card" style="margin-bottom: 20px;">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h2 style="margin: 0;">🤖 Entrenar Asistente IA</h2>
-        <a href="/admin/menu?tenant_id={{ tenant_id }}" class="btn">📋 Volver al Menú</a>
-    </div>
-    <p style="margin-top: 10px;">Sube una imagen de tu menú o escribe la información de tu negocio para que la IA aprenda a atender pedidos correctamente.</p>
+<div class="card">
+    <h2>🤖 Entrenar Asistente IA</h2>
+    <p>Sube una imagen de tu menú o escribe la información de tu negocio para que la IA aprenda a atender pedidos correctamente.</p>
 </div>
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
@@ -23,7 +20,7 @@
         </div>
         
         <div id="imagePreview" style="margin-top: 10px; display: none;">
-            <img id="preview" style="max-width: 100%; border-radius: 10px;">
+            <img id="previewImg" style="max-width: 100%; border-radius: 10px;">
         </div>
         
         <button id="trainImageBtn" class="btn" style="margin-top: 15px;" disabled>Entrenar con imagen</button>
@@ -37,7 +34,7 @@
         
         <div class="form-group">
             <label>Descripción del negocio</label>
-            <textarea id="textoInput" rows="8" placeholder="Ejemplo:
+            <textarea id="textoEntrenamiento" rows="10" placeholder="Ejemplo:
             
 Nombre: Pizzería Avars
 Horario: Lunes a Domingo 12pm a 10pm
@@ -51,7 +48,6 @@ Productos:
 Políticas:
 - Tiempo de entrega: 30-45 minutos
 - Mínimo para envío: $15,000
-- Formas de pago: efectivo, transferencia, link de pago
 
 Instrucciones para atender:
 - Sé amable y ofrece combos
@@ -64,129 +60,120 @@ Instrucciones para atender:
     </div>
 </div>
 
-<div class="card" id="contextPreview" style="display: none;">
-    <h2>📋 Contexto aprendido</h2>
-    <div id="contextContent"></div>
-    <a href="/admin/menu?tenant_id={{ tenant_id }}" class="btn" style="margin-top: 15px;">Ver menú generado</a>
+<!-- Contexto actual -->
+<div id="contextoCard" class="card" style="display: none;">
+    <h2>📋 Contexto aprendido actualmente</h2>
+    <div id="contextoContent"></div>
+    <button id="clearContextBtn" class="btn btn-danger" style="margin-top: 15px;">🗑️ Limpiar contexto aprendido</button>
+    <p style="font-size:12px; color:#666; margin-top:10px;">Esto eliminará el contexto de IA, pero NO eliminará los productos del menú.</p>
 </div>
+
+<style>
+    .alert-info { background: #e3f2fd; color: #0c5460; border: 1px solid #bee5eb; padding: 12px; border-radius: 8px; margin-bottom: 15px; }
+    .btn-danger { background: #dc3545; color: white; }
+    .btn-danger:hover { background: #c82333; }
+    .producto-item { padding: 5px; margin: 3px 0; background: #f5f5f5; border-radius: 5px; }
+</style>
 
 <script>
     const tenantId = '{{ tenant_id }}';
+    const API_BASE = window.location.origin;
     
-    // Previsualizar imagen
-    document.getElementById('imageInput').onchange = function(e) {
+    // Mostrar alerta
+    function showAlert(type, message) {
+        const alertDiv = document.getElementById('alert');
+        if (alertDiv) {
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = message;
+            alertDiv.style.display = 'block';
+            setTimeout(() => {
+                alertDiv.style.display = 'none';
+            }, 4000);
+        } else {
+            alert(message);
+        }
+    }
+    
+    // ==================== CARGAR CONTEXTO EXISTENTE ====================
+    async function cargarContexto() {
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/context`);
+            const contexto = await response.json();
+            
+            if (contexto && contexto.menu_estructurado && contexto.menu_estructurado.length > 0) {
+                const card = document.getElementById('contextoCard');
+                const content = document.getElementById('contextoContent');
+                
+                let html = '<p><strong>Productos aprendidos:</strong></p><ul>';
+                contexto.menu_estructurado.slice(0, 20).forEach(p => {
+                    html += `<li>${p.nombre} - $${p.precio}${p.descripcion ? ` (${p.descripcion.substring(0, 50)})` : ''}</li>`;
+                });
+                if (contexto.menu_estructurado.length > 20) {
+                    html += `<li>... y ${contexto.menu_estructurado.length - 20} más</li>`;
+                }
+                html += '</ul>';
+                
+                if (contexto.horario) html += `<p><strong>Horario:</strong> ${contexto.horario}</p>`;
+                if (contexto.ubicacion) html += `<p><strong>Ubicación:</strong> ${contexto.ubicacion}</p>`;
+                if (contexto.politicas) html += `<p><strong>Políticas:</strong> ${contexto.politicas.substring(0, 100)}...</p>`;
+                
+                content.innerHTML = html;
+                card.style.display = 'block';
+            } else {
+                document.getElementById('contextoCard').style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Error cargando contexto:', error);
+        }
+    }
+    
+    // ==================== PREVISUALIZAR IMAGEN ====================
+    document.getElementById('imageInput').addEventListener('change', function(e) {
         const file = e.target.files[0];
+        const preview = document.getElementById('imagePreview');
+        const previewImg = document.getElementById('previewImg');
+        const trainBtn = document.getElementById('trainImageBtn');
+        
         if (file) {
             const reader = new FileReader();
             reader.onload = function(event) {
-                document.getElementById('preview').src = event.target.result;
-                document.getElementById('imagePreview').style.display = 'block';
-                document.getElementById('trainImageBtn').disabled = false;
-                window.selectedImage = event.target.result.split(',')[1];
+                previewImg.src = event.target.result;
+                preview.style.display = 'block';
+                trainBtn.disabled = false;
+                trainBtn.textContent = '📸 Entrenar con imagen';
             };
             reader.readAsDataURL(file);
-        }
-    };
-    
-// Entrenar con texto
-async function entrenarTexto() {
-    const texto = document.getElementById('textoEntrenamiento').value;
-    if (!texto.trim()) {
-        showAlert('error', 'Por favor ingresa la descripción de tu negocio');
-        return;
-    }
-    
-    const btn = document.getElementById('trainTextBtn');
-    const resultDiv = document.getElementById('textResult');
-    
-    btn.disabled = true;
-    btn.textContent = 'Procesando...';
-    resultDiv.style.display = 'block';
-    resultDiv.className = 'alert alert-info';
-    resultDiv.innerHTML = '🔄 Procesando con IA...';
-    
-    try {
-        const response = await fetch(`/admin/train/${tenantId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tipo: 'texto', texto: texto })
-        });
-        
-        const result = await response.json();
-        console.log('Respuesta:', result);
-        
-        if (result.status === 'ok' || response.ok) {
-            const productos = result.contexto?.productos || result.productos || [];
-            const guardados = result.productos_guardados || productos.length;
-            
-            resultDiv.className = 'alert alert-success';
-            resultDiv.innerHTML = `
-                ✅ <strong>¡Entrenamiento completado!</strong><br>
-                📦 Productos procesados: ${productos.length}<br>
-                💾 Productos guardados: ${guardados}<br>
-                <a href="/admin/menu?tenant_id=${tenantId}" class="btn btn-small" style="margin-top:10px; background:#25D366; color:white;">📋 Ir al menú</a>
-            `;
-            
-            // Limpiar el área de texto
-            document.getElementById('textoEntrenamiento').value = '';
-            
-            // Mostrar resumen de lo aprendido
-            if (productos.length > 0) {
-                let resumen = '<div style="margin-top:15px; padding:10px; background:#f0f0f0; border-radius:8px;"><strong>📋 Productos aprendidos:</strong><ul>';
-                productos.slice(0, 10).forEach(p => {
-                    resumen += `<li>${p.nombre} - $${p.precio}</li>`;
-                });
-                if (productos.length > 10) {
-                    resumen += `<li>... y ${productos.length - 10} más</li>`;
-                }
-                resumen += '</ul></div>';
-                resultDiv.innerHTML += resumen;
-            }
         } else {
-            throw new Error(result.error || 'Error desconocido');
+            preview.style.display = 'none';
+            trainBtn.disabled = true;
         }
-    } catch (error) {
-        console.error('Error:', error);
-        resultDiv.className = 'alert alert-error';
-        resultDiv.innerHTML = '❌ Error: ' + error.message;
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Entrenar con texto';
-    }
-}
-
-// Entrenar con imagen
-async function entrenarImagen() {
-    const imageInput = document.getElementById('imageInput');
-    const resultDiv = document.getElementById('imageResult');
-    const btn = document.getElementById('trainImageBtn');
+    });
     
-    if (!imageInput.files || imageInput.files.length === 0) {
-        showAlert('error', 'Por favor selecciona una imagen');
-        return;
-    }
-    
-    const file = imageInput.files[0];
-    const reader = new FileReader();
-    
-    reader.onloadend = async function() {
-        const base64String = reader.result.split(',')[1];
+    // ==================== ENTRENAR CON TEXTO ====================
+    window.entrenarTexto = async function() {
+        const texto = document.getElementById('textoEntrenamiento').value;
+        if (!texto.trim()) {
+            showAlert('error', 'Por favor ingresa la descripción de tu negocio');
+            return;
+        }
+        
+        const btn = document.getElementById('trainTextBtn');
+        const resultDiv = document.getElementById('textResult');
         
         btn.disabled = true;
-        btn.textContent = 'Procesando imagen...';
+        btn.textContent = 'Procesando...';
         resultDiv.style.display = 'block';
         resultDiv.className = 'alert alert-info';
-        resultDiv.innerHTML = '🔄 Leyendo texto de la imagen con OCR... (puede tomar 10-20 segundos)';
+        resultDiv.innerHTML = '🔄 Procesando con IA... Esto puede tomar unos segundos.';
         
         try {
-            const response = await fetch(`/admin/train/${tenantId}`, {
+            const response = await fetch(`${API_BASE}/admin/train/${tenantId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tipo: 'imagen', imagen: base64String })
+                body: JSON.stringify({ tipo: 'texto', texto: texto })
             });
             
             const result = await response.json();
-            console.log('Respuesta imagen:', result);
             
             if (result.status === 'ok' || response.ok) {
                 const productos = result.contexto?.productos || result.productos || [];
@@ -200,22 +187,21 @@ async function entrenarImagen() {
                     <a href="/admin/menu?tenant_id=${tenantId}" class="btn btn-small" style="margin-top:10px; background:#25D366; color:white;">📋 Ir al menú</a>
                 `;
                 
-                // Limpiar la selección de imagen
-                imageInput.value = '';
-                document.getElementById('imagePreview').style.display = 'none';
-                
-                // Mostrar resumen de lo aprendido
+                // Mostrar resumen de productos
                 if (productos.length > 0) {
-                    let resumen = '<div style="margin-top:15px; padding:10px; background:#f0f0f0; border-radius:8px;"><strong>📋 Productos aprendidos:</strong><ul>';
-                    productos.slice(0, 10).forEach(p => {
-                        resumen += `<li>${p.nombre} - $${p.precio}</li>`;
+                    let resumen = '<div style="margin-top:15px; padding:10px; background:#e8f5e9; border-radius:8px;"><strong>📋 Productos aprendidos:</strong><ul>';
+                    productos.slice(0, 15).forEach(p => {
+                        resumen += `<li><strong>${p.nombre}</strong> - $${p.precio}</li>`;
                     });
-                    if (productos.length > 10) {
-                        resumen += `<li>... y ${productos.length - 10} más</li>`;
+                    if (productos.length > 15) {
+                        resumen += `<li>... y ${productos.length - 15} más</li>`;
                     }
                     resumen += '</ul></div>';
                     resultDiv.innerHTML += resumen;
                 }
+                
+                document.getElementById('textoEntrenamiento').value = '';
+                cargarContexto(); // Recargar contexto
             } else {
                 throw new Error(result.error || 'Error desconocido');
             }
@@ -225,44 +211,112 @@ async function entrenarImagen() {
             resultDiv.innerHTML = '❌ Error: ' + error.message;
         } finally {
             btn.disabled = false;
-            btn.textContent = 'Entrenar con imagen';
+            btn.textContent = 'Entrenar con texto';
         }
     };
     
-    reader.readAsDataURL(file);
-}    
-    function mostrarContexto(contexto) {
-        const preview = document.getElementById('contextPreview');
-        const content = document.getElementById('contextContent');
+    // ==================== ENTRENAR CON IMAGEN ====================
+    window.entrenarImagen = async function() {
+        const imageInput = document.getElementById('imageInput');
+        const resultDiv = document.getElementById('imageResult');
+        const btn = document.getElementById('trainImageBtn');
         
-        let html = '<ul>';
-        if (contexto.productos && contexto.productos.length > 0) {
-            html += `<li><strong>📦 Productos detectados:</strong> ${contexto.productos.length}</li>`;
+        if (!imageInput.files || imageInput.files.length === 0) {
+            showAlert('error', 'Por favor selecciona una imagen');
+            return;
         }
-        if (contexto.horario) html += `<li><strong>🕒 Horario:</strong> ${contexto.horario}</li>`;
-        if (contexto.ubicacion) html += `<li><strong>📍 Ubicación:</strong> ${contexto.ubicacion}</li>`;
-        if (contexto.politicas) html += `<li><strong>📋 Políticas:</strong> ${contexto.politicas.substring(0, 100)}...</li>`;
-        html += '</ul>';
         
-        content.innerHTML = html;
-        preview.style.display = 'block';
-    }
-    
-    // Cargar contexto existente
-    async function cargarContexto() {
-        try {
-            const response = await fetch(`/api/tenant/${tenantId}/context`);
-            if (response.ok) {
-                const contexto = await response.json();
-                if (contexto && contexto.menu_estructurado && contexto.menu_estructurado.length > 0) {
-                    mostrarContexto(contexto);
+        const file = imageInput.files[0];
+        const reader = new FileReader();
+        
+        reader.onloadend = async function() {
+            const base64String = reader.result.split(',')[1];
+            
+            btn.disabled = true;
+            btn.textContent = 'Procesando imagen...';
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'alert alert-info';
+            resultDiv.innerHTML = '🔄 Leyendo texto de la imagen con OCR... (puede tomar 10-20 segundos)';
+            
+            try {
+                const response = await fetch(`${API_BASE}/admin/train/${tenantId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tipo: 'imagen', imagen: base64String })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'ok' || response.ok) {
+                    const productos = result.contexto?.productos || result.productos || [];
+                    const guardados = result.productos_guardados || productos.length;
+                    
+                    resultDiv.className = 'alert alert-success';
+                    resultDiv.innerHTML = `
+                        ✅ <strong>¡Entrenamiento completado!</strong><br>
+                        📦 Productos procesados: ${productos.length}<br>
+                        💾 Productos guardados: ${guardados}<br>
+                        <a href="/admin/menu?tenant_id=${tenantId}" class="btn btn-small" style="margin-top:10px; background:#25D366; color:white;">📋 Ir al menú</a>
+                    `;
+                    
+                    // Mostrar resumen de productos
+                    if (productos.length > 0) {
+                        let resumen = '<div style="margin-top:15px; padding:10px; background:#e8f5e9; border-radius:8px;"><strong>📋 Productos aprendidos:</strong><ul>';
+                        productos.slice(0, 15).forEach(p => {
+                            resumen += `<li><strong>${p.nombre}</strong> - $${p.precio}</li>`;
+                        });
+                        if (productos.length > 15) {
+                            resumen += `<li>... y ${productos.length - 15} más</li>`;
+                        }
+                        resumen += '</ul></div>';
+                        resultDiv.innerHTML += resumen;
+                    }
+                    
+                    imageInput.value = '';
+                    document.getElementById('imagePreview').style.display = 'none';
+                    cargarContexto(); // Recargar contexto
+                } else {
+                    throw new Error(result.error || 'Error desconocido');
                 }
+            } catch (error) {
+                console.error('Error:', error);
+                resultDiv.className = 'alert alert-error';
+                resultDiv.innerHTML = '❌ Error: ' + error.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Entrenar con imagen';
+            }
+        };
+        
+        reader.readAsDataURL(file);
+    };
+    
+    // ==================== LIMPIAR CONTEXTO ====================
+    window.limpiarContexto = async function() {
+        if (!confirm('⚠️ ¿Estás seguro de que quieres eliminar todo el contexto aprendido?\n\nLos productos del menú NO se eliminarán, solo la IA perderá el entrenamiento personalizado.')) return;
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/context`, { method: 'DELETE' });
+            const result = await response.json();
+            if (response.ok) {
+                showAlert('success', '✅ Contexto eliminado correctamente');
+                cargarContexto();
+            } else {
+                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
             }
         } catch (error) {
-            console.error('Error cargando contexto:', error);
+            showAlert('error', '❌ Error de conexión');
         }
-    }
+    };
     
+    // Asignar eventos a los botones
+    document.getElementById('trainTextBtn').onclick = entrenarTexto;
+    document.getElementById('trainImageBtn').onclick = entrenarImagen;
+    document.getElementById('clearContextBtn').onclick = limpiarContexto;
+    
+    // Cargar contexto al iniciar
     cargarContexto();
+    
+    console.log('Script cargado correctamente. tenantId:', tenantId);
 </script>
 {% endblock %}
