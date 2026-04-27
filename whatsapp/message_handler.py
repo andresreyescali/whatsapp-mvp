@@ -9,7 +9,7 @@ from core.logger import logger
 from core.database import db_manager
 
 class MessageHandler:
-    """Procesa mensajes de WhatsApp usando IA con contexto personalizado"""
+    """Procesa mensajes de WhatsApp usando IA con contexto personalizado y memoria"""
     
     def process(self, phone_id: str, numero: str, texto: str):
         """Procesa mensaje entrante y envía respuesta"""
@@ -30,12 +30,58 @@ class MessageHandler:
         # Obtener contexto personalizado del tenant
         contexto = self._obtener_contexto_tenant(tenant['id'])
         
-        # Generar respuesta con IA (con contexto personalizado)
+        # Generar respuesta con IA (con contexto personalizado y memoria)
         respuesta = self._responder_con_ia(texto, tenant, menu, numero, pedidos_pendientes, contexto)
         
         # Enviar respuesta
         if respuesta:
             whatsapp_client.send_message(tenant, numero, respuesta)
+            
+            # Guardar conversación en la base de datos (memoria)
+            self._guardar_conversacion(tenant['id'], numero, texto, respuesta)
+    
+    def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
+        """Guarda la conversación en la base de datos"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO public.conversaciones (tenant_id, cliente_numero, mensaje, respuesta)
+                        VALUES (%s, %s, %s, %s)
+                    """, (tenant_id, cliente_numero, mensaje, respuesta))
+                conn.commit()
+        except Exception as e:
+            logger.error(f'Error guardando conversación: {e}')
+    
+    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
+        """Obtiene el historial de conversación con el cliente"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT mensaje, respuesta, created_at 
+                        FROM public.conversaciones 
+                        WHERE tenant_id = %s AND cliente_numero = %s 
+                        ORDER BY created_at DESC 
+                        LIMIT %s
+                    """, (tenant_id, cliente_numero, limit))
+                    rows = cur.fetchall()
+                    # Retornar en orden cronológico
+                    return list(reversed(rows))
+        except Exception as e:
+            logger.error(f'Error obteniendo historial: {e}')
+            return []
+    
+    def _formatear_historial_para_prompt(self, historial: list) -> str:
+        """Formatea el historial para incluirlo en el prompt de IA"""
+        if not historial:
+            return ""
+        
+        texto = "\n\nHISTORIAL DE LA CONVERSACIÓN:\n"
+        for h in historial:
+            texto += f"Cliente: {h[0]}\n"
+            texto += f"Asistente: {h[1]}\n"
+        return texto
     
     def _obtener_contexto_tenant(self, tenant_id: str) -> dict:
         """Obtiene el contexto personalizado del tenant desde la base de datos"""
@@ -52,7 +98,6 @@ class MessageHandler:
                     
                     if row:
                         menu_estructurado = row[0]
-                        # Manejar correctamente el JSONB
                         if isinstance(menu_estructurado, str):
                             try:
                                 menu_estructurado = json.loads(menu_estructurado)
@@ -76,24 +121,26 @@ class MessageHandler:
     
     def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
                           pedidos_pendientes: list, contexto: dict) -> str:
-        """Usa DeepSeek con contexto personalizado del negocio"""
+        """Usa DeepSeek con contexto personalizado y memoria conversacional"""
         
-        # Si no hay cliente de IA, usar fallback
         if not ai_client.client:
             logger.warning("Cliente de IA no disponible, usando fallback")
             return self._respuesta_fallback(texto, tenant, menu, numero)
         
+        # Obtener historial de conversación
+        historial = self._get_historial_conversacion(tenant['id'], numero, 5)
+        historial_texto = self._formatear_historial_para_prompt(historial)
+        
         # Si hay prompt personalizado, usarlo
         if contexto.get('prompt_personalizado'):
-            system_prompt = contexto['prompt_personalizado']
+            system_prompt = contexto['prompt_personalizado'] + historial_texto
         else:
             # Construir prompt del sistema con contexto disponible
-            system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto)
+            system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto) + historial_texto
         
-        # Mensaje del usuario
         user_message = f"""Cliente dice: "{texto}"
 
-Genera una respuesta amable y útil para este cliente."""
+Genera una respuesta amable y útil para este cliente. Mantén el contexto de la conversación anterior."""
         
         try:
             response = ai_client.client.chat.completions.create(
@@ -120,58 +167,49 @@ Genera una respuesta amable y útil para este cliente."""
     def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
         """Construye el prompt del sistema con toda la información disponible"""
         
-        # Información básica del negocio
         negocio_info = f"""Eres un asistente de ventas por WhatsApp para {tenant['nombre']}, una {tenant.get('tipo_negocio', 'restaurante')}.
 
 CONTEXTO DEL NEGOCIO:
 - Nombre: {tenant['nombre']}
 - Tipo: {tenant.get('tipo_negocio', 'restaurante')}"""
         
-        # Agregar horario si existe
         if contexto.get('horario'):
             negocio_info += f"\n- Horario: {contexto['horario']}"
         else:
             negocio_info += "\n- Horario: 12pm a 10pm (todos los días)"
         
-        # Agregar ubicación si existe
         if contexto.get('ubicacion'):
             negocio_info += f"\n- Ubicación: {contexto['ubicacion']}"
         else:
             negocio_info += "\n- Ubicación: Cali, Colombia"
         
-        # Agregar políticas si existen
         if contexto.get('politicas'):
             negocio_info += f"\n\nPOLÍTICAS DEL NEGOCIO:\n{contexto['politicas']}"
         
-        # Agregar instrucciones personalizadas
         if contexto.get('instrucciones'):
             negocio_info += f"\n\nINSTRUCCIONES PERSONALIZADAS:\n{contexto['instrucciones']}"
         
-        # Agregar menú
         menu_contexto = self._formatear_menu_para_ia(menu)
         
-        # Agregar pedidos pendientes
         pedidos_contexto = ""
         if pedidos_pendientes:
             pedidos_contexto = "\nPEDIDOS PENDIENTES DEL CLIENTE:\n"
             for p in pedidos_pendientes:
                 pedidos_contexto += f"- {p['items'][0]['nombre'] if p.get('items') else 'Producto'}: ${p['total']} (ID: {p['id']})\n"
         
-        # Reglas del asistente
         reglas = """
 
 REGLAS IMPORTANTES:
 1. Eres un vendedor amable, conversacional y natural.
-2. Tu objetivo es ayudar al cliente a hacer un pedido.
-3. Si el cliente pide el menú, preséntalo de forma atractiva.
-4. Si el cliente pregunta por horario o ubicación, responde con la información proporcionada.
-5. Si el cliente quiere comprar algo, confirma el producto, el precio y genera un link de pago.
-6. Para generar un link de pago, usa el formato: https://checkout.wompi.co/l/test_[ID_PEDIDO]_[TOTAL]
-7. Si el cliente dice "ya pague" o similar, confirma el pago y despídete amablemente.
-8. Responde SIEMPRE en español, de forma breve pero completa (2-4 oraciones).
-9. Sé proactivo: si el cliente duda, recomienda los productos más populares.
-10. Si el cliente pide algo que no está en el menú, ofrécele alternativas similares.
-11. Sigue las políticas y instrucciones personalizadas del negocio.
+2. Mantén el contexto de la conversación. Si el cliente ya pidió algo antes, recuérdalo.
+3. NO saludes cada vez. Solo saluda al inicio de la conversación.
+4. Si el cliente confirma un pedido, procede a generar el link de pago.
+5. Si el cliente pide el menú, preséntalo de forma atractiva.
+6. Si el cliente pregunta por horario o ubicación, responde con la información proporcionada.
+7. Para generar un link de pago, usa el formato: https://checkout.wompi.co/l/test_[ID_PEDIDO]_[TOTAL]
+8. Si el cliente dice "ya pague" o similar, confirma el pago y despídete amablemente.
+9. Responde SIEMPRE en español, de forma breve pero completa (2-4 oraciones).
+10. Sé proactivo: si el cliente duda, recomienda los productos más populares.
 
 INSTRUCCIÓN CRÍTICA: Tu respuesta debe ser SOLO el mensaje para el cliente, sin explicaciones adicionales."""
 
@@ -188,10 +226,8 @@ MENÚ COMPLETO:
         if not menu:
             return "No hay productos disponibles actualmente."
         
-        # Agrupar por categoría, manejando valores nulos
         categorias = {}
         for p in menu:
-            # Si categoria es None o vacío, usar "general"
             cat = p.get('categoria')
             if cat is None or cat == '':
                 cat = 'general'
@@ -265,5 +301,4 @@ MENÚ COMPLETO:
         
         return f"👋 Hola! Soy el asistente de {tenant['nombre']}. ¿Qué te gustaría ordenar?"
 
-# Instancia global
 message_handler = MessageHandler()

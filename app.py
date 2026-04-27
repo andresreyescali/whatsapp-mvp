@@ -724,6 +724,34 @@ def get_tenant_context(tenant_id):
                 return jsonify({})
     except Exception as e:
         return jsonify({}), 500
+    
+    @app.route('/api/tenant/<tenant_id>/conversaciones/cliente/<cliente_numero>', methods=['GET'])
+    def get_conversaciones_cliente(tenant_id, cliente_numero):
+        """Obtiene el historial de conversaciones con un cliente específico"""
+        if 'usuario_id' not in session:
+            return jsonify({'error': 'No autenticado'}), 401
+        
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT mensaje, respuesta, created_at 
+                        FROM public.conversaciones 
+                        WHERE tenant_id = %s AND cliente_numero = %s 
+                        ORDER BY created_at ASC
+                    """, (tenant_id, cliente_numero))
+                    rows = cur.fetchall()
+                    conversaciones = []
+                    for row in rows:
+                        conversaciones.append({
+                            'mensaje': row[0],
+                            'respuesta': row[1],
+                            'fecha': row[2]
+                        })
+                    return jsonify(conversaciones)
+        except Exception as e:
+            logger.error(f'Error cargando historial: {e}')
+            return jsonify([]), 500
 
 # ==================== PANEL DEL CLIENTE ====================
 
