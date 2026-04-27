@@ -111,6 +111,13 @@
     <button id="saveConfigBtn" class="btn" style="margin-top: 15px;">💾 Guardar Configuración</button>
 </div>
 
+<!-- Agregado 27Apr2026- limpiar configuracion -->
+<div class="card">
+    <h2>⚙️ Configuración Avanzada</h2>
+    <button id="clearContextBtn" class="btn btn-danger" onclick="limpiarContexto()">🗑️ Limpiar contexto aprendido</button>
+    <p style="font-size:12px; color:#666; margin-top:10px;">Esto eliminará el contexto de IA y los productos aprendidos.</p>
+</div>
+
 <style>
     .btn-small {
         padding: 5px 10px;
@@ -389,6 +396,24 @@ verificarPermisos();
         }
     }
     
+    
+    async function limpiarContexto() {
+    if (!confirm('¿Estás seguro de que quieres eliminar todo el contexto aprendido? Los productos actuales no se eliminarán, pero la IA perderá el entrenamiento personalizado.')) return;
+    
+    try {
+        const response = await fetch(`/api/tenant/${tenantId}/context`, { method: 'DELETE' });
+        const result = await response.json();
+        if (response.ok) {
+            showAlert('success', '✅ Contexto eliminado correctamente');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
+        }
+    } catch (error) {
+        showAlert('error', '❌ Error de conexión');
+    }
+}
+
     document.getElementById('productForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         
@@ -479,6 +504,7 @@ verificarPermisos();
         return div.innerHTML;
     }
     
+
     // Eventos del modal
     document.querySelector('.close').onclick = closeModal;
     document.getElementById('cancelEditBtn').onclick = closeModal;
