@@ -88,37 +88,115 @@ Instrucciones para atender:
         }
     };
     
-    // Entrenar con imagen
-    document.getElementById('trainImageBtn').onclick = async function() {
-        const btn = this;
-        const resultDiv = document.getElementById('imageResult');
+    // Entrenar con texto
+async function entrenarTexto() {
+    const texto = document.getElementById('textoEntrenamiento').value;
+    if (!texto.trim()) {
+        showAlert('error', 'Por favor ingresa la descripción de tu negocio');
+        return;
+    }
+    
+    const btn = document.getElementById('trainTextBtn');
+    const resultDiv = document.getElementById('textResult');
+    
+    btn.disabled = true;
+    btn.textContent = 'Procesando...';
+    resultDiv.style.display = 'block';
+    resultDiv.className = 'alert alert-info';
+    resultDiv.innerHTML = '🔄 Procesando con IA...';
+    
+    try {
+        const response = await fetch(`/admin/train/${tenantId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tipo: 'texto', texto: texto })
+        });
+        
+        const result = await response.json();
+        console.log('Respuesta del servidor:', result);  // Debug
+        
+        // Verificar estructura de la respuesta
+        if (result.status === 'ok' || response.ok) {
+            const contexto = result.contexto || result;
+            const productos = contexto.productos || [];
+            
+            resultDiv.className = 'alert alert-success';
+            resultDiv.innerHTML = `
+                ✅ <strong>Entrenamiento completado!</strong><br>
+                Se procesaron ${productos.length} productos.<br>
+                <a href="/admin/menu?tenant_id=${tenantId}" class="btn btn-small" style="margin-top:10px;">📋 Ver menú</a>
+            `;
+            
+            // Recargar el menú si estamos en la página de menú
+            if (typeof loadMenu === 'function') {
+                loadMenu();
+            }
+        } else {
+            throw new Error(result.error || 'Error desconocido');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        resultDiv.className = 'alert alert-error';
+        resultDiv.innerHTML = '❌ Error: ' + error.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Entrenar con texto';
+    }
+}
+
+// Entrenar con imagen
+async function entrenarImagen() {
+    const imageInput = document.getElementById('imageInput');
+    const imagePreview = document.getElementById('imagePreview');
+    const resultDiv = document.getElementById('imageResult');
+    const btn = document.getElementById('trainImageBtn');
+    
+    if (!imageInput.files || imageInput.files.length === 0) {
+        showAlert('error', 'Por favor selecciona una imagen');
+        return;
+    }
+    
+    const file = imageInput.files[0];
+    const reader = new FileReader();
+    
+    reader.onloadend = async function() {
+        const base64String = reader.result.split(',')[1];
         
         btn.disabled = true;
-        btn.textContent = '📸 Aplicando OCR a la imagen...';
-        resultDiv.className = 'loading';
-        resultDiv.innerHTML = '🔄 Leyendo texto de la imagen con OCR... (puede tomar 10-20 segundos)';
+        btn.textContent = 'Procesando imagen...';
         resultDiv.style.display = 'block';
+        resultDiv.className = 'alert alert-info';
+        resultDiv.innerHTML = '🔄 Leyendo texto de la imagen con OCR... (puede tomar 10-20 segundos)';
         
         try {
             const response = await fetch(`/admin/train/${tenantId}`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    tipo: 'imagen',
-                    imagen: window.selectedImage
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tipo: 'imagen', imagen: base64String })
             });
             
             const result = await response.json();
+            console.log('Respuesta del servidor:', result);
             
-            if (response.ok) {
+            if (result.status === 'ok' || response.ok) {
+                const contexto = result.contexto || result;
+                const productos = contexto.productos || [];
+                
                 resultDiv.className = 'alert alert-success';
-                resultDiv.innerHTML = '✅ ¡Entrenamiento completado! La IA ha aprendido tu menú.';
-                mostrarContexto(result.contexto);
+                resultDiv.innerHTML = `
+                    ✅ <strong>Entrenamiento completado!</strong><br>
+                    Se procesaron ${productos.length} productos.<br>
+                    <a href="/admin/menu?tenant_id=${tenantId}" class="btn btn-small" style="margin-top:10px;">📋 Ver menú</a>
+                `;
+                
+                if (typeof loadMenu === 'function') {
+                    loadMenu();
+                }
             } else {
-                throw new Error(result.error || 'Error');
+                throw new Error(result.error || 'Error desconocido');
             }
         } catch (error) {
+            console.error('Error:', error);
             resultDiv.className = 'alert alert-error';
             resultDiv.innerHTML = '❌ Error: ' + error.message;
         } finally {
@@ -127,50 +205,8 @@ Instrucciones para atender:
         }
     };
     
-    // Entrenar con texto
-    document.getElementById('trainTextBtn').onclick = async function() {
-        const btn = this;
-        const resultDiv = document.getElementById('textResult');
-        const texto = document.getElementById('textoInput').value;
-        
-        if (!texto.trim()) {
-            alert('Por favor escribe la información de tu negocio');
-            return;
-        }
-        
-        btn.disabled = true;
-        btn.textContent = 'Procesando texto...';
-        resultDiv.className = 'loading';
-        resultDiv.innerHTML = '🔄 Procesando texto con IA...';
-        resultDiv.style.display = 'block';
-        
-        try {
-            const response = await fetch(`/admin/train/${tenantId}`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    tipo: 'texto',
-                    texto: texto
-                })
-            });
-            
-            const result = await response.json();
-            
-            if (response.ok) {
-                resultDiv.className = 'alert alert-success';
-                resultDiv.innerHTML = '✅ ¡Entrenamiento completado! La IA ha aprendido tu negocio.';
-                mostrarContexto(result.contexto);
-            } else {
-                throw new Error(result.error || 'Error');
-            }
-        } catch (error) {
-            resultDiv.className = 'alert alert-error';
-            resultDiv.innerHTML = '❌ Error: ' + error.message;
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Entrenar con texto';
-        }
-    };
+    reader.readAsDataURL(file);
+}
     
     function mostrarContexto(contexto) {
         const preview = document.getElementById('contextPreview');

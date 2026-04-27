@@ -636,6 +636,19 @@ def train_ia(tenant_id):
         if not resultado:
             return jsonify({'error': 'No se pudo procesar'}), 500
         
+        # Asegurar estructura mínima
+        if 'productos' not in resultado:
+            resultado['productos'] = []
+        if 'horario' not in resultado:
+            resultado['horario'] = ''
+        if 'ubicacion' not in resultado:
+            resultado['ubicacion'] = ''
+        if 'politicas' not in resultado:
+            resultado['politicas'] = ''
+        if 'instrucciones_adicionales' not in resultado:
+            resultado['instrucciones_adicionales'] = ''
+        
+        # Guardar contexto en base de datos
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 prompt_personalizado = trainer.generar_prompt_personalizado(resultado)
@@ -663,20 +676,38 @@ def train_ia(tenant_id):
                 ))
             conn.commit()
         
+        # Guardar productos en el menú del tenant
+        productos_agregados = 0
         for producto in resultado.get('productos', []):
             if producto.get('nombre') and producto.get('precio'):
                 try:
                     schema_manager.add_product(
-                        tenant_id, producto.get('nombre'), int(producto.get('precio', 0)),
-                        producto.get('descripcion', ''), producto.get('categoria', 'general')
+                        tenant_id, 
+                        producto.get('nombre'), 
+                        int(producto.get('precio', 0)),
+                        producto.get('descripcion', ''), 
+                        producto.get('categoria', 'general')
                     )
+                    productos_agregados += 1
                 except Exception as e:
-                    logger.warning(f'Error guardando producto: {e}')
+                    logger.warning(f'Error guardando producto {producto.get("nombre")}: {e}')
         
-        return jsonify({'status': 'ok'})
+        logger.info(f'Entrenamiento completado: {productos_agregados} productos guardados')
+        
+        # ✅ CORREGIDO: Devolver estructura completa que espera el frontend
+        return jsonify({
+            'status': 'ok',
+            'contexto': resultado,
+            'productos_guardados': productos_agregados,
+            'message': f'Entrenamiento exitoso. Se guardaron {productos_agregados} productos.'
+        })
+        
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
+        logger.error(f'Error en train_ia: {str(e)}')
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'details': 'Error interno del servidor'}), 500
+    
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET'])
 def get_tenant_context(tenant_id):
     try:
