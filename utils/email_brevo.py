@@ -8,7 +8,7 @@ class BrevoEmailSender:
     def __init__(self):
         self.api_key = os.environ.get('BREVO_API_KEY')
         # CORREGIDO: usar el email que usaste para registrar Brevo (debe estar verificado)
-        self.from_email = os.environ.get('EMAIL_FROM', 'no-reply@avarstechnology.com')
+        self.from_email = os.environ.get('EMAIL_FROM', 'tu-email-registrado@gmail.com')
         self.from_name = os.environ.get('EMAIL_FROM_NAME', 'WhatsApp Bot SaaS')
     
     def enviar_codigo_verificacion(self, email_to: str, codigo: str, nombre_negocio: str) -> bool:
