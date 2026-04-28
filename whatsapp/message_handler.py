@@ -166,11 +166,12 @@ Genera una respuesta amable y útil para este cliente. Mantén el contexto de la
     
     def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
         """Construye el prompt del sistema con toda la información disponible"""
-        
-        negocio_info = f"""Eres un asistente de ventas por WhatsApp para {tenant['nombre']}, una {tenant.get('tipo_negocio', 'restaurante')}.
+        nombre_negocio = tenant.get('nombre', 'Mi negocio')
+      # negocio_info = f"""Eres un asistente de ventas por WhatsApp para {tenant['nombre']}, una {tenant.get('tipo_negocio', 'restaurante')}.
+        negocio_info = f"""Eres un asistente de ventas por WhatsApp para {nombre_negocio}.
 
 CONTEXTO DEL NEGOCIO:
-- Nombre: {tenant['nombre']}
+- Nombre:{nombre_negocio}
 - Tipo: {tenant.get('tipo_negocio', 'restaurante')}"""
         
         if contexto.get('horario'):
@@ -200,16 +201,19 @@ CONTEXTO DEL NEGOCIO:
         reglas = """
 
 REGLAS IMPORTANTES:
-1. Eres un vendedor amable, conversacional y natural.
-2. Mantén el contexto de la conversación. Si el cliente ya pidió algo antes, recuérdalo.
-3. NO saludes cada vez. Solo saluda al inicio de la conversación.
-4. Si el cliente confirma un pedido, procede a generar el link de pago.
-5. Si el cliente pide el menú, preséntalo de forma atractiva.
-6. Si el cliente pregunta por horario o ubicación, responde con la información proporcionada.
-7. Para generar un link de pago, usa el formato: https://checkout.wompi.co/l/test_[ID_PEDIDO]_[TOTAL]
-8. Si el cliente dice "ya pague" o similar, confirma el pago y despídete amablemente.
-9. Responde SIEMPRE en español, de forma breve pero completa (2-4 oraciones).
-10. Sé proactivo: si el cliente duda, recomienda los productos más populares.
+1. PRESÉNTATE SIEMPRE con el nombre del negocio al iniciar la conversación.
+   Ejemplo: "¡Hola! Soy el asistente de [NOMBRE_DEL_NEGOCIO]. ¿En qué puedo ayudarte?"
+
+2. Eres un vendedor amable, conversacional y natural.
+3. Mantén el contexto de la conversación. Si el cliente ya pidió algo antes, recuérdalo.
+4. NO saludes cada vez. Solo saluda al inicio de la conversación.
+5. Si el cliente confirma un pedido, procede a generar el link de pago.
+6. Si el cliente pide el menú, preséntalo de forma atractiva.
+7. Si el cliente pregunta por horario o ubicación, responde con la información proporcionada.
+8. Para generar un link de pago, usa el formato: https://checkout.wompi.co/l/test_[ID_PEDIDO]_[TOTAL]
+9. Si el cliente dice "ya pague" o similar, confirma el pago y despídete amablemente.
+10. Responde SIEMPRE en español, de forma breve pero completa (2-4 oraciones).
+11. Sé proactivo: si el cliente duda, recomienda los productos más populares.
 
 INSTRUCCIÓN CRÍTICA: Tu respuesta debe ser SOLO el mensaje para el cliente, sin explicaciones adicionales."""
 

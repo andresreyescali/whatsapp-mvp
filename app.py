@@ -1198,6 +1198,18 @@ def debug_asignar_negocio():
         'tenant_id': tenant['id']
     })
 
+@app.route('/debug/contexto/<tenant_id>', methods=['GET'])
+def debug_contexto(tenant_id):
+    """Ver el contexto guardado para un tenant"""
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM public.tenant_context WHERE tenant_id = %s", (tenant_id,))
+            row = cur.fetchone()
+            if row:
+                columns = [desc[0] for desc in cur.description]
+                return jsonify(dict(zip(columns, row)))
+            return jsonify({'error': 'No hay contexto'}), 404
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)
