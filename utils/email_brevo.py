@@ -7,21 +7,24 @@ class BrevoEmailSender:
     
     def __init__(self):
         self.api_key = os.environ.get('BREVO_API_KEY')
-        # CORREGIDO: usar el email que usaste para registrar Brevo (debe estar verificado)
-        self.from_email = os.environ.get('EMAIL_FROM', 'tu-email-registrado@gmail.com')
+        self.from_email = os.environ.get('EMAIL_FROM', '')
         self.from_name = os.environ.get('EMAIL_FROM_NAME', 'WhatsApp Bot SaaS')
+        
+        # Log de configuración
+        logger.info(f"Email sender configurado - API Key: {'Configurada' if self.api_key else 'NO CONFIGURADA'}")
+        logger.info(f"Email FROM: {self.from_email if self.from_email else 'NO CONFIGURADO'}")
     
     def enviar_codigo_verificacion(self, email_to: str, codigo: str, nombre_negocio: str) -> bool:
         """Envía código de verificación por email usando Brevo API"""
         
-        if not self.api_key:
-            logger.error("BREVO_API_KEY no configurada")
-            return False
+        logger.info(f"=== INICIANDO ENVÍO DE EMAIL ===")
+        logger.info(f"Para: {email_to}")
+        logger.info(f"Código: {codigo}")
+        logger.info(f"Negocio: {nombre_negocio}")
         
-        # Si el email remitente no está configurado, usar el de la API (Brevo asigna uno por defecto)
-        if not self.from_email or self.from_email == 'tu-email-registrado@gmail.com':
-            # Brevo asigna un remitente por defecto si no especificas uno verificado
-            self.from_email = None
+        if not self.api_key:
+            logger.error("❌ BREVO_API_KEY no configurada en variables de entorno")
+            return False
         
         subject = f"🔐 Código de verificación - {nombre_negocio}"
         
@@ -83,20 +86,33 @@ Ingresa este código en el panel de control para activar tu asistente de ventas.
             "textContent": text_content
         }
         
-        # Solo incluir sender si está configurado
+        # Brevo permite omitir el sender, usará el predeterminado de la cuenta
         if self.from_email:
             data["sender"] = {"name": self.from_name, "email": self.from_email}
+            logger.info(f"Usando sender: {self.from_email}")
+        else:
+            logger.info("No se especificó sender, Brevo usará el predeterminado")
+        
+        logger.info(f"Enviando petición a Brevo...")
         
         try:
             response = requests.post(url, headers=headers, json=data, timeout=30)
+            logger.info(f"Respuesta Brevo - Status code: {response.status_code}")
+            logger.info(f"Respuesta Brevo - Body: {response.text}")
+            
             if response.status_code == 201:
                 logger.info(f"✅ Email de verificación enviado a {email_to}")
                 return True
             else:
                 logger.error(f"❌ Error enviando email: {response.status_code} - {response.text}")
                 return False
+        except requests.exceptions.Timeout:
+            logger.error("❌ Timeout conectando a Brevo")
+            return False
         except Exception as e:
             logger.error(f"❌ Error enviando email: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
 # Instancia global
