@@ -329,6 +329,58 @@ def api_verificar_negocio():
         codigo=data.get('codigo')
     )
     return jsonify(result)
+# ========= Reenvía código por email
+
+@app.route('/api/negocio/reenviar_codigo_email/<tenant_id>', methods=['POST'])
+def reenviar_codigo_email(tenant_id):
+    """Reenvía el código de verificación por email"""
+    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
+        return jsonify({'error': 'No autenticado'}), 401
+    
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Negocio no encontrado'}), 404
+    
+    # Obtener código de verificación
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''
+                SELECT codigo_verificacion FROM public.verificacion_negocio 
+                WHERE tenant_id = %s AND verificado = false
+            ''', (tenant_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'error': 'Negocio ya verificado o no existe'}), 400
+            codigo = row[0]
+    
+    # Obtener email del usuario
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT email FROM public.usuarios WHERE id = %s", (session['usuario_id'],))
+            row = cur.fetchone()
+            email = row[0] if row else None
+    
+    if not email:
+        return jsonify({'error': 'No hay email registrado'}), 400
+    
+    # Enviar código por email
+    from utils.email_brevo import email_sender
+    enviado = email_sender.enviar_codigo_verificacion(email, codigo, tenant['nombre'])
+    
+    if enviado:
+        # Actualizar fecha de envío
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    UPDATE public.verificacion_negocio SET codigo_enviado = NOW()
+                    WHERE tenant_id = %s
+                ''', (tenant_id,))
+            conn.commit()
+        return jsonify({'success': True, 'message': 'Código reenviado exitosamente'})
+    else:
+        return jsonify({'error': 'Error al enviar el código'}), 500
+
+# ========== Reenvía codigo por whatsapp ===============
 
 @app.route('/api/negocio/reenviar_codigo/<tenant_id>', methods=['POST'])
 def reenviar_codigo(tenant_id):

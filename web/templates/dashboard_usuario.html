@@ -104,11 +104,12 @@
 </div>
 
 <!-- Modal de verificación actualizado -->
+<!-- Modal de verificación -->
 <div id="verificacionModal" class="modal">
     <div class="modal-content">
         <span class="close" onclick="closeVerificacionModal()">&times;</span>
         <h2>Verificar Negocio</h2>
-        <p>Hemos enviado un código de verificación a tu WhatsApp. Ingresa el código a continuación.</p>
+        <p>Hemos enviado un código de verificación a tu correo electrónico. Revisa tu bandeja de entrada o spam.</p>
         <div id="verificacionAlert" class="alert" style="display:none"></div>
         <form id="verificacionForm">
             <input type="hidden" id="verifTenantId">
@@ -120,7 +121,7 @@
             <button type="submit" class="btn btn-primary" style="width:100%">Verificar</button>
         </form>
         <div style="text-align: center; margin-top: 15px;">
-            <a href="#" onclick="reenviarCodigo()" id="reenviarLink">¿No recibiste el código? Reenviar</a>
+            <a href="#" onclick="reenviarCodigo()" id="reenviarLink">📧 ¿No recibiste el código? Reenviar por email</a>
         </div>
     </div>
 </div>
@@ -416,7 +417,7 @@
                 alertDiv.style.display = 'block';
                 
                 if (result.codigo_enviado) {
-                    alertDiv.innerHTML = '✅ Negocio registrado. Hemos enviado un código de verificación a tu WhatsApp.';
+                    alertDiv.innerHTML = '✅ Negocio registrado. Hemos enviado un código de verificación a tu correo electrónico'
                 } else {
                     alertDiv.innerHTML = `✅ Negocio registrado. Código de verificación: <strong>${result.codigo_verificacion}</strong>`;
                 }
@@ -470,6 +471,8 @@
     
     // ==================== REENVÍO DE CÓDIGO ====================
     
+/*  funcion que reenvia codigo por whatsapp 
+
     async function reenviarCodigo() {
         if (!currentTenantId) return;
         
@@ -514,7 +517,52 @@
             link.style.pointerEvents = 'auto';
         }
     }
+  */
+/*   esta funcion que sigue envia codigo por email */
+    async function reenviarCodigo() {
+       if (!currentTenantId) return;
     
+        const link = document.getElementById('reenviarLink');
+        if (!link) return;
+    
+        const originalText = link.textContent;
+        link.textContent = 'Enviando...';
+        link.style.pointerEvents = 'none';
+        
+        try {
+            const response = await fetch(`/api/negocio/reenviar_codigo_email/${currentTenantId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const result = await response.json();
+            
+            const alertDiv = document.getElementById('verificacionAlert');
+            if (result.success) {
+                alertDiv.className = 'alert alert-success';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '✅ Código reenviado. Revisa tu correo electrónico.';
+            } else {
+                alertDiv.className = 'alert alert-error';
+                alertDiv.style.display = 'block';
+                alertDiv.innerHTML = '❌ ' + result.error;
+            }
+            setTimeout(() => {
+                alertDiv.style.display = 'none';
+            }, 3000);
+        } catch (error) {
+            console.error('Error:', error);
+            const alertDiv = document.getElementById('verificacionAlert');
+            alertDiv.className = 'alert alert-error';
+            alertDiv.style.display = 'block';
+            alertDiv.innerHTML = '❌ Error de conexión';
+            setTimeout(() => {
+                alertDiv.style.display = 'none';
+            }, 3000);
+        } finally {
+            link.textContent = originalText;
+            link.style.pointerEvents = 'auto';
+        }
+    }
     // ==================== GESTIÓN DE EQUIPO ====================
     
     async function verEquipo(tenantId, tenantNombre) {
