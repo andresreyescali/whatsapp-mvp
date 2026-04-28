@@ -220,13 +220,30 @@ class DatabaseManager:
                     );
                     ''')
                     
+                    # Tabla de conversaciones de IA
+                    cur.execute('''
+                    CREATE TABLE IF NOT EXISTS public.conversaciones_ia (
+                        id SERIAL PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        cliente_numero TEXT NOT NULL,
+                        mensaje TEXT NOT NULL,
+                        respuesta TEXT,
+                        tipo VARCHAR(20) DEFAULT 'cliente',
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                    ''')
+
+
+
                     # Índices
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_tenants_phone_id ON public.tenants(phone_id)')
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_usuario_negocio_usuario ON public.usuario_negocio(usuario_id)')
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_usuario_negocio_tenant ON public.usuario_negocio(tenant_id)')
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_conversaciones_tenant ON public.conversaciones(tenant_id)')
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON public.conversaciones(cliente_numero)')
-                    
+                    cur.execute('CREATE INDEX IF NOT EXISTS idx_conversaciones_tenant ON public.conversaciones_ia(tenant_id)')
+                    cur.execute('CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON public.conversaciones_ia(cliente_numero)')
+
                 conn.commit()
             
             logger.info('Tablas globales listas')

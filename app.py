@@ -829,34 +829,13 @@ def get_pedidos_tenant(tenant_id):
     cliente = request.args.get('cliente', '')
     
     try:
+        # Usar conexión específica del tenant
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                query = "SELECT * FROM pedidos"  # Dentro del schema del tenant
-                params = []
-                
-                condiciones = []
-                if estado != 'todos':
-                    condiciones.append("estado = %s")
-                    params.append(estado)
-                if cliente:
-                    condiciones.append("cliente_numero LIKE %s")
-                    params.append(f'%{cliente}%')
-                
-                if condiciones:
-                    query += " WHERE " + " AND ".join(condiciones)
-                
-                query += " ORDER BY created_at DESC"
-                
-                cur.execute(query, params)
+                cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
                 rows = cur.fetchall()
                 columns = [desc[0] for desc in cur.description]
-                pedidos = []
-                for row in rows:
-                    pedido = dict(zip(columns, row))
-                    if not pedido.get('cliente_nombre'):
-                        pedido['cliente_nombre'] = pedido['cliente_numero']
-                    pedidos.append(pedido)
-                
+                pedidos = [dict(zip(columns, row)) for row in rows]
                 return jsonify(pedidos)
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
@@ -1209,6 +1188,32 @@ def debug_contexto(tenant_id):
                 columns = [desc[0] for desc in cur.description]
                 return jsonify(dict(zip(columns, row)))
             return jsonify({'error': 'No hay contexto'}), 404
+        
+# ====== Empoint para crear tabla de conversaciones
+@app.route('/debug/crear_tabla_conversaciones', methods=['GET'])
+def crear_tabla_conversaciones():
+    """Crea la tabla de conversaciones si no existe"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS public.conversaciones_ia (
+                        id SERIAL PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        cliente_numero TEXT NOT NULL,
+                        mensaje TEXT NOT NULL,
+                        respuesta TEXT,
+                        tipo VARCHAR(20) DEFAULT 'cliente',
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_conversaciones_tenant ON public.conversaciones_ia(tenant_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON public.conversaciones_ia(cliente_numero)")
+            conn.commit()
+        return jsonify({'success': True, 'message': 'Tabla conversaciones_ia creada'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
