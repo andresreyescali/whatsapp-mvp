@@ -415,15 +415,9 @@
             if (result.success) {
                 alertDiv.className = 'alert alert-success';
                 alertDiv.style.display = 'block';
-                
-                if (result.codigo_enviado) {
-                    alertDiv.innerHTML = '✅ Negocio registrado. Hemos enviado un código de verificación a tu correo electrónico'
-                } else {
-                    alertDiv.innerHTML = `✅ Negocio registrado. Código de verificación: <strong>${result.codigo_verificacion}</strong>`;
-                }
-                
+                alertDiv.innerHTML = '✅ Negocio registrado. Hemos enviado un código de verificación a tu correo electrónico. Revisa tu bandeja de entrada o spam.';
                 setTimeout(() => { location.reload(); }, 3000);
-            } else {
+                   } else {
                 alertDiv.className = 'alert alert-error';
                 alertDiv.style.display = 'block';
                 alertDiv.innerHTML = '❌ ' + result.error;

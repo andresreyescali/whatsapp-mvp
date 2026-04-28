@@ -1082,18 +1082,22 @@ def check_token(tenant_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
-@app.route('/debug/test-email-only', methods=['GET'])
-def test_email_only():
-    """Prueba solo el envío de email"""
+@app.route('/debug/test-email-now', methods=['GET'])
+def test_email_now():
+    """Prueba de envío de email directo"""
     from utils.email_brevo import email_sender
     
-    result = email_sender.enviar_codigo_verificacion(
-        email_to="areyescali@hotmail.com",  # Cambia por tu email
-        codigo="123456",
-        nombre_negocio="Test Negocio"
-    )
+    email_to = "areyescali@hotmail.com" #Cambia por tu email
+    codigo = "123456"
+    nombre = "Test"
     
-    return jsonify({'success': result})
+    result = email_sender.enviar_codigo_verificacion(email_to, codigo, nombre)
+    
+    return jsonify({
+        'success': result,
+        'message': 'Email enviado' if result else 'Error al enviar',
+        'api_key_configured': bool(os.environ.get('BREVO_API_KEY'))
+    })
 
 def enviar_notificacion_email(tenant, pedido_id):
     """Envía notificación de nuevo pedido por email"""

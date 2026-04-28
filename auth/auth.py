@@ -209,15 +209,15 @@ class AuthManager:
                     email_usuario = row[0]
         
         # Enviar código por EMAIL (no WhatsApp)
+        # Enviar código por EMAIL
         email_enviado = False
         if email_usuario:
-            logger.info(f"Intentando enviar email a {email_usuario} con código {codigo_verificacion}")
+            logger.info(f"📧 Intentando enviar email a {email_usuario}")
             try:
                 email_enviado = email_sender.enviar_codigo_verificacion(email_usuario, codigo_verificacion, nombre)
                 logger.info(f"Resultado envío email: {email_enviado}")
             except Exception as e:
                 logger.error(f"Error en envío de email: {e}")
-                email_enviado = False
                 
         return {
             'success': True,
