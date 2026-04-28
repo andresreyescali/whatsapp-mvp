@@ -46,13 +46,13 @@ class MessageHandler:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        INSERT INTO public.conversaciones (tenant_id, cliente_numero, mensaje, respuesta)
-                        VALUES (%s, %s, %s, %s)
+                        INSERT INTO public.conversaciones_ia (tenant_id, cliente_numero, mensaje, respuesta, tipo)
+                        VALUES (%s, %s, %s, %s, 'cliente')
                     """, (tenant_id, cliente_numero, mensaje, respuesta))
                 conn.commit()
         except Exception as e:
             logger.error(f'Error guardando conversación: {e}')
-    
+        
     def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
         """Obtiene el historial de conversación con el cliente"""
         try:

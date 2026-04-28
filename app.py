@@ -831,7 +831,7 @@ def get_pedidos_tenant(tenant_id):
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                query = "SELECT * FROM pedidos"
+                query = "SELECT * FROM pedidos"  # Dentro del schema del tenant
                 params = []
                 
                 condiciones = []
@@ -853,7 +853,6 @@ def get_pedidos_tenant(tenant_id):
                 pedidos = []
                 for row in rows:
                     pedido = dict(zip(columns, row))
-                    # Asegurar que siempre hay nombre
                     if not pedido.get('cliente_nombre'):
                         pedido['cliente_nombre'] = pedido['cliente_numero']
                     pedidos.append(pedido)
@@ -944,40 +943,41 @@ def detalle_pedido(pedido_id):
 
 @app.route('/api/tenant/<tenant_id>/conversaciones', methods=['GET'])
 def get_conversaciones(tenant_id):
-    """Obtiene resumen de conversaciones por cliente"""
+    """Obtiene resumen de conversaciones por cliente desde conversaciones_ia"""
     if 'usuario_id' not in session:
         return jsonify({'error': 'No autenticado'}), 401
     
     try:
-        with db_manager.get_connection(tenant_id) as conn:
+        # Las conversaciones están en la tabla pública (no por tenant)
+        with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT 
                         cliente_numero, 
-                        MAX(cliente_nombre) as cliente_nombre,
-                        MAX(created_at) as ultimo_mensaje,
-                        COUNT(*) as total_pedidos,
-                        MAX(estado) as ultimo_estado
-                    FROM pedidos
+                        MAX(CASE WHEN tipo = 'cliente' THEN mensaje ELSE respuesta END) as ultimo_mensaje,
+                        COUNT(*) as total_mensajes,
+                        MAX(created_at) as ultimo_mensaje_fecha
+                    FROM public.conversaciones_ia 
+                    WHERE tenant_id = %s
                     GROUP BY cliente_numero
-                    ORDER BY ultimo_mensaje DESC
+                    ORDER BY ultimo_mensaje_fecha DESC
                     LIMIT 50
-                """)
+                """, (tenant_id,))
                 rows = cur.fetchall()
                 conversaciones = []
                 for row in rows:
                     conversaciones.append({
                         'cliente_numero': row[0],
-                        'cliente_nombre': row[1] or row[0],  # Si no hay nombre, usar teléfono
-                        'ultimo_mensaje': row[2],
-                        'total_pedidos': row[3],
-                        'ultimo_estado': row[4]
+                        'cliente_nombre': row[0],
+                        'ultimo_mensaje': row[1] or '',
+                        'total_pedidos': row[2] or 0,
+                        'ultimo_estado': 'activo'
                     })
                 return jsonify(conversaciones)
     except Exception as e:
         logger.error(f'Error cargando conversaciones: {e}')
         return jsonify([])
-
+    
 @app.route('/api/tenant/<tenant_id>/configuracion', methods=['GET', 'PUT'])
 def tenant_configuracion(tenant_id):
     """Obtiene o actualiza configuración del tenant"""
