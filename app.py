@@ -60,23 +60,29 @@ def login_required(f):
     return decorated_function
 
 def tenant_owner_required(f):
-    """Decorador para verificar que el usuario es dueño del tenant"""
     @wraps(f)
     def decorated_function(tenant_id, *args, **kwargs):
-        if 'usuario_id' not in session:
-            return redirect('/')
+        # Log para debugging
+        logger.info(f"Verificando acceso - Usuario: {session.get('usuario_id')}, Tenant: {tenant_id}")
         
-        # Super admin puede ver todo
+        if 'usuario_id' not in session:
+            logger.warning("No hay sesión activa")
+            return jsonify({'error': 'No autenticado'}), 401
+        
         if session.get('rol_sistema') == 'super_admin':
+            logger.info("Super admin - acceso concedido")
             return f(tenant_id, *args, **kwargs)
         
-        # Verificar que el usuario tiene acceso a este tenant
         negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
+        logger.info(f"Negocios del usuario: {[n['id'] for n in negocios]}")
+        
         for n in negocios:
             if n['id'] == tenant_id:
+                logger.info(f"Acceso concedido a {tenant_id}")
                 return f(tenant_id, *args, **kwargs)
         
-        return "No tienes acceso a este negocio", 403
+        logger.warning(f"Acceso denegado - Usuario {session.get('usuario_id')} no tiene acceso a {tenant_id}")
+        return jsonify({'error': 'No tienes acceso a este negocio'}), 403
     return decorated_function
 
 def tenant_owner_required_from_args(f):
