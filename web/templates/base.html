@@ -185,14 +185,15 @@
             </div>
             <div class="nav">
                 <a href="/">🏠 Inicio</a>
-                <a href="/admin/tenants">📋 Negocios</a>
-                <a href="/registro">➕ Registrar Negocio (Manual)</a>
                 {% if session and session.usuario_id %}
+                    {% if session.rol_sistema == 'super_admin' %}
+                        <a href="/admin/tenants">📋 Admin Negocios</a>
+                    {% endif %}
                     <a href="/dashboard">📊 Mi Dashboard</a>
-                    <a href="#" onclick="cerrarSesionGlobal()" class="btn-logout" style="background: rgba(220, 53, 69, 0.8); padding: 8px 16px; border-radius: 20px;">🚪 Cerrar Sesión</a>
+                    <a href="#" onclick="cerrarSesionGlobal()" class="btn-logout">🚪 Cerrar Sesión</a>
                 {% else %}
                     <a href="#" onclick="openLoginModal()">🔑 Iniciar Sesión</a>
-                    <a href="#" onclick="openRegisterModal()" style="background: rgba(255,255,255,0.2);">📝 Registrarse</a>
+                    <a href="#" onclick="openRegisterModal()">📝 Registrarse</a>
                 {% endif %}
             </div>
         </div>

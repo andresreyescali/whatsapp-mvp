@@ -1,0 +1,11 @@
+- Training con IA: texto que informe del alcance de la extracción de información y solicite
+al cliente que revise el menu aprendido, y lo complete.
+- slogan "Tienda que si te atiende o tienda que se demora o nunca te atiende"
+- Tarificador. De cuanto es el plan. De cuanto 
+
+- 80 a 360 pesos por persona.
+
+- Campañas salientes para automatizar envíos por whatsapp (Marketing) - checkbox para añadir 
+el feature. Compradores frecuentes.
+
+- el asistente personal.

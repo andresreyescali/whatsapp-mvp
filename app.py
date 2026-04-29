@@ -14,6 +14,7 @@ from tenants.schema_manager import schema_manager
 from ai.training import trainer
 from ai.client import ai_client
 from auth.auth import auth_manager
+from functools import wraps
 
 setup_logging()
 
@@ -46,6 +47,37 @@ for i in range(max_retries):
             raise
 
 register_webhook_routes(app)
+
+# ==================== DECORADORES DE AUTENTICACIÓN ====================
+
+def login_required(f):
+    """Decorador para requerir autenticación"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'usuario_id' not in session:
+            return redirect('/')
+        return f(*args, **kwargs)
+    return decorated_function
+
+def tenant_owner_required(f):
+    """Decorador para verificar que el usuario es dueño del tenant"""
+    @wraps(f)
+    def decorated_function(tenant_id, *args, **kwargs):
+        if 'usuario_id' not in session:
+            return redirect('/')
+        
+        # Super admin puede ver todo
+        if session.get('rol_sistema') == 'super_admin':
+            return f(tenant_id, *args, **kwargs)
+        
+        # Verificar que el usuario tiene acceso a este tenant
+        negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
+        for n in negocios:
+            if n['id'] == tenant_id:
+                return f(tenant_id, *args, **kwargs)
+        
+        return "No tienes acceso a este negocio", 403
+    return decorated_function
 
 # ==================== PÁGINAS PÚBLICAS ====================
 
@@ -80,7 +112,6 @@ def super_admin_login():
     email = data.get('email')
     password = data.get('password')
     
-    # Verificar credenciales de super admin
     super_admin_email = os.environ.get('SUPER_ADMIN_EMAIL', 'admin@whatsappbotsaas.com')
     super_admin_password = os.environ.get('SUPER_ADMIN_PASSWORD', 'Admin123!')
     
@@ -106,7 +137,6 @@ def super_admin_dashboard():
     """Panel de super administrador"""
     if session.get('rol_sistema') != 'super_admin':
         return redirect('/super/admin/login-page')
-    
     return render_template('super_admin.html')
 
 @app.route('/super/admin/usuarios', methods=['GET'])
@@ -114,7 +144,6 @@ def super_admin_usuarios():
     """Lista todos los usuarios (solo super_admin)"""
     if session.get('rol_sistema') != 'super_admin':
         return jsonify({'error': 'No autorizado'}), 403
-    
     usuarios = auth_manager.get_all_usuarios()
     return jsonify(usuarios)
 
@@ -123,7 +152,6 @@ def super_admin_negocios():
     """Lista todos los negocios (solo super_admin)"""
     if session.get('rol_sistema') != 'super_admin':
         return jsonify({'error': 'No autorizado'}), 403
-    
     negocios = auth_manager.get_all_negocios()
     return jsonify(negocios)
 
@@ -132,33 +160,23 @@ def super_admin_update_usuario(usuario_id):
     """Actualiza un usuario (solo super_admin)"""
     if request.method == 'OPTIONS':
         return '', 200
-    
-    # Verificar autenticación de super admin
     if session.get('rol_sistema') != 'super_admin':
-        logger.warning(f'Intento no autorizado de actualización: session={dict(session)}')
-        return jsonify({'error': 'No autorizado. Debes iniciar sesión como Super Administrador.'}), 403
-    
+        return jsonify({'error': 'No autorizado'}), 403
     try:
         data = request.json
-        logger.info(f'Super Admin actualizando usuario {usuario_id}: {data}')
-        
         result = auth_manager.actualizar_usuario(usuario_id, data)
-        
         if result.get('success'):
             return jsonify({'success': True, 'message': result.get('message', 'Usuario actualizado')})
-        else:
-            return jsonify({'success': False, 'error': result.get('error', 'Error al actualizar')}), 400
-            
+        return jsonify({'success': False, 'error': result.get('error', 'Error al actualizar')}), 400
     except Exception as e:
         logger.error(f'Error actualizando usuario: {e}')
         return jsonify({'error': str(e)}), 500
-    
+
 @app.route('/super/admin/usuario/<usuario_id>', methods=['DELETE'])
 def super_admin_delete_usuario(usuario_id):
     """Elimina un usuario (solo super_admin)"""
     if session.get('rol_sistema') != 'super_admin':
         return jsonify({'error': 'No autorizado'}), 403
-    
     result = auth_manager.eliminar_usuario(usuario_id)
     return jsonify(result)
 
@@ -167,20 +185,13 @@ def super_admin_debug():
     """Diagnóstico para super admin"""
     if session.get('rol_sistema') != 'super_admin':
         return jsonify({'error': 'No autorizado'}), 403
-    
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM public.usuarios")
             total_usuarios = cur.fetchone()[0]
-            
             cur.execute("SELECT COUNT(*) FROM public.tenants")
             total_negocios = cur.fetchone()[0]
-            
-            return jsonify({
-                'total_usuarios': total_usuarios,
-                'total_negocios': total_negocios,
-                'message': 'Si ves números aquí, los datos existen'
-            })
+            return jsonify({'total_usuarios': total_usuarios, 'total_negocios': total_negocios})
 
 # ==================== AUTH ENDPOINTS (Usuarios normales) ====================
 
@@ -217,96 +228,74 @@ def api_auth_logout():
 # ==================== PERFIL DE USUARIO ====================
 
 @app.route('/api/usuario/perfil', methods=['GET'])
+@login_required
 def get_perfil():
     """Obtiene el perfil del usuario actual"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
+    if session['usuario_id'] == 'super_admin':
         return jsonify({'error': 'No autenticado'}), 401
-    
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute('''
-                SELECT id, email, nombre_completo, telefono, created_at
-                FROM public.usuarios WHERE id = %s
-            ''', (session['usuario_id'],))
+            cur.execute('SELECT id, email, nombre_completo, telefono, created_at FROM public.usuarios WHERE id = %s', (session['usuario_id'],))
             row = cur.fetchone()
             if row:
-                return jsonify({
-                    'id': row[0],
-                    'email': row[1],
-                    'nombre': row[2],
-                    'telefono': row[3],
-                    'created_at': row[4]
-                })
+                return jsonify({'id': row[0], 'email': row[1], 'nombre': row[2], 'telefono': row[3], 'created_at': row[4]})
     return jsonify({'error': 'Usuario no encontrado'}), 404
 
 @app.route('/api/usuario/perfil', methods=['PUT'])
+@login_required
 def update_perfil():
     """Actualiza el perfil del usuario actual"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
+    if session['usuario_id'] == 'super_admin':
         return jsonify({'error': 'No autenticado'}), 401
-    
     data = request.json
     updates = []
     params = []
-    
     if data.get('nombre'):
         updates.append("nombre_completo = %s")
         params.append(data['nombre'])
         session['nombre'] = data['nombre']
-    
     if data.get('telefono'):
         updates.append("telefono = %s")
         params.append(data['telefono'])
-    
     if data.get('email') and data['email'] != session['email']:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM public.usuarios WHERE email = %s AND id != %s", 
-                           (data['email'], session['usuario_id']))
+                cur.execute("SELECT id FROM public.usuarios WHERE email = %s AND id != %s", (data['email'], session['usuario_id']))
                 if cur.fetchone():
                     return jsonify({'error': 'El email ya está en uso'}), 400
         updates.append("email = %s")
         params.append(data['email'])
         session['email'] = data['email']
-    
     if not updates:
         return jsonify({'error': 'No hay datos para actualizar'}), 400
-    
     params.append(session['usuario_id'])
     query = f"UPDATE public.usuarios SET {', '.join(updates)} WHERE id = %s"
-    
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
         conn.commit()
-    
     return jsonify({'success': True, 'message': 'Perfil actualizado'})
 
 # ==================== DASHBOARD DEL USUARIO ====================
 
 @app.route('/dashboard')
+@login_required
 def dashboard():
     """Dashboard del usuario (múltiples negocios)"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
+    if session['usuario_id'] == 'super_admin':
         return redirect('/')
-    
-    usuario = {
-        'id': session['usuario_id'],
-        'email': session['email'],
-        'nombre': session.get('nombre')
-    }
+    usuario = {'id': session['usuario_id'], 'email': session['email'], 'nombre': session.get('nombre')}
     negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
-    
     return render_template('dashboard_usuario.html', usuario=usuario, negocios=negocios)
 
 # ==================== NEGOCIOS (TENANTS) ====================
 
 @app.route('/api/negocio/registrar', methods=['POST'])
+@login_required
 def api_registrar_negocio():
     """Registro de nuevo negocio por usuario autenticado"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
+    if session['usuario_id'] == 'super_admin':
         return jsonify({'success': False, 'error': 'No autenticado'}), 401
-    
     data = request.json
     result = auth_manager.crear_negocio(
         usuario_id=session['usuario_id'],
@@ -318,127 +307,87 @@ def api_registrar_negocio():
     return jsonify(result)
 
 @app.route('/api/negocio/verificar', methods=['POST'])
+@login_required
 def api_verificar_negocio():
     """Verificación de negocio"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
+    if session['usuario_id'] == 'super_admin':
         return jsonify({'success': False, 'error': 'No autenticado'}), 401
-    
     data = request.json
-    result = auth_manager.verificar_negocio(
-        tenant_id=data.get('tenant_id'),
-        codigo=data.get('codigo')
-    )
+    result = auth_manager.verificar_negocio(tenant_id=data.get('tenant_id'), codigo=data.get('codigo'))
     return jsonify(result)
-# ========= Reenvía código por email
 
 @app.route('/api/negocio/reenviar_codigo_email/<tenant_id>', methods=['POST'])
+@login_required
+@tenant_owner_required
 def reenviar_codigo_email(tenant_id):
     """Reenvía el código de verificación por email"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
-        return jsonify({'error': 'No autenticado'}), 401
-    
     tenant = tenant_repo.find_by_id(tenant_id)
     if not tenant:
         return jsonify({'error': 'Negocio no encontrado'}), 404
-    
-    # Obtener código de verificación
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute('''
-                SELECT codigo_verificacion FROM public.verificacion_negocio 
-                WHERE tenant_id = %s AND verificado = false
-            ''', (tenant_id,))
+            cur.execute('SELECT codigo_verificacion FROM public.verificacion_negocio WHERE tenant_id = %s AND verificado = false', (tenant_id,))
             row = cur.fetchone()
             if not row:
                 return jsonify({'error': 'Negocio ya verificado o no existe'}), 400
             codigo = row[0]
-    
-    # Obtener email del usuario
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT email FROM public.usuarios WHERE id = %s", (session['usuario_id'],))
             row = cur.fetchone()
             email = row[0] if row else None
-    
     if not email:
         return jsonify({'error': 'No hay email registrado'}), 400
-    
-    # Enviar código por email
     from utils.email_brevo import email_sender
     enviado = email_sender.enviar_codigo_verificacion(email, codigo, tenant['nombre'])
-    
     if enviado:
-        # Actualizar fecha de envío
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
-                    UPDATE public.verificacion_negocio SET codigo_enviado = NOW()
-                    WHERE tenant_id = %s
-                ''', (tenant_id,))
+                cur.execute('UPDATE public.verificacion_negocio SET codigo_enviado = NOW() WHERE tenant_id = %s', (tenant_id,))
             conn.commit()
         return jsonify({'success': True, 'message': 'Código reenviado exitosamente'})
-    else:
-        return jsonify({'error': 'Error al enviar el código'}), 500
-
-# ========== Reenvía codigo por whatsapp ===============
+    return jsonify({'error': 'Error al enviar el código'}), 500
 
 @app.route('/api/negocio/reenviar_codigo/<tenant_id>', methods=['POST'])
+@login_required
+@tenant_owner_required
 def reenviar_codigo(tenant_id):
     """Reenvía el código de verificación por WhatsApp"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
-        return jsonify({'error': 'No autenticado'}), 401
-    
     tenant = tenant_repo.find_by_id(tenant_id)
     if not tenant:
         return jsonify({'error': 'Negocio no encontrado'}), 404
-    
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute('''
-                SELECT codigo_verificacion FROM public.verificacion_negocio 
-                WHERE tenant_id = %s AND verificado = false
-            ''', (tenant_id,))
+            cur.execute('SELECT codigo_verificacion FROM public.verificacion_negocio WHERE tenant_id = %s AND verificado = false', (tenant_id,))
             row = cur.fetchone()
             if not row:
                 return jsonify({'error': 'Negocio ya verificado o no existe'}), 400
             codigo = row[0]
-    
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT telefono FROM public.usuarios WHERE id = %s", (session['usuario_id'],))
             row = cur.fetchone()
             telefono = row[0] if row else None
-    
     if not telefono:
         return jsonify({'error': 'No hay número de teléfono registrado'}), 400
-    
-    enviado = auth_manager.enviar_codigo_whatsapp(
-        tenant['phone_id'], tenant['token'], codigo, telefono
-    )
-    
+    enviado = auth_manager.enviar_codigo_whatsapp(tenant['phone_id'], tenant['token'], codigo, telefono)
     if enviado:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
-                    UPDATE public.verificacion_negocio SET codigo_enviado = NOW()
-                    WHERE tenant_id = %s
-                ''', (tenant_id,))
+                cur.execute('UPDATE public.verificacion_negocio SET codigo_enviado = NOW() WHERE tenant_id = %s', (tenant_id,))
             conn.commit()
         return jsonify({'success': True, 'message': 'Código reenviado exitosamente'})
-    else:
-        return jsonify({'error': 'Error al enviar el código'}), 500
+    return jsonify({'error': 'Error al enviar el código'}), 500
 
 # ==================== ROLES Y USUARIOS POR NEGOCIO ====================
 
 @app.route('/api/negocio/<tenant_id>/usuarios', methods=['GET'])
+@login_required
+@tenant_owner_required
 def get_usuarios_negocio(tenant_id):
     """Obtiene todos los usuarios de un negocio"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
-        return jsonify({'error': 'No autenticado'}), 401
-    
     usuarios = auth_manager.get_usuarios_negocio(tenant_id)
     mi_rol = auth_manager.get_rol_negocio(session['usuario_id'], tenant_id)
-    
     return jsonify({
         'usuarios': usuarios,
         'mi_rol': mi_rol,
@@ -446,44 +395,36 @@ def get_usuarios_negocio(tenant_id):
     })
 
 @app.route('/api/negocio/<tenant_id>/invitar', methods=['POST'])
+@login_required
+@tenant_owner_required
 def invitar_usuario(tenant_id):
     """Invita a un usuario a un negocio"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
-        return jsonify({'error': 'No autenticado'}), 401
-    
     data = request.json
-    result = auth_manager.invitar_usuario(
-        session['usuario_id'], tenant_id, data.get('email'), data.get('rol', 'viewer')
-    )
+    result = auth_manager.invitar_usuario(session['usuario_id'], tenant_id, data.get('email'), data.get('rol', 'viewer'))
     return jsonify(result)
 
 @app.route('/api/negocio/<tenant_id>/usuarios/<usuario_id>', methods=['DELETE'])
+@login_required
+@tenant_owner_required
 def remover_usuario(tenant_id, usuario_id):
     """Remueve un usuario de un negocio"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
-        return jsonify({'error': 'No autenticado'}), 401
-    
     result = auth_manager.remover_usuario(session['usuario_id'], tenant_id, usuario_id)
     return jsonify(result)
 
 @app.route('/api/negocio/<tenant_id>/usuarios/<usuario_id>/rol', methods=['PUT'])
+@login_required
+@tenant_owner_required
 def cambiar_rol_usuario(tenant_id, usuario_id):
     """Cambia el rol de un usuario en un negocio"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
-        return jsonify({'error': 'No autenticado'}), 401
-    
     data = request.json
-    result = auth_manager.cambiar_rol_usuario(
-        session['usuario_id'], tenant_id, usuario_id, data.get('rol')
-    )
+    result = auth_manager.cambiar_rol_usuario(session['usuario_id'], tenant_id, usuario_id, data.get('rol'))
     return jsonify(result)
 
 @app.route('/api/negocio/<tenant_id>/permisos', methods=['GET'])
+@login_required
+@tenant_owner_required
 def verificar_permisos(tenant_id):
     """Verifica los permisos del usuario actual en el negocio"""
-    if 'usuario_id' not in session or session['usuario_id'] == 'super_admin':
-        return jsonify({'error': 'No autenticado'}), 401
-    
     permisos = {
         'editar_negocio': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'editar_negocio'),
         'invitar_usuarios': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'invitar_usuarios'),
@@ -494,7 +435,6 @@ def verificar_permisos(tenant_id):
         'eliminar_negocio': auth_manager.verificar_permiso(session['usuario_id'], tenant_id, 'eliminar_negocio')
     }
     mi_rol = auth_manager.get_rol_negocio(session['usuario_id'], tenant_id)
-    
     return jsonify({'permisos': permisos, 'mi_rol': mi_rol})
 
 # ==================== ENDPOINTS BÁSICOS ====================
@@ -508,10 +448,14 @@ def api_register_tenant():
 def health():
     return {'status': 'ok', 'message': 'WhatsApp SaaS is running'}
 
-# ==================== ADMIN (PANEL ANTIGUO) ====================
+# ==================== ADMIN (PANEL ANTIGUO) - PROTEGIDO ====================
 
 @app.route('/admin/tenants')
+@login_required
 def list_tenants():
+    """Lista todos los tenants (solo super_admin)"""
+    if session.get('rol_sistema') != 'super_admin':
+        return redirect('/dashboard')
     tenants = tenant_repo.get_all()
     return render_template('tenants.html', tenants=tenants)
 
@@ -524,27 +468,27 @@ def registro_web():
     nombre = request.form.get('nombre')
     phone_id = request.form.get('phone_id')
     token = request.form.get('token')
-    
     tenant = tenant_repo.create(nombre, phone_id, token)
     schema_manager.create_tenant_schema(tenant['id'], 'restaurante')
-    
     return render_template('registro_exito.html', tenant=tenant)
 
 @app.route('/admin/menu', methods=['GET'])
+@login_required
+@tenant_owner_required
 def admin_menu():
     tenant_id = request.args.get('tenant_id')
     if not tenant_id:
         return "Se requiere tenant_id", 400
-    
     tenant = tenant_repo.find_by_id(tenant_id)
     if not tenant:
         return f"Tenant no encontrado: {tenant_id}", 404
-    
     return render_template('menu.html', tenant=tenant)
 
 # ==================== PRODUCTOS (CRUD) ====================
 
 @app.route('/api/tenant/<tenant_id>/menu', methods=['GET'])
+@login_required
+@tenant_owner_required
 def get_tenant_menu(tenant_id):
     try:
         menu = schema_manager.get_menu(tenant_id)
@@ -553,6 +497,8 @@ def get_tenant_menu(tenant_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tenant/<tenant_id>/config', methods=['GET'])
+@login_required
+@tenant_owner_required
 def get_tenant_config(tenant_id):
     try:
         tenant = tenant_repo.find_by_id(tenant_id)
@@ -563,6 +509,8 @@ def get_tenant_config(tenant_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tenant/<tenant_id>/config/ia', methods=['PUT', 'OPTIONS'])
+@login_required
+@tenant_owner_required
 def update_tenant_ia(tenant_id):
     if request.method == 'OPTIONS':
         return '', 200
@@ -575,6 +523,8 @@ def update_tenant_ia(tenant_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/add_product/<tenant_id>', methods=['POST', 'OPTIONS'])
+@login_required
+@tenant_owner_required
 def add_product(tenant_id):
     if request.method == 'OPTIONS':
         return '', 200
@@ -584,16 +534,14 @@ def add_product(tenant_id):
         precio = data.get('precio')
         if not nombre or not precio:
             return jsonify({'error': 'Faltan nombre o precio'}), 400
-        product_id = schema_manager.add_product(
-            tenant_id, nombre, int(precio),
-            data.get('descripcion', ''),
-            data.get('categoria', 'general')
-        )
+        product_id = schema_manager.add_product(tenant_id, nombre, int(precio), data.get('descripcion', ''), data.get('categoria', 'general'))
         return jsonify({'status': 'ok', 'product_id': product_id}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/delete_product/<tenant_id>/<product_id>', methods=['DELETE', 'OPTIONS'])
+@login_required
+@tenant_owner_required
 def delete_product(tenant_id, product_id):
     if request.method == 'OPTIONS':
         return '', 200
@@ -607,6 +555,8 @@ def delete_product(tenant_id, product_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/update_product/<tenant_id>/<product_id>', methods=['PUT', 'OPTIONS'])
+@login_required
+@tenant_owner_required
 def update_product(tenant_id, product_id):
     if request.method == 'OPTIONS':
         return '', 200
@@ -618,16 +568,15 @@ def update_product(tenant_id, product_id):
                     UPDATE {tenant_id}.productos 
                     SET nombre = %s, descripcion = %s, precio = %s, categoria = %s, disponible = %s
                     WHERE id = %s
-                """, (
-                    data.get('nombre'), data.get('descripcion'), data.get('precio'),
-                    data.get('categoria', 'general'), data.get('disponible', True), product_id
-                ))
+                """, (data.get('nombre'), data.get('descripcion'), data.get('precio'), data.get('categoria', 'general'), data.get('disponible', True), product_id))
             conn.commit()
         return jsonify({'status': 'ok', 'message': 'Producto actualizado'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/toggle_product/<tenant_id>/<product_id>', methods=['PUT', 'OPTIONS'])
+@login_required
+@tenant_owner_required
 def toggle_product(tenant_id, product_id):
     if request.method == 'OPTIONS':
         return '', 200
@@ -643,20 +592,21 @@ def toggle_product(tenant_id, product_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/update_tenant/<tenant_id>', methods=['PUT', 'OPTIONS'])
+@login_required
+@tenant_owner_required
 def update_tenant(tenant_id):
     if request.method == 'OPTIONS':
         return '', 200
     try:
         data = request.json
-        tenant_repo.update_tenant(
-            tenant_id, data.get('nombre'), data.get('phone_id'),
-            data.get('token'), data.get('usar_ia', False)
-        )
+        tenant_repo.update_tenant(tenant_id, data.get('nombre'), data.get('phone_id'), data.get('token'), data.get('usar_ia', False))
         return jsonify({'status': 'ok', 'message': 'Tenant actualizado'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/delete_tenant/<tenant_id>', methods=['DELETE', 'OPTIONS'])
+@login_required
+@tenant_owner_required
 def delete_tenant(tenant_id):
     if request.method == 'OPTIONS':
         return '', 200
@@ -672,23 +622,20 @@ def delete_tenant(tenant_id):
 # ==================== AI TRAINING ====================
 
 @app.route('/admin/train/<tenant_id>', methods=['GET', 'POST'])
+@login_required
+@tenant_owner_required
 def train_ia(tenant_id):
     if request.method == 'GET':
         return render_template('train.html', tenant_id=tenant_id)
-    
     try:
         data = request.json
         tipo = data.get('tipo')
-        
         if tipo == 'imagen':
             resultado = trainer.procesar_imagen(data.get('imagen'))
         else:
             resultado = trainer.procesar_texto(data.get('texto'))
-        
         if not resultado:
             return jsonify({'error': 'No se pudo procesar'}), 500
-        
-        # Asegurar estructura mínima
         if 'productos' not in resultado:
             resultado['productos'] = []
         if 'horario' not in resultado:
@@ -699,8 +646,6 @@ def train_ia(tenant_id):
             resultado['politicas'] = ''
         if 'instrucciones_adicionales' not in resultado:
             resultado['instrucciones_adicionales'] = ''
-        
-        # Guardar contexto en base de datos
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 prompt_personalizado = trainer.generar_prompt_personalizado(resultado)
@@ -717,50 +662,27 @@ def train_ia(tenant_id):
                         politicas = EXCLUDED.politicas,
                         prompt_personalizado = EXCLUDED.prompt_personalizado,
                         updated_at = NOW()
-                ''', (
-                    tenant_id,
-                    json.dumps(resultado.get('productos', [])),
-                    resultado.get('instrucciones_adicionales', ''),
-                    resultado.get('horario', ''),
-                    resultado.get('ubicacion', ''),
-                    resultado.get('politicas', ''),
-                    prompt_personalizado
-                ))
+                ''', (tenant_id, json.dumps(resultado.get('productos', [])), resultado.get('instrucciones_adicionales', ''), resultado.get('horario', ''), resultado.get('ubicacion', ''), resultado.get('politicas', ''), prompt_personalizado))
             conn.commit()
-        
-        # Guardar productos en el menú del tenant
         productos_agregados = 0
         for producto in resultado.get('productos', []):
             if producto.get('nombre') and producto.get('precio'):
                 try:
-                    schema_manager.add_product(
-                        tenant_id, 
-                        producto.get('nombre'), 
-                        int(producto.get('precio', 0)),
-                        producto.get('descripcion', ''), 
-                        producto.get('categoria', 'general')
-                    )
+                    schema_manager.add_product(tenant_id, producto.get('nombre'), int(producto.get('precio', 0)), producto.get('descripcion', ''), producto.get('categoria', 'general'))
                     productos_agregados += 1
                 except Exception as e:
-                    logger.warning(f'Error guardando producto {producto.get("nombre")}: {e}')
-        
+                    logger.warning(f'Error guardando producto: {e}')
         logger.info(f'Entrenamiento completado: {productos_agregados} productos guardados')
-        
-        # ✅ CORREGIDO: Devolver estructura completa que espera el frontend
-        return jsonify({
-            'status': 'ok',
-            'contexto': resultado,
-            'productos_guardados': productos_agregados,
-            'message': f'Entrenamiento exitoso. Se guardaron {productos_agregados} productos.'
-        })
-        
+        return jsonify({'status': 'ok', 'contexto': resultado, 'productos_guardados': productos_agregados, 'message': f'Entrenamiento exitoso. Se guardaron {productos_agregados} productos.'})
     except Exception as e:
         logger.error(f'Error en train_ia: {str(e)}')
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e), 'details': 'Error interno del servidor'}), 500
-    
+
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET'])
+@login_required
+@tenant_owner_required
 def get_tenant_context(tenant_id):
     try:
         with db_manager.get_connection() as conn:
@@ -776,82 +698,78 @@ def get_tenant_context(tenant_id):
                 return jsonify({})
     except Exception as e:
         return jsonify({}), 500
-    
-    @app.route('/api/tenant/<tenant_id>/conversaciones/cliente/<cliente_numero>', methods=['GET'])
-    def get_conversaciones_cliente(tenant_id, cliente_numero):
-        """Obtiene el historial de conversaciones con un cliente específico"""
-        if 'usuario_id' not in session:
-            return jsonify({'error': 'No autenticado'}), 401
-        
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        SELECT mensaje, respuesta, created_at 
-                        FROM public.conversaciones 
-                        WHERE tenant_id = %s AND cliente_numero = %s 
-                        ORDER BY created_at ASC
-                    """, (tenant_id, cliente_numero))
-                    rows = cur.fetchall()
-                    conversaciones = []
-                    for row in rows:
-                        conversaciones.append({
-                            'mensaje': row[0],
-                            'respuesta': row[1],
-                            'fecha': row[2]
-                        })
-                    return jsonify(conversaciones)
-        except Exception as e:
-            logger.error(f'Error cargando historial: {e}')
-            return jsonify([]), 500
+
+@app.route('/api/tenant/<tenant_id>/conversaciones/cliente/<cliente_numero>', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_conversaciones_cliente(tenant_id, cliente_numero):
+    """Obtiene el historial de conversaciones con un cliente específico"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT mensaje, respuesta, created_at FROM public.conversaciones_ia WHERE tenant_id = %s AND cliente_numero = %s ORDER BY created_at ASC", (tenant_id, cliente_numero))
+                rows = cur.fetchall()
+                conversaciones = [{'mensaje': row[0], 'respuesta': row[1], 'fecha': row[2]} for row in rows]
+                return jsonify(conversaciones)
+    except Exception as e:
+        logger.error(f'Error cargando historial: {e}')
+        return jsonify([]), 500
 
 # ==================== PANEL DEL CLIENTE ====================
 
 @app.route('/panel/<tenant_id>')
+@login_required
+@tenant_owner_required
 def panel_cliente(tenant_id):
-    """Panel de control del cliente (tenant)"""
-    if 'usuario_id' not in session:
-        return redirect('/')
-    
     tenant = tenant_repo.find_by_id(tenant_id)
     if not tenant:
         return "Tenant no encontrado", 404
-    
     return render_template('panel_cliente.html', tenant=tenant)
 
 @app.route('/api/tenant/<tenant_id>/pedidos', methods=['GET'])
+@login_required
+@tenant_owner_required
 def get_pedidos_tenant(tenant_id):
     """Obtiene pedidos del tenant con filtros"""
-    if 'usuario_id' not in session:
-        return jsonify({'error': 'No autenticado'}), 401
-    
     estado = request.args.get('estado', 'todos')
     cliente = request.args.get('cliente', '')
-    
     try:
-        # Usar conexión específica del tenant
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
+                query = "SELECT * FROM pedidos"
+                params = []
+                condiciones = []
+                if estado != 'todos':
+                    condiciones.append("estado = %s")
+                    params.append(estado)
+                if cliente:
+                    condiciones.append("cliente_numero LIKE %s")
+                    params.append(f'%{cliente}%')
+                if condiciones:
+                    query += " WHERE " + " AND ".join(condiciones)
+                query += " ORDER BY created_at DESC"
+                cur.execute(query, params)
                 rows = cur.fetchall()
                 columns = [desc[0] for desc in cur.description]
-                pedidos = [dict(zip(columns, row)) for row in rows]
+                pedidos = []
+                for row in rows:
+                    pedido = dict(zip(columns, row))
+                    if not pedido.get('cliente_nombre'):
+                        pedido['cliente_nombre'] = pedido['cliente_numero']
+                    pedidos.append(pedido)
                 return jsonify(pedidos)
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
         return jsonify([])
-    
+
 @app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
+@login_required
 def cambiar_estado_pedido(pedido_id):
     """Cambia el estado de un pedido"""
-    if 'usuario_id' not in session:
-        return jsonify({'error': 'No autenticado'}), 401
-    
     data = request.json
     nuevo_estado = data.get('estado')
-    
-    # Buscar en qué tenant está el pedido
     tenants = tenant_repo.get_all()
+    tenant_id = None
     for t in tenants:
         with db_manager.get_connection(t['id']) as conn:
             with conn.cursor() as cur:
@@ -860,48 +778,22 @@ def cambiar_estado_pedido(pedido_id):
                 if row:
                     tenant_id = row[0]
                     break
-    
     if not tenant_id:
         return jsonify({'error': 'Pedido no encontrado'}), 404
-    
-    # Actualizar estado
-    fecha_campo = {
-        'pagado': 'pagado_at',
-        'enviado': 'enviado_at',
-        'cancelado': 'cancelado_at'
-    }.get(nuevo_estado)
-    
+    fecha_campo = {'pagado': 'pagado_at', 'enviado': 'enviado_at', 'cancelado': 'cancelado_at'}.get(nuevo_estado)
     with db_manager.get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
             if fecha_campo:
-                cur.execute(f"""
-                    UPDATE pedidos 
-                    SET estado = %s, updated_at = NOW(), {fecha_campo} = NOW()
-                    WHERE id = %s
-                """, (nuevo_estado, pedido_id))
+                cur.execute(f"UPDATE pedidos SET estado = %s, updated_at = NOW(), {fecha_campo} = NOW() WHERE id = %s", (nuevo_estado, pedido_id))
             else:
-                cur.execute("""
-                    UPDATE pedidos 
-                    SET estado = %s, updated_at = NOW()
-                    WHERE id = %s
-                """, (nuevo_estado, pedido_id))
+                cur.execute("UPDATE pedidos SET estado = %s, updated_at = NOW() WHERE id = %s", (nuevo_estado, pedido_id))
         conn.commit()
-    
-    # Si el pedido es nuevo, enviar notificación por email
-    if nuevo_estado == 'pagado':
-        tenant = tenant_repo.find_by_id(tenant_id)
-        if tenant:
-            enviar_notificacion_email(tenant, pedido_id)
-    
     return jsonify({'success': True, 'mensaje': f'Pedido {nuevo_estado}'})
 
 @app.route('/api/pedido/<pedido_id>/detalle', methods=['GET'])
+@login_required
 def detalle_pedido(pedido_id):
     """Obtiene detalle de un pedido con nombre del cliente"""
-    if 'usuario_id' not in session:
-        return jsonify({'error': 'No autenticado'}), 401
-    
-    # Buscar en qué tenant está el pedido
     tenants = tenant_repo.get_all()
     for t in tenants:
         with db_manager.get_connection(t['id']) as conn:
@@ -911,36 +803,23 @@ def detalle_pedido(pedido_id):
                 if row:
                     columns = [desc[0] for desc in cur.description]
                     pedido = dict(zip(columns, row))
-                    
-                    # Si no hay nombre, usar el teléfono
                     if not pedido.get('cliente_nombre'):
                         pedido['cliente_nombre'] = pedido['cliente_numero']
-                    
                     return jsonify(pedido)
-    
     return jsonify({'error': 'Pedido no encontrado'}), 404
 
 @app.route('/api/tenant/<tenant_id>/conversaciones', methods=['GET'])
+@login_required
+@tenant_owner_required
 def get_conversaciones(tenant_id):
     """Obtiene resumen de conversaciones por cliente desde conversaciones_ia"""
-    if 'usuario_id' not in session:
-        return jsonify({'error': 'No autenticado'}), 401
-    
     try:
-        # Las conversaciones están en la tabla pública (no por tenant)
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT 
-                        cliente_numero, 
-                        MAX(CASE WHEN tipo = 'cliente' THEN mensaje ELSE respuesta END) as ultimo_mensaje,
-                        COUNT(*) as total_mensajes,
-                        MAX(created_at) as ultimo_mensaje_fecha
-                    FROM public.conversaciones_ia 
-                    WHERE tenant_id = %s
-                    GROUP BY cliente_numero
-                    ORDER BY ultimo_mensaje_fecha DESC
-                    LIMIT 50
+                    SELECT cliente_numero, MAX(created_at) as ultimo_mensaje, COUNT(*) as total_mensajes
+                    FROM public.conversaciones_ia WHERE tenant_id = %s
+                    GROUP BY cliente_numero ORDER BY ultimo_mensaje DESC LIMIT 50
                 """, (tenant_id,))
                 rows = cur.fetchall()
                 conversaciones = []
@@ -948,21 +827,18 @@ def get_conversaciones(tenant_id):
                     conversaciones.append({
                         'cliente_numero': row[0],
                         'cliente_nombre': row[0],
-                        'ultimo_mensaje': row[1] or '',
-                        'total_pedidos': row[2] or 0,
-                        'ultimo_estado': 'activo'
+                        'ultimo_mensaje': row[1],
+                        'total_pedidos': row[2] or 0
                     })
                 return jsonify(conversaciones)
     except Exception as e:
         logger.error(f'Error cargando conversaciones: {e}')
         return jsonify([])
-    
+
 @app.route('/api/tenant/<tenant_id>/configuracion', methods=['GET', 'PUT'])
+@login_required
+@tenant_owner_required
 def tenant_configuracion(tenant_id):
-    """Obtiene o actualiza configuración del tenant"""
-    if 'usuario_id' not in session:
-        return jsonify({'error': 'No autenticado'}), 401
-    
     if request.method == 'GET':
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
@@ -970,16 +846,11 @@ def tenant_configuracion(tenant_id):
                 row = cur.fetchone()
                 config = row[0] if row and row[0] else {}
                 return jsonify(config)
-    
     if request.method == 'PUT':
         data = request.json
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE public.tenants 
-                    SET configuracion = configuracion || %s
-                    WHERE id = %s
-                """, (json.dumps(data), tenant_id))
+                cur.execute("UPDATE public.tenants SET configuracion = configuracion || %s WHERE id = %s", (json.dumps(data), tenant_id))
             conn.commit()
         return jsonify({'success': True})
 
@@ -1001,185 +872,80 @@ def test_tesseract():
 @app.route('/debug/webhook_info', methods=['GET'])
 def webhook_info():
     tenants = tenant_repo.get_all()
-    return {
-        'webhook_url': 'https://whatsapp-mvp-docker.onrender.com/webhook',
-        'tenants_registrados': [{'nombre': t['nombre'], 'phone_id': t['phone_id']} for t in tenants]
-    }
-
+    return {'webhook_url': 'https://whatsapp-mvp-docker.onrender.com/webhook', 'tenants_registrados': [{'nombre': t['nombre'], 'phone_id': t['phone_id']} for t in tenants]}
 
 @app.route('/super/admin/debug-session', methods=['GET'])
 def debug_session():
-    """Muestra la sesión actual (solo para diagnóstico)"""
     if session.get('rol_sistema') != 'super_admin':
         return jsonify({'error': 'No autorizado'}), 403
-    
-    return jsonify({
-        'session': dict(session),
-        'rol_sistema': session.get('rol_sistema'),
-        'usuario_id': session.get('usuario_id')
-    })
+    return jsonify({'session': dict(session), 'rol_sistema': session.get('rol_sistema'), 'usuario_id': session.get('usuario_id')})
 
 @app.route('/debug/send-test-message', methods=['GET'])
 def send_test_message():
-    """Envía un mensaje de prueba al número configurado"""
-    # Obtener el primer tenant
     tenants = tenant_repo.get_all()
     if not tenants:
         return jsonify({'error': 'No hay tenants'}), 404
-    
     tenant = tenants[0]
-    numero = "573155692656"  # Tu número de prueba
-    
+    numero = "573155692656"
     from whatsapp.client import whatsapp_client
     result = whatsapp_client.send_message(tenant, numero, "Este es un mensaje de prueba desde el sistema")
-    
-    return jsonify({
-        'success': result,
-        'tenant': tenant['nombre'],
-        'phone_id': tenant['phone_id'],
-        'numero_enviado': numero
-    })
+    return jsonify({'success': result, 'tenant': tenant['nombre'], 'phone_id': tenant['phone_id'], 'numero_enviado': numero})
 
 @app.route('/debug/check-token/<tenant_id>', methods=['GET'])
 def check_token(tenant_id):
-    """Verifica si el token de WhatsApp es válido"""
     tenant = tenant_repo.find_by_id(tenant_id)
     if not tenant:
         return jsonify({'error': 'Tenant no encontrado'}), 404
-    
-    # Probar obtener información del número
     url = f"https://graph.facebook.com/v18.0/{tenant['phone_id']}"
     headers = {"Authorization": f"Bearer {tenant['token']}"}
-    
     try:
         response = requests.get(url, headers=headers)
-        return jsonify({
-            'status_code': response.status_code,
-            'response': response.json() if response.status_code == 200 else response.text,
-            'token_valido': response.status_code == 200
-        })
+        return jsonify({'status_code': response.status_code, 'response': response.json() if response.status_code == 200 else response.text, 'token_valido': response.status_code == 200})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
+
 @app.route('/debug/test-email-now', methods=['GET'])
 def test_email_now():
-    """Prueba de envío de email directo"""
     from utils.email_brevo import email_sender
-    
-    email_to = "areyescali@hotmail.com" #Cambia por tu email
+    email_to = "areyescali@hotmail.com"
     codigo = "123456"
     nombre = "Test"
-    
     result = email_sender.enviar_codigo_verificacion(email_to, codigo, nombre)
-    
-    return jsonify({
-        'success': result,
-        'message': 'Email enviado' if result else 'Error al enviar',
-        'api_key_configured': bool(os.environ.get('BREVO_API_KEY'))
-    })
+    return jsonify({'success': result, 'message': 'Email enviado' if result else 'Error al enviar', 'api_key_configured': bool(os.environ.get('BREVO_API_KEY'))})
 
 def enviar_notificacion_email(tenant, pedido_id):
-    """Envía notificación de nuevo pedido por email"""
     from utils.email_brevo import email_sender
-    
-    # Obtener email del dueño del negocio
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT u.email FROM public.usuarios u
-                JOIN public.usuario_negocio un ON u.id = un.usuario_id
-                WHERE un.tenant_id = %s AND un.rol_id = 1
-            """, (tenant['id'],))
+            cur.execute("SELECT u.email FROM public.usuarios u JOIN public.usuario_negocio un ON u.id = un.usuario_id WHERE un.tenant_id = %s AND un.rol_id = 1", (tenant['id'],))
             row = cur.fetchone()
             if row:
-                email_to = row[0]
-                email_sender.enviar_notificacion_pedido(email_to, pedido_id, tenant['nombre'])
-
-# Endpoint temporal para arreglar - agrégalo en app.py
-@app.route('/debug/asignar_negocio', methods=['GET'])
-def asignar_negocio():
-    """Asigna un negocio existente al usuario actual (solo para debugging)"""
-    if 'usuario_id' not in session:
-        return jsonify({'error': 'No autenticado'}), 401
-    
-    # Obtener el primer tenant disponible
-    tenants = tenant_repo.get_all()
-    if not tenants:
-        return jsonify({'error': 'No hay negocios disponibles'}), 404
-    
-    tenant = tenants[0]
-    
-    # Verificar si ya está asociado
-    with db_manager.get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id FROM public.usuario_negocio 
-                WHERE usuario_id = %s AND tenant_id = %s
-            """, (session['usuario_id'], tenant['id']))
-            if cur.fetchone():
-                return jsonify({'message': 'El negocio ya está asociado a este usuario'})
-            
-            # Asociar como owner
-            cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
-            rol_owner_id = cur.fetchone()[0]
-            
-            cur.execute("""
-                INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por)
-                VALUES (%s, %s, %s, %s)
-            """, (session['usuario_id'], tenant['id'], rol_owner_id, session['usuario_id']))
-        conn.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': f'Negocio {tenant["nombre"]} asignado al usuario {session["email"]}'
-    })
+                email_sender.enviar_notificacion_pedido(row[0], pedido_id, tenant['nombre'])
 
 @app.route('/debug/asignar_negocio', methods=['GET'])
 def debug_asignar_negocio():
-    """Asigna el primer negocio disponible al usuario actual"""
     if 'usuario_id' not in session:
         return jsonify({'error': 'No autenticado'}), 401
-    
-    # Obtener el primer tenant disponible
     tenants = tenant_repo.get_all()
     if not tenants:
         return jsonify({'error': 'No hay negocios disponibles'}), 404
-    
     tenant = tenants[0]
-    
-    # Verificar si ya está asociado
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id FROM public.usuario_negocio 
-                WHERE usuario_id = %s AND tenant_id = %s
-            """, (session['usuario_id'], tenant['id']))
+            cur.execute("SELECT id FROM public.usuario_negocio WHERE usuario_id = %s AND tenant_id = %s", (session['usuario_id'], tenant['id']))
             if cur.fetchone():
-                return jsonify({'message': f'El negocio {tenant["nombre"]} ya está asociado a este usuario'})
-            
-            # Obtener rol owner
+                return jsonify({'message': f'El negocio {tenant["nombre"]} ya está asociado'})
             cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
             rol_row = cur.fetchone()
             if not rol_row:
                 return jsonify({'error': 'No se encontró el rol owner'}), 500
             rol_owner_id = rol_row[0]
-            
-            # Asociar usuario al negocio
-            cur.execute("""
-                INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por)
-                VALUES (%s, %s, %s, %s)
-            """, (session['usuario_id'], tenant['id'], rol_owner_id, session['usuario_id']))
+            cur.execute("INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por) VALUES (%s, %s, %s, %s)", (session['usuario_id'], tenant['id'], rol_owner_id, session['usuario_id']))
         conn.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': f'Negocio "{tenant["nombre"]}" asignado al usuario {session["email"]}',
-        'tenant_id': tenant['id']
-    })
+    return jsonify({'success': True, 'message': f'Negocio "{tenant["nombre"]}" asignado al usuario {session["email"]}', 'tenant_id': tenant['id']})
 
 @app.route('/debug/contexto/<tenant_id>', methods=['GET'])
 def debug_contexto(tenant_id):
-    """Ver el contexto guardado para un tenant"""
     with db_manager.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM public.tenant_context WHERE tenant_id = %s", (tenant_id,))
@@ -1188,11 +954,9 @@ def debug_contexto(tenant_id):
                 columns = [desc[0] for desc in cur.description]
                 return jsonify(dict(zip(columns, row)))
             return jsonify({'error': 'No hay contexto'}), 404
-        
-# ====== Empoint para crear tabla de conversaciones
+
 @app.route('/debug/crear_tabla_conversaciones', methods=['GET'])
 def crear_tabla_conversaciones():
-    """Crea la tabla de conversaciones si no existe"""
     try:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
@@ -1213,7 +977,6 @@ def crear_tabla_conversaciones():
         return jsonify({'success': True, 'message': 'Tabla conversaciones_ia creada'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
