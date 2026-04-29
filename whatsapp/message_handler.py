@@ -128,7 +128,7 @@ class MessageHandler:
             return self._respuesta_fallback(texto, tenant, menu, numero)
         
         # Obtener historial de conversación
-        historial = self._get_historial_conversacion(tenant['id'], numero, 5)
+        historial = self._get_historial_conversacion(tenant['id'], numero, 50)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
         # Si hay prompt personalizado, usarlo
