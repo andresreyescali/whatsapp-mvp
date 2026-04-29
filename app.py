@@ -79,6 +79,28 @@ def tenant_owner_required(f):
         return "No tienes acceso a este negocio", 403
     return decorated_function
 
+def tenant_owner_required_from_args(f):
+    """Decorador para verificar dueño del tenant (tenant_id viene de request.args)"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'usuario_id' not in session:
+            return redirect('/')
+        
+        tenant_id = request.args.get('tenant_id')
+        if not tenant_id:
+            return "Se requiere tenant_id", 400
+        
+        if session.get('rol_sistema') == 'super_admin':
+            return f(*args, **kwargs)
+        
+        negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
+        for n in negocios:
+            if n['id'] == tenant_id:
+                return f(*args, **kwargs)
+        
+        return "No tienes acceso a este negocio", 403
+    return decorated_function
+
 # ==================== PÁGINAS PÚBLICAS ====================
 
 @app.route('/')
@@ -474,11 +496,9 @@ def registro_web():
 
 @app.route('/admin/menu', methods=['GET'])
 @login_required
-@tenant_owner_required
+@tenant_owner_required_from_args
 def admin_menu():
     tenant_id = request.args.get('tenant_id')
-    if not tenant_id:
-        return "Se requiere tenant_id", 400
     tenant = tenant_repo.find_by_id(tenant_id)
     if not tenant:
         return f"Tenant no encontrado: {tenant_id}", 404
