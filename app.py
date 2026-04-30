@@ -983,6 +983,7 @@ def debug_contexto(tenant_id):
 
 @app.route('/debug/crear_tabla_conversaciones', methods=['GET'])
 def crear_tabla_conversaciones():
+    """Crea la tabla de conversaciones"""
     try:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
@@ -1000,7 +1001,43 @@ def crear_tabla_conversaciones():
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_conversaciones_tenant ON public.conversaciones_ia(tenant_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON public.conversaciones_ia(cliente_numero)")
             conn.commit()
-        return jsonify({'success': True, 'message': 'Tabla conversaciones_ia creada'})
+        return jsonify({'success': True, 'message': 'Tabla creada'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/debug/verificar_tabla_conversaciones', methods=['GET'])
+def verificar_tabla_conversaciones():
+    """Verifica si la tabla de conversaciones existe y tiene datos"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'conversaciones_ia'")
+                existe = cur.fetchone()[0] > 0
+                
+                if existe:
+                    cur.execute("SELECT COUNT(*) FROM public.conversaciones_ia")
+                    total = cur.fetchone()[0]
+                    return jsonify({'tabla_existe': True, 'total_registros': total})
+                else:
+                    return jsonify({'tabla_existe': False, 'error': 'Tabla no existe'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/debug/ver_historial/<tenant_id>/<cliente_numero>', methods=['GET'])
+def ver_historial(tenant_id, cliente_numero):
+    """Ver el historial de conversaciones de un cliente"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT mensaje, respuesta, created_at 
+                    FROM public.conversaciones_ia 
+                    WHERE tenant_id = %s AND cliente_numero = %s 
+                    ORDER BY created_at ASC
+                """, (tenant_id, cliente_numero))
+                rows = cur.fetchall()
+                historial = [{'mensaje': r[0], 'respuesta': r[1], 'fecha': r[2]} for r in rows]
+                return jsonify({'historial': historial, 'total': len(historial)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

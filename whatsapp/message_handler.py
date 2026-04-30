@@ -41,18 +41,19 @@ class MessageHandler:
             self._guardar_conversacion(tenant['id'], numero, texto, respuesta)
     
     def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
-        """Guarda la conversación en la base de datos"""
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        INSERT INTO public.conversaciones_ia (tenant_id, cliente_numero, mensaje, respuesta, tipo)
-                        VALUES (%s, %s, %s, %s, 'cliente')
-                    """, (tenant_id, cliente_numero, mensaje, respuesta))
-                conn.commit()
-        except Exception as e:
-            logger.error(f'Error guardando conversación: {e}')
-        
+    """Guarda la conversación en la base de datos"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO public.conversaciones_ia (tenant_id, cliente_numero, mensaje, respuesta)
+                    VALUES (%s, %s, %s, %s)
+                """, (tenant_id, cliente_numero, mensaje, respuesta))
+            conn.commit()
+            logger.info(f"Conversación guardada para {cliente_numero}")
+    except Exception as e:
+        logger.error(f'Error guardando conversación: {e}')
+
     def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
         """Obtiene el historial de conversación con el cliente"""
         try:
@@ -205,7 +206,7 @@ REGLAS IMPORTANTES:
    Ejemplo: "¡Hola! Soy el asistente de [NOMBRE_DEL_NEGOCIO]. ¿En qué puedo ayudarte?"
 
 2. Eres un vendedor amable, conversacional y natural.
-3. Mantén el contexto de la conversación. Si el cliente ya pidió algo antes, recuérdalo.
+3. Mantén el contexto de toda la conversación. Si el cliente ya pidió algo antes, recuérdalo y no olvides lo que el cliente ya pidió.
 4. NO saludes cada vez. Solo saluda al inicio de la conversación.
 5. Si el cliente confirma un pedido, procede a generar el link de pago.
 6. Si el cliente pide el menú, preséntalo de forma atractiva.
@@ -214,7 +215,8 @@ REGLAS IMPORTANTES:
 9. Si el cliente dice "ya pague" o similar, confirma el pago y despídete amablemente.
 10. Responde SIEMPRE en español, de forma breve pero completa (2-4 oraciones).
 11. Sé proactivo: si el cliente duda, recomienda los productos más populares.
-
+12. Si el cliente ya ha pedido un producto, NO le preguntes de nuevo qué quiere.
+13. Si el cliente ya te dijo el pedido, y al preguntarle si es todo, te dice "si", "es todo", "si eso es", "confirmo" o similar, procesa el pedido pendiente.
 INSTRUCCIÓN CRÍTICA: Tu respuesta debe ser SOLO el mensaje para el cliente, sin explicaciones adicionales."""
 
         return f"""{negocio_info}
