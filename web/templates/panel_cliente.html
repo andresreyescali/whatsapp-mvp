@@ -202,6 +202,8 @@
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}`);
             const pedidos = await response.json();
             
+            console.log('Pedidos recibidos:', pedidos);  // Debug
+            
             if (!pedidos || pedidos.length === 0) {
                 document.getElementById('pedidosContainer').innerHTML = '<div class="card">📭 No hay pedidos</div>';
                 actualizarStats([]);
@@ -212,10 +214,23 @@
             
             let html = '';
             pedidos.forEach(p => {
-                const estadoClass = p.estado === 'nuevo' ? 'estado-nuevo' : 
-                                   (p.estado === 'pagado' ? 'estado-pagado' : 'estado-enviado');
-                const estadoTexto = p.estado === 'nuevo' ? '🆕 Nuevo' : 
-                                    (p.estado === 'pagado' ? '✅ Pagado' : '🚚 Enviado');
+                let estadoClass = '';
+                let estadoTexto = '';
+                
+                if (p.estado === 'nuevo') {
+                    estadoClass = 'estado-nuevo';
+                    estadoTexto = '🆕 Nuevo';
+                } else if (p.estado === 'pagado') {
+                    estadoClass = 'estado-pagado';
+                    estadoTexto = '✅ Pagado';
+                } else if (p.estado === 'enviado') {
+                    estadoClass = 'estado-enviado';
+                    estadoTexto = '🚚 Enviado';
+                } else {
+                    estadoClass = 'estado-nuevo';
+                    estadoTexto = p.estado || 'Nuevo';
+                }
+                
                 const items = p.items ? (Array.isArray(p.items) ? p.items : JSON.parse(p.items)) : [];
                 
                 html += `
@@ -246,6 +261,17 @@
             console.error('Error:', error);
             document.getElementById('pedidosContainer').innerHTML = '<div class="card">❌ Error al cargar pedidos</div>';
         }
+    }
+
+    function actualizarStats(pedidos) {
+        const stats = {
+            nuevo: pedidos.filter(p => p.estado === 'nuevo' || p.estado === 'pendiente_pago').length,
+            pagado: pedidos.filter(p => p.estado === 'pagado').length,
+            enviado: pedidos.filter(p => p.estado === 'enviado').length
+        };
+        document.getElementById('totalNuevos').innerText = stats.nuevo;
+        document.getElementById('totalPagados').innerText = stats.pagado;
+        document.getElementById('totalEnviados').innerText = stats.enviado;
     }
 
     function actualizarStats(pedidos) {
