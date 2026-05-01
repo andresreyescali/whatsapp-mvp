@@ -229,26 +229,31 @@ MENÚ COMPLETO:
     def _detectar_y_crear_pedido(self, respuesta_ia: str, texto_original: str, tenant: dict, menu: list, numero: str) -> tuple:
         """Detecta si la IA quiere crear un pedido y lo ejecuta"""
         
+        logger.info(f"Detectando pedido - Respuesta IA: {respuesta_ia[:100]}...")
+        
         lineas = respuesta_ia.lower().split('\n')
         
         for linea in lineas:
             if any(palabra in linea for palabra in ['pedido confirmado', 'producto agregado', 'link de pago', 'paga aquí']):
+                logger.info(f"Patrón de pedido detectado en: {linea}")
                 for producto in menu:
                     if producto['nombre'].lower() in texto_original.lower():
+                        logger.info(f"Creando pedido para: {producto['nombre']}")
                         pedido = order_repo.create(tenant['id'], numero, producto['nombre'], producto['precio'])
                         link_pago = generar_link_pago(pedido['total'], pedido['id'])
                         
                         respuesta_nueva = f"""✅ ¡Pedido confirmado!
 
-**Producto:** {producto['nombre']}
-**Precio:** ${producto['precio']:,.0f}
+    **Producto:** {producto['nombre']}
+    **Precio:** ${producto['precio']:,.0f}
 
-🔗 **Link de pago:** {link_pago}
+    🔗 **Link de pago:** {link_pago}
 
-✍️ Escribe "ya pagué" cuando completes el pago."""
+    ✍️ Escribe "ya pagué" cuando completes el pago."""
                         
                         return respuesta_nueva, True
         
+        logger.info("No se detectó ningún pedido")
         return respuesta_ia, False
     
     def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:

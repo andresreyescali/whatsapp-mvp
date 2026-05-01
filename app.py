@@ -1093,7 +1093,52 @@ def debug_pedidos(tenant_id):
                 resultado['total_public'] = len(pedidos)
     except Exception as e:
         resultado['error_public'] = str(e)
+    return jsonify(resultado)
+
+@app.route('/debug/ver_pedidos/<tenant_id>', methods=['GET'])
+def debug_ver_pedidos(tenant_id):
+    """Diagnóstico para ver dónde están los pedidos"""
+    resultado = {}
     
+    # 1. Buscar en el schema del tenant
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) FROM {tenant_id}.pedidos")
+                count = cur.fetchone()[0]
+                resultado['total_en_schema_tenant'] = count
+                
+                if count > 0:
+                    cur.execute(f"SELECT * FROM {tenant_id}.pedidos ORDER BY created_at DESC LIMIT 3")
+                    rows = cur.fetchall()
+                    columns = [desc[0] for desc in cur.description]
+                    resultado['ejemplo_pedidos'] = [dict(zip(columns, row)) for row in rows]
+    except Exception as e:
+        resultado['error_schema_tenant'] = str(e)
+    
+    # 2. Buscar en la tabla pública
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM public.pedidos WHERE tenant_id = %s", (tenant_id,))
+                count = cur.fetchone()[0]
+                resultado['total_en_public'] = count
+    except Exception as e:
+        resultado['error_public'] = str(e)
+    
+    # 3. Verificar si la tabla existe en el tenant
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = %s AND table_name = 'pedidos'
+                    )
+                """, (tenant_id,))
+                resultado['tabla_pedidos_existe'] = cur.fetchone()[0]
+    except Exception as e:
+        resultado['error_tabla'] = str(e)
     return jsonify(resultado)
 
 if __name__ == '__main__':
