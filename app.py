@@ -756,7 +756,7 @@ def panel_cliente(tenant_id):
 @login_required
 @tenant_owner_required
 def get_pedidos_tenant(tenant_id):
-    """Obtiene pedidos del tenant"""
+    """Obtiene pedidos del tenant desde el schema del tenant"""
     estado = request.args.get('estado', 'todos')
     
     try:
@@ -779,12 +779,12 @@ def get_pedidos_tenant(tenant_id):
                             pedido['items'] = []
                     pedidos.append(pedido)
                 
-                logger.info(f"Pedidos encontrados: {len(pedidos)}")
+                logger.info(f"Pedidos encontrados en {tenant_id}.pedidos: {len(pedidos)}")
                 return jsonify(pedidos)
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
         return jsonify([])
-        
+            
 @app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
 @login_required
 def cambiar_estado_pedido(pedido_id):
@@ -1140,6 +1140,20 @@ def debug_ver_pedidos(tenant_id):
     except Exception as e:
         resultado['error_tabla'] = str(e)
     return jsonify(resultado)
+
+@app.route('/debug/crear_pedido_prueba/<tenant_id>', methods=['GET'])
+def crear_pedido_prueba(tenant_id):
+    """Crea un pedido de prueba manualmente"""
+    from orders.repository import order_repo
+    
+    pedido = order_repo.create(
+        tenant_id=tenant_id,
+        cliente_numero="573155692656",
+        producto_nombre="Pizza Margarita (Test)",
+        precio=25000
+    )
+    
+    return jsonify({'success': True, 'pedido': pedido})
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
