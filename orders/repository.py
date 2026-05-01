@@ -6,34 +6,34 @@ from core.logger import logger
 class OrderRepository:
     """Gestión de pedidos por tenant"""
     
-    def create(self, tenant_id: str, cliente_numero: str, producto_nombre: str, precio: int) -> dict:
-        """Crea un nuevo pedido"""
-        pedido_id = str(uuid.uuid4())
+def create(self, tenant_id: str, cliente_numero: str, producto_nombre: str, precio: int) -> dict:
+    """Crea un nuevo pedido"""
+    pedido_id = str(uuid.uuid4())
+    
+    items = [{"nombre": producto_nombre, "precio": precio, "cantidad": 1}]
+    total = precio
+    
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    INSERT INTO {tenant_id}.pedidos (id, cliente_numero, items, total, estado)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (pedido_id, cliente_numero, json.dumps(items), total, "nuevo"))  # ← cambiar a "nuevo"
+            conn.commit()
         
-        items = [{"nombre": producto_nombre, "precio": precio, "cantidad": 1}]
-        total = precio
+        logger.info(f'Pedido creado: {pedido_id} para {cliente_numero} en tenant {tenant_id}')
         
-        try:
-            with db_manager.get_connection(tenant_id) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"""
-                        INSERT INTO {tenant_id}.pedidos (id, cliente_numero, items, total, estado)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (pedido_id, cliente_numero, json.dumps(items), total, "pendiente_pago"))
-                conn.commit()
-            
-            logger.info(f'Pedido creado: {pedido_id} para {cliente_numero} en tenant {tenant_id}')
-            
-            return {
-                "id": pedido_id,
-                "cliente_numero": cliente_numero,
-                "items": items,
-                "total": total,
-                "estado": "pendiente_pago"
-            }
-        except Exception as e:
-            logger.error(f'Error creando pedido: {e}')
-            raise
+        return {
+            "id": pedido_id,
+            "cliente_numero": cliente_numero,
+            "items": items,
+            "total": total,
+            "estado": "nuevo"
+        }
+    except Exception as e:
+        logger.error(f'Error creando pedido: {e}')
+        raise
     
     def marcar_pagado(self, tenant_id: str, cliente_numero: str) -> int:
         """Marca pedidos como pagados"""

@@ -756,38 +756,35 @@ def panel_cliente(tenant_id):
 @login_required
 @tenant_owner_required
 def get_pedidos_tenant(tenant_id):
-    """Obtiene pedidos del tenant con filtros"""
+    """Obtiene pedidos del tenant"""
     estado = request.args.get('estado', 'todos')
-    cliente = request.args.get('cliente', '')
+    
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                query = "SELECT * FROM pedidos"
-                params = []
-                condiciones = []
-                if estado != 'todos':
-                    condiciones.append("estado = %s")
-                    params.append(estado)
-                if cliente:
-                    condiciones.append("cliente_numero LIKE %s")
-                    params.append(f'%{cliente}%')
-                if condiciones:
-                    query += " WHERE " + " AND ".join(condiciones)
-                query += " ORDER BY created_at DESC"
-                cur.execute(query, params)
+                if estado == 'todos':
+                    cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
+                else:
+                    cur.execute("SELECT * FROM pedidos WHERE estado = %s ORDER BY created_at DESC", (estado,))
+                
                 rows = cur.fetchall()
                 columns = [desc[0] for desc in cur.description]
                 pedidos = []
                 for row in rows:
                     pedido = dict(zip(columns, row))
-                    if not pedido.get('cliente_nombre'):
-                        pedido['cliente_nombre'] = pedido['cliente_numero']
+                    if pedido.get('items') and isinstance(pedido['items'], str):
+                        try:
+                            pedido['items'] = json.loads(pedido['items'])
+                        except:
+                            pedido['items'] = []
                     pedidos.append(pedido)
+                
+                logger.info(f"Pedidos encontrados: {len(pedidos)}")
                 return jsonify(pedidos)
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
         return jsonify([])
-
+        
 @app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
 @login_required
 def cambiar_estado_pedido(pedido_id):
@@ -879,6 +876,31 @@ def tenant_configuracion(tenant_id):
                 cur.execute("UPDATE public.tenants SET configuracion = configuracion || %s WHERE id = %s", (json.dumps(data), tenant_id))
             conn.commit()
         return jsonify({'success': True})
+
+@app.route('/api/tenant/<tenant_id>/pedidos/stats', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_pedidos_stats(tenant_id):
+    """Obtiene estadísticas de pedidos"""
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT estado, COUNT(*) as total 
+                    FROM pedidos 
+                    GROUP BY estado
+                """)
+                rows = cur.fetchall()
+                stats = {row[0]: row[1] for row in rows}
+                return jsonify({
+                    'nuevo': stats.get('nuevo', 0),
+                    'pagado': stats.get('pagado', 0),
+                    'enviado': stats.get('enviado', 0),
+                    'cancelado': stats.get('cancelado', 0),
+                    'pendiente_pago': stats.get('pendiente_pago', 0)
+                })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ==================== DEBUG ENDPOINTS ====================
 
@@ -1040,6 +1062,39 @@ def ver_historial(tenant_id, cliente_numero):
                 return jsonify({'historial': historial, 'total': len(historial)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/debug/pedidos/<tenant_id>', methods=['GET'])
+def debug_pedidos(tenant_id):
+    """Verifica dónde están los pedidos"""
+    resultado = {}
+    
+    # 1. Buscar en el schema del tenant
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC LIMIT 5")
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+                pedidos = [dict(zip(columns, row)) for row in rows]
+                resultado['pedidos_en_schema_tenant'] = pedidos
+                resultado['total_schema_tenant'] = len(pedidos)
+    except Exception as e:
+        resultado['error_schema_tenant'] = str(e)
+    
+    # 2. Buscar en la tabla pública
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM public.pedidos WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 5", (tenant_id,))
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+                pedidos = [dict(zip(columns, row)) for row in rows]
+                resultado['pedidos_en_public'] = pedidos
+                resultado['total_public'] = len(pedidos)
+    except Exception as e:
+        resultado['error_public'] = str(e)
+    
+    return jsonify(resultado)
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
