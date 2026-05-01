@@ -1155,6 +1155,34 @@ def crear_pedido_prueba(tenant_id):
     
     return jsonify({'success': True, 'pedido': pedido})
 
+@app.route('/debug/crear_pedido_manual/<tenant_id>', methods=['GET'])
+def crear_pedido_manual(tenant_id):
+    """Crea un pedido manualmente para prueba"""
+    from orders.repository import order_repo
+    
+    try:
+        pedido = order_repo.create(
+            tenant_id=tenant_id,
+            cliente_numero="573155692656",
+            producto_nombre="Pizza Margarita Test",
+            precio=25000
+        )
+        return jsonify({'success': True, 'pedido': pedido})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/debug/menu_tenant/<tenant_id>', methods=['GET'])
+def debug_menu_tenant(tenant_id):
+    """Ver los productos en el menú del tenant"""
+    try:
+        menu = schema_manager.get_menu(tenant_id)
+        return jsonify({
+            'total': len(menu),
+            'productos': [{'nombre': p['nombre'], 'precio': p['precio']} for p in menu[:10]]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)

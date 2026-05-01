@@ -229,20 +229,42 @@ MENÚ COMPLETO:
     def _detectar_y_crear_pedido(self, respuesta_ia: str, texto_original: str, tenant: dict, menu: list, numero: str) -> tuple:
         """Detecta si la IA quiere crear un pedido y lo ejecuta"""
         
-        logger.info(f"Detectando pedido - Respuesta IA: {respuesta_ia[:100]}...")
+        logger.info(f"=== DETECTANDO PEDIDO ===")
+        logger.info(f"Texto original: {texto_original}")
+        logger.info(f"Respuesta IA: {respuesta_ia[:200]}...")
         
-        lineas = respuesta_ia.lower().split('\n')
+        # Buscar producto en el texto original
+        producto_encontrado = None
+        for producto in menu:
+            if producto['nombre'].lower() in texto_original.lower():
+                producto_encontrado = producto
+                logger.info(f"Producto encontrado: {producto['nombre']}")
+                break
         
-        for linea in lineas:
-            if any(palabra in linea for palabra in ['pedido confirmado', 'producto agregado', 'link de pago', 'paga aquí']):
-                logger.info(f"Patrón de pedido detectado en: {linea}")
-                for producto in menu:
-                    if producto['nombre'].lower() in texto_original.lower():
-                        logger.info(f"Creando pedido para: {producto['nombre']}")
-                        pedido = order_repo.create(tenant['id'], numero, producto['nombre'], producto['precio'])
-                        link_pago = generar_link_pago(pedido['total'], pedido['id'])
-                        
-                        respuesta_nueva = f"""✅ ¡Pedido confirmado!
+        if producto_encontrado:
+            logger.info(f"Creando pedido para: {producto_encontrado['nombre']}")
+            pedido = order_repo.create(tenant['id'], numero, producto_encontrado['nombre'], producto_encontrado['precio'])
+            link_pago = generar_link_pago(pedido['total'], pedido['id'])
+            
+            respuesta_nueva = f"""✅ ¡Pedido confirmado!
+
+    **Producto:** {producto_encontrado['nombre']}
+    **Precio:** ${producto_encontrado['precio']:,.0f}
+
+    🔗 **Link de pago:** {link_pago}
+
+    ✍️ Escribe "ya pagué" cuando completes el pago."""
+            
+            return respuesta_nueva, True
+        
+        # Buscar en la respuesta de la IA
+        for producto in menu:
+            if producto['nombre'].lower() in respuesta_ia.lower():
+                logger.info(f"Producto detectado en respuesta IA: {producto['nombre']}")
+                pedido = order_repo.create(tenant['id'], numero, producto['nombre'], producto['precio'])
+                link_pago = generar_link_pago(pedido['total'], pedido['id'])
+                
+                respuesta_nueva = f"""✅ ¡Pedido confirmado!
 
     **Producto:** {producto['nombre']}
     **Precio:** ${producto['precio']:,.0f}
@@ -250,11 +272,12 @@ MENÚ COMPLETO:
     🔗 **Link de pago:** {link_pago}
 
     ✍️ Escribe "ya pagué" cuando completes el pago."""
-                        
-                        return respuesta_nueva, True
+                
+                return respuesta_nueva, True
         
-        logger.info("No se detectó ningún pedido")
+        logger.info("No se detectó ningún producto en el mensaje")
         return respuesta_ia, False
+
     
     def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
         """Respuesta de fallback si la IA no está disponible"""
