@@ -10,6 +10,7 @@
         margin-bottom: 20px;
         border-bottom: 2px solid #e0e0e0;
         padding-bottom: 10px;
+        flex-wrap: wrap;
     }
     .tab {
         padding: 10px 20px;
@@ -21,12 +22,20 @@
         background: #25D366;
         color: white;
     }
+    .tab:hover:not(.active) {
+        background: #f0f0f0;
+    }
     .pedido-card {
         background: white;
         border-radius: 12px;
         padding: 15px;
         margin-bottom: 15px;
         box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        transition: transform 0.2s;
+    }
+    .pedido-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
     }
     .pedido-header {
         display: flex;
@@ -35,6 +44,8 @@
         margin-bottom: 10px;
         padding-bottom: 10px;
         border-bottom: 1px solid #eee;
+        flex-wrap: wrap;
+        gap: 10px;
     }
     .estado-badge {
         padding: 4px 12px;
@@ -52,21 +63,40 @@
         background: #f9f9f9;
         border-radius: 8px;
     }
+    .pedido-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+        flex-wrap: wrap;
+    }
     .btn-sm {
         padding: 5px 12px;
         font-size: 12px;
         border: none;
         border-radius: 5px;
         cursor: pointer;
+        transition: opacity 0.2s;
+    }
+    .btn-sm:hover {
+        opacity: 0.8;
     }
     .btn-detalle { background: #2196F3; color: white; }
     .btn-chat { background: #25D366; color: white; }
     .btn-historial { background: #9C27B0; color: white; }
+    .btn-pagar { background: #4CAF50; color: white; }
+    .btn-enviar { background: #FF9800; color: white; }
     .filtros {
         display: flex;
         gap: 10px;
         margin-bottom: 20px;
         flex-wrap: wrap;
+        align-items: center;
+    }
+    .filtro-select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font-size: 14px;
     }
     .modal {
         display: none;
@@ -93,10 +123,14 @@
         float: right;
         font-size: 24px;
         cursor: pointer;
+        color: #999;
+    }
+    .close:hover {
+        color: #333;
     }
     .stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
         gap: 15px;
         margin-bottom: 20px;
     }
@@ -106,9 +140,64 @@
         padding: 15px;
         border-radius: 10px;
         text-align: center;
+        cursor: pointer;
+        transition: transform 0.2s;
     }
-    .stat-card .number { font-size: 28px; font-weight: bold; }
-    .loading { text-align: center; padding: 40px; color: #666; }
+    .stat-card:hover {
+        transform: translateY(-2px);
+    }
+    .stat-card .number {
+        font-size: 28px;
+        font-weight: bold;
+    }
+    .stat-card .label {
+        font-size: 12px;
+        opacity: 0.9;
+    }
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+    }
+    .empty {
+        text-align: center;
+        padding: 40px;
+        color: #999;
+    }
+    .conversacion-card {
+        background: white;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .mensaje-cliente {
+        background: #e3f2fd;
+        border-left: 3px solid #2196F3;
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 8px;
+    }
+    .mensaje-bot {
+        background: #e8f5e9;
+        border-left: 3px solid #4CAF50;
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 8px;
+    }
+    @media (max-width: 768px) {
+        .pedido-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .stats {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        .tab {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+    }
 </style>
 
 <div class="tabs">
@@ -120,20 +209,33 @@
 <!-- Tab: Pedidos -->
 <div id="tabPedidos">
     <div class="stats" id="statsPedidos">
-        <div class="stat-card"><div class="number" id="totalNuevos">0</div><div>Nuevos</div></div>
-        <div class="stat-card"><div class="number" id="totalPagados">0</div><div>Pagados</div></div>
-        <div class="stat-card"><div class="number" id="totalEnviados">0</div><div>Enviados</div></div>
+        <div class="stat-card" onclick="filtrarPorEstado('nuevo')">
+            <div class="number" id="totalNuevos">0</div>
+            <div class="label">🆕 Nuevos</div>
+        </div>
+        <div class="stat-card" onclick="filtrarPorEstado('pagado')">
+            <div class="number" id="totalPagados">0</div>
+            <div class="label">✅ Pagados</div>
+        </div>
+        <div class="stat-card" onclick="filtrarPorEstado('enviado')">
+            <div class="number" id="totalEnviados">0</div>
+            <div class="label">🚚 Enviados</div>
+        </div>
+        <div class="stat-card" onclick="filtrarPorEstado('cancelado')">
+            <div class="number" id="totalCancelados">0</div>
+            <div class="label">❌ Cancelados</div>
+        </div>
     </div>
 
     <div class="filtros">
         <select id="filtroEstado" class="filtro-select" onchange="cargarPedidos()">
-            <option value="todos">Todos los estados</option>
+            <option value="todos">📋 Todos los estados</option>
             <option value="nuevo">🆕 Nuevos</option>
             <option value="pagado">✅ Pagados</option>
             <option value="enviado">🚚 Enviados</option>
             <option value="cancelado">❌ Cancelados</option>
         </select>
-        <button class="btn" onclick="cargarPedidos()">🔍 Actualizar</button>
+        <button class="btn-sm" style="background:#25D366; color:white; padding:8px 16px;" onclick="cargarPedidos()">🔄 Actualizar</button>
     </div>
 
     <div id="pedidosContainer" class="loading">Cargando pedidos...</div>
@@ -154,17 +256,21 @@
         <form id="configForm">
             <div class="form-group">
                 <label>Nombre del negocio</label>
-                <input type="text" id="configNombre" value="{{ tenant.nombre }}">
+                <input type="text" id="configNombre" value="{{ tenant.nombre }}" class="form-control">
             </div>
             <div class="form-group">
                 <label>Horario de atención</label>
-                <input type="text" id="configHorario" placeholder="Ej: Lunes a Domingo 12pm a 10pm">
+                <input type="text" id="configHorario" placeholder="Ej: Lunes a Domingo 12pm a 10pm" class="form-control">
             </div>
             <div class="form-group">
-                <label>Ubicación</label>
-                <input type="text" id="configUbicacion" placeholder="Ej: Calle 123, Cali">
+                <label>Ubicación / Dirección</label>
+                <input type="text" id="configUbicacion" placeholder="Ej: Calle 123, Cali" class="form-control">
             </div>
-            <button type="submit" class="btn">💾 Guardar</button>
+            <div class="form-group">
+                <label>Políticas de entrega</label>
+                <textarea id="configPoliticas" rows="3" placeholder="Tiempo de entrega, mínimo de pedido, etc." class="form-control"></textarea>
+            </div>
+            <button type="submit" class="btn">💾 Guardar Configuración</button>
         </form>
     </div>
 </div>
@@ -175,12 +281,14 @@
         <span class="close" onclick="cerrarModal()">&times;</span>
         <h2 id="detalleTitulo">Detalle del Pedido</h2>
         <div id="detalleContent"></div>
+        <div class="pedido-actions" id="detalleActions" style="margin-top: 15px;"></div>
     </div>
 </div>
 
 <script>
     const tenantId = '{{ tenant.id }}';
     const API_BASE = window.location.origin;
+    let estadoActual = 'todos';
 
     function mostrarTab(tab) {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -195,17 +303,24 @@
         if (tab === 'configuracion') cargarConfiguracion();
     }
 
+    function filtrarPorEstado(estado) {
+        document.getElementById('filtroEstado').value = estado;
+        estadoActual = estado;
+        cargarPedidos();
+    }
+
     async function cargarPedidos() {
         const estado = document.getElementById('filtroEstado').value;
+        estadoActual = estado;
         
         try {
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}`);
             const pedidos = await response.json();
             
-            console.log('Pedidos recibidos:', pedidos);  // Debug
+            console.log('Pedidos recibidos:', pedidos);
             
             if (!pedidos || pedidos.length === 0) {
-                document.getElementById('pedidosContainer').innerHTML = '<div class="card">📭 No hay pedidos</div>';
+                document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos</div>';
                 actualizarStats([]);
                 return;
             }
@@ -217,7 +332,7 @@
                 let estadoClass = '';
                 let estadoTexto = '';
                 
-                if (p.estado === 'nuevo') {
+                if (p.estado === 'nuevo' || p.estado === 'pendiente_pago') {
                     estadoClass = 'estado-nuevo';
                     estadoTexto = '🆕 Nuevo';
                 } else if (p.estado === 'pagado') {
@@ -226,23 +341,27 @@
                 } else if (p.estado === 'enviado') {
                     estadoClass = 'estado-enviado';
                     estadoTexto = '🚚 Enviado';
+                } else if (p.estado === 'cancelado') {
+                    estadoClass = 'estado-cancelado';
+                    estadoTexto = '❌ Cancelado';
                 } else {
                     estadoClass = 'estado-nuevo';
                     estadoTexto = p.estado || 'Nuevo';
                 }
                 
                 const items = p.items ? (Array.isArray(p.items) ? p.items : JSON.parse(p.items)) : [];
+                const nombreCliente = p.cliente_nombre || p.cliente_numero;
                 
                 html += `
                     <div class="pedido-card">
                         <div class="pedido-header">
-                            <span><strong>📱 Cliente:</strong> ${p.cliente_nombre || p.cliente_numero}</span>
+                            <span><strong>📱 ${escapeHtml(nombreCliente)}</strong></span>
                             <span class="estado-badge ${estadoClass}">${estadoTexto}</span>
                         </div>
                         <div class="pedido-items">
                             <strong>🛒 Productos:</strong>
-                            <ul>
-                                ${items.map(i => `<li>${i.cantidad || 1}x ${i.nombre} - $${(i.precio * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
+                            <ul style="margin: 5px 0 0 20px;">
+                                ${items.map(i => `<li>${i.cantidad || 1}x ${escapeHtml(i.nombre)} - $${(i.precio * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
                             </ul>
                         </div>
                         <div><strong>💰 Total:</strong> $${p.total.toLocaleString()}</div>
@@ -250,8 +369,9 @@
                         <div class="pedido-actions">
                             <button class="btn-sm btn-detalle" onclick="verDetalle('${p.id}')">📋 Ver detalle</button>
                             <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${p.cliente_numero}')">💬 WhatsApp</button>
-                            ${p.estado === 'nuevo' ? `<button class="btn-sm" style="background:#4CAF50;color:white" onclick="cambiarEstado('${p.id}', 'pagado')">✅ Marcar pagado</button>` : ''}
-                            ${p.estado === 'pagado' ? `<button class="btn-sm" style="background:#9C27B0;color:white" onclick="cambiarEstado('${p.id}', 'enviado')">🚚 Marcar enviado</button>` : ''}
+                            ${p.estado === 'nuevo' || p.estado === 'pendiente_pago' ? `<button class="btn-sm btn-pagar" onclick="cambiarEstado('${p.id}', 'pagado')">✅ Marcar pagado</button>` : ''}
+                            ${p.estado === 'pagado' ? `<button class="btn-sm btn-enviar" onclick="cambiarEstado('${p.id}', 'enviado')">🚚 Marcar enviado</button>` : ''}
+                            ${p.estado !== 'cancelado' && p.estado !== 'enviado' && p.estado !== 'pagado' ? `<button class="btn-sm" style="background:#f44336;color:white" onclick="cambiarEstado('${p.id}', 'cancelado')">❌ Cancelar</button>` : ''}
                         </div>
                     </div>
                 `;
@@ -259,7 +379,7 @@
             document.getElementById('pedidosContainer').innerHTML = html;
         } catch (error) {
             console.error('Error:', error);
-            document.getElementById('pedidosContainer').innerHTML = '<div class="card">❌ Error al cargar pedidos</div>';
+            document.getElementById('pedidosContainer').innerHTML = '<div class="empty">❌ Error al cargar pedidos</div>';
         }
     }
 
@@ -267,26 +387,18 @@
         const stats = {
             nuevo: pedidos.filter(p => p.estado === 'nuevo' || p.estado === 'pendiente_pago').length,
             pagado: pedidos.filter(p => p.estado === 'pagado').length,
-            enviado: pedidos.filter(p => p.estado === 'enviado').length
+            enviado: pedidos.filter(p => p.estado === 'enviado').length,
+            cancelado: pedidos.filter(p => p.estado === 'cancelado').length
         };
         document.getElementById('totalNuevos').innerText = stats.nuevo;
         document.getElementById('totalPagados').innerText = stats.pagado;
         document.getElementById('totalEnviados').innerText = stats.enviado;
-    }
-
-    function actualizarStats(pedidos) {
-        const stats = {
-            nuevo: pedidos.filter(p => p.estado === 'nuevo').length,
-            pagado: pedidos.filter(p => p.estado === 'pagado').length,
-            enviado: pedidos.filter(p => p.estado === 'enviado').length
-        };
-        document.getElementById('totalNuevos').innerText = stats.nuevo;
-        document.getElementById('totalPagados').innerText = stats.pagado;
-        document.getElementById('totalEnviados').innerText = stats.enviado;
+        document.getElementById('totalCancelados').innerText = stats.cancelado;
     }
 
     async function cambiarEstado(pedidoId, nuevoEstado) {
-        if (!confirm(`¿Cambiar estado a ${nuevoEstado}?`)) return;
+        const estadoTexto = nuevoEstado === 'pagado' ? 'pagado' : nuevoEstado === 'enviado' ? 'enviado' : 'cancelado';
+        if (!confirm(`¿Marcar este pedido como ${estadoTexto}?`)) return;
         
         try {
             const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/estado`, {
@@ -311,24 +423,51 @@
             const pedido = await response.json();
             
             const items = pedido.items ? (Array.isArray(pedido.items) ? pedido.items : JSON.parse(pedido.items)) : [];
+            const nombreCliente = pedido.cliente_nombre || pedido.cliente_numero;
+            
+            let estadoClass = '';
+            if (pedido.estado === 'nuevo' || pedido.estado === 'pendiente_pago') estadoClass = 'estado-nuevo';
+            else if (pedido.estado === 'pagado') estadoClass = 'estado-pagado';
+            else if (pedido.estado === 'enviado') estadoClass = 'estado-enviado';
+            else estadoClass = 'estado-cancelado';
             
             let html = `
-                <p><strong>📱 Cliente:</strong> ${pedido.cliente_nombre || pedido.cliente_numero}</p>
+                <div class="pedido-header">
+                    <span><strong>📱 Cliente:</strong> ${escapeHtml(nombreCliente)}</span>
+                    <span class="estado-badge ${estadoClass}">${pedido.estado.toUpperCase()}</span>
+                </div>
                 <p><strong>📞 Teléfono:</strong> ${pedido.cliente_numero}</p>
                 <p><strong>🕒 Fecha:</strong> ${new Date(pedido.created_at).toLocaleString()}</p>
+                ${pedido.pagado_at ? `<p><strong>✅ Pagado el:</strong> ${new Date(pedido.pagado_at).toLocaleString()}</p>` : ''}
+                ${pedido.enviado_at ? `<p><strong>🚚 Enviado el:</strong> ${new Date(pedido.enviado_at).toLocaleString()}</p>` : ''}
                 <div class="pedido-items">
                     <strong>🛒 Productos:</strong>
                     <ul>
-                        ${items.map(i => `<li>${i.cantidad || 1}x ${i.nombre} - $${(i.precio * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
+                        ${items.map(i => `<li>${i.cantidad || 1}x ${escapeHtml(i.nombre)} - $${(i.precio * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
                     </ul>
                 </div>
                 <p><strong>💰 Total:</strong> $${pedido.total.toLocaleString()}</p>
+                ${pedido.notas ? `<p><strong>📝 Notas:</strong> ${escapeHtml(pedido.notas)}</p>` : ''}
             `;
+            
+            let actionsHtml = `
+                <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${pedido.cliente_numero}')">💬 WhatsApp</button>
+                <button class="btn-sm btn-historial" onclick="verHistorialCliente('${pedido.cliente_numero}', '${escapeHtml(nombreCliente)}')">📜 Ver historial</button>
+            `;
+            
+            if (pedido.estado === 'nuevo' || pedido.estado === 'pendiente_pago') {
+                actionsHtml += `<button class="btn-sm btn-pagar" onclick="cambiarEstado('${pedido.id}', 'pagado')">✅ Marcar pagado</button>`;
+            }
+            if (pedido.estado === 'pagado') {
+                actionsHtml += `<button class="btn-sm btn-enviar" onclick="cambiarEstado('${pedido.id}', 'enviado')">🚚 Marcar enviado</button>`;
+            }
             
             document.getElementById('detalleTitulo').innerHTML = `📋 Pedido ${pedido.id.substring(0, 8)}...`;
             document.getElementById('detalleContent').innerHTML = html;
+            document.getElementById('detalleActions').innerHTML = actionsHtml;
             document.getElementById('detalleModal').style.display = 'flex';
         } catch (error) {
+            console.error('Error:', error);
             alert('Error al cargar detalle');
         }
     }
@@ -339,29 +478,31 @@
             const conversaciones = await response.json();
             
             if (!conversaciones || conversaciones.length === 0) {
-                document.getElementById('conversacionesContainer').innerHTML = '<div class="card">💬 No hay conversaciones aún</div>';
+                document.getElementById('conversacionesContainer').innerHTML = '<div class="empty">💬 No hay conversaciones aún</div>';
                 return;
             }
             
             let html = '';
             conversaciones.forEach(conv => {
+                const nombreCliente = conv.cliente_nombre || conv.cliente_numero;
                 html += `
-                    <div class="card">
+                    <div class="conversacion-card">
                         <div class="pedido-header">
-                            <span><strong>📱 ${conv.cliente_nombre || conv.cliente_numero}</strong></span>
+                            <span><strong>📱 ${escapeHtml(nombreCliente)}</strong></span>
                             <span>📦 ${conv.total_pedidos || 0} pedidos</span>
                             <span>🕒 ${new Date(conv.ultimo_mensaje).toLocaleString()}</span>
                         </div>
                         <div class="pedido-actions">
                             <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${conv.cliente_numero}')">💬 WhatsApp</button>
-                            <button class="btn-sm btn-historial" onclick="verHistorialCliente('${conv.cliente_numero}', '${conv.cliente_nombre || conv.cliente_numero}')">📜 Ver historial</button>
+                            <button class="btn-sm btn-historial" onclick="verHistorialCliente('${conv.cliente_numero}', '${escapeHtml(nombreCliente)}')">📜 Ver historial</button>
                         </div>
                     </div>
                 `;
             });
             document.getElementById('conversacionesContainer').innerHTML = html;
         } catch (error) {
-            document.getElementById('conversacionesContainer').innerHTML = '<div class="card">❌ Error al cargar conversaciones</div>';
+            console.error('Error:', error);
+            document.getElementById('conversacionesContainer').innerHTML = '<div class="empty">❌ Error al cargar conversaciones</div>';
         }
     }
 
@@ -370,19 +511,19 @@
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/conversaciones/cliente/${clienteNumero}`);
             const conversaciones = await response.json();
             
-            let html = `<h3>📜 Historial con ${clienteNombre}</h3>`;
-            if (conversaciones.length === 0) {
-                html += '<p>No hay conversaciones previas.</p>';
+            let html = `<h3>📜 Historial con ${escapeHtml(clienteNombre)}</h3>`;
+            if (!conversaciones || conversaciones.length === 0) {
+                html += '<p>No hay conversaciones previas con este cliente.</p>';
             } else {
                 conversaciones.forEach(c => {
                     html += `
-                        <div style="margin:10px 0; padding:10px; background:#e3f2fd; border-radius:8px;">
-                            <strong>🧑 Cliente:</strong> ${c.mensaje}
-                            <div style="font-size:10px; color:#666;">${new Date(c.fecha).toLocaleString()}</div>
+                        <div class="mensaje-cliente">
+                            <strong>🧑 Cliente:</strong> ${escapeHtml(c.mensaje)}
+                            <div style="font-size:10px; color:#666; margin-top:5px;">${new Date(c.fecha).toLocaleString()}</div>
                         </div>
-                        <div style="margin:10px 0; padding:10px; background:#e8f5e9; border-radius:8px;">
-                            <strong>🤖 Asistente:</strong> ${c.respuesta}
-                            <div style="font-size:10px; color:#666;">${new Date(c.fecha).toLocaleString()}</div>
+                        <div class="mensaje-bot">
+                            <strong>🤖 Asistente:</strong> ${escapeHtml(c.respuesta)}
+                            <div style="font-size:10px; color:#666; margin-top:5px;">${new Date(c.fecha).toLocaleString()}</div>
                         </div>
                     `;
                 });
@@ -390,8 +531,10 @@
             
             document.getElementById('detalleTitulo').innerHTML = 'Historial de Conversación';
             document.getElementById('detalleContent').innerHTML = html;
+            document.getElementById('detalleActions').innerHTML = '<button class="btn-sm" onclick="cerrarModal()">Cerrar</button>';
             document.getElementById('detalleModal').style.display = 'flex';
         } catch (error) {
+            console.error('Error:', error);
             alert('Error al cargar el historial');
         }
     }
@@ -410,8 +553,9 @@
             const config = await response.json();
             document.getElementById('configHorario').value = config.horario || '';
             document.getElementById('configUbicacion').value = config.ubicacion || '';
+            document.getElementById('configPoliticas').value = config.politicas || '';
         } catch (error) {
-            console.error('Error:', error);
+            console.error('Error cargando config:', error);
         }
     }
 
@@ -419,20 +563,32 @@
         e.preventDefault();
         const data = {
             horario: document.getElementById('configHorario').value,
-            ubicacion: document.getElementById('configUbicacion').value
+            ubicacion: document.getElementById('configUbicacion').value,
+            politicas: document.getElementById('configPoliticas').value
         };
         
         try {
-            await fetch(`${API_BASE}/api/tenant/${tenantId}/configuracion`, {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/configuracion`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            alert('✅ Configuración guardada');
+            if (response.ok) {
+                alert('✅ Configuración guardada correctamente');
+            } else {
+                alert('❌ Error al guardar la configuración');
+            }
         } catch (error) {
-            alert('❌ Error al guardar');
+            alert('❌ Error de conexión');
         }
     };
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
 
     // Cargar datos iniciales
     cargarPedidos();

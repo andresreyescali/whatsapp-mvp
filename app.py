@@ -1183,6 +1183,20 @@ def debug_menu_tenant(tenant_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/debug/ver_pedidos_recientes/<tenant_id>', methods=['GET'])
+def ver_pedidos_recientes(tenant_id):
+    """Ver los pedidos recientes del tenant"""
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT * FROM {tenant_id}.pedidos ORDER BY created_at DESC LIMIT 5")
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+                pedidos = [dict(zip(columns, row)) for row in rows]
+                return jsonify(pedidos)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)

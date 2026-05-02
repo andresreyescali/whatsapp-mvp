@@ -242,7 +242,7 @@ class MessageHandler:
                     cur.execute(f"""
                         INSERT INTO {tenant['id']}.pedidos (id, cliente_numero, items, total, estado)
                         VALUES (%s, %s, %s, %s, %s)
-                    """, (pedido_id, numero, json.dumps(items), total, "pendiente_pago"))
+                    """, (pedido_id, numero, json.dumps(items), total, "nuevo"))
                 conn.commit()
             
             link_pago = generar_link_pago(total, pedido_id)
