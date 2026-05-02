@@ -1,5 +1,6 @@
 import json
 import re
+import uuid
 from tenants.repository import tenant_repo
 from tenants.schema_manager import schema_manager
 from orders.repository import order_repo
@@ -12,7 +13,7 @@ from core.database import db_manager
 class MessageHandler:
     """Procesa mensajes de WhatsApp usando IA con contexto personalizado y memoria"""
     
-    # Carrito temporal por cliente (en memoria, podrías usar Redis en producción)
+    # Carrito temporal por cliente (en memoria)
     _carritos = {}
     
     def process(self, phone_id: str, numero: str, texto: str):
@@ -34,72 +35,116 @@ class MessageHandler:
             whatsapp_client.send_message(tenant, numero, respuesta)
             self._guardar_conversacion(tenant['id'], numero, texto, respuesta)
     
-    def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
-                          pedidos_pendientes: list, contexto: dict) -> str:
-        """Usa DeepSeek con contexto personalizado y manejo de carrito"""
-        
-        if not ai_client.client:
-            return self._respuesta_fallback(texto, tenant, menu, numero)
-        
-        # Verificar si hay un pedido pendiente sin pagar
-        pedido_pendiente = self._get_pedido_pendiente_confirmado(tenant['id'], numero)
-        
-        # Procesar el mensaje según la intención
-        texto_lower = texto.lower()
-        
-        # 1. Confirmación de pedido
-        if any(palabra in texto_lower for palabra in ['si eso es todo', 'confirmo', 'haz el pedido', 'procesar pedido', 'está bien']):
-            if self._carritos.get(numero, {}).get('items'):
-                return self._finalizar_pedido(tenant, numero, menu)
-            elif pedido_pendiente:
-                return self._finalizar_pedido_existente(tenant, pedido_pendiente)
-        
-        # 2. Cancelar pedido
-        if any(palabra in texto_lower for palabra in ['cancelar pedido', 'no quiero nada']):
-            return self._cancelar_pedido(tenant, numero)
-        
-        # 3. Ver carrito actual
-        if any(palabra in texto_lower for palabra in ['ver carrito', 'qué tengo', 'mi pedido']):
-            return self._mostrar_carrito(tenant, numero)
-        
-        # 4. Detectar productos para agregar al carrito
-        productos_detectados = self._detectar_productos_en_texto(texto, menu)
-        
-        if productos_detectados:
-            self._agregar_al_carrito(numero, productos_detectados)
-            carrito = self._carritos.get(numero, {})
-            return self._mostrar_carrito_confirmacion(tenant, numero, carrito)
-        
-        # 5. Si no hay productos detectados, usar IA para respuesta general
-        historial = self._get_historial_conversacion(tenant['id'], numero, 5)
-        historial_texto = self._formatear_historial_para_prompt(historial)
-        
-        if contexto.get('prompt_personalizado'):
-            system_prompt = contexto['prompt_personalizado'] + historial_texto
-        else:
-            system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto) + historial_texto
-        
-        # Agregar información del carrito al prompt
-        carrito_info = self._get_carrito_info(numero)
-        if carrito_info:
-            system_prompt += f"\n\nCARRITO ACTUAL DEL CLIENTE:\n{carrito_info}\nPregunta si quiere agregar más productos o confirmar el pedido."
-        
-        user_message = f"""Cliente dice: "{texto}"\n\nGenera una respuesta amable y útil."""
-        
+    def _obtener_contexto_tenant(self, tenant_id: str) -> dict:
+        """Obtiene el contexto personalizado del tenant desde la base de datos"""
         try:
-            response = ai_client.client.chat.completions.create(
-                model=ai_client.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                temperature=0.7,
-                max_tokens=500
-            )
-            return response.choices[0].message.content
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('''
+                        SELECT menu_estructurado, instrucciones, horario, ubicacion, 
+                               politicas, prompt_personalizado 
+                        FROM public.tenant_context 
+                        WHERE tenant_id = %s
+                    ''', (tenant_id,))
+                    row = cur.fetchone()
+                    
+                    if row:
+                        menu_estructurado = row[0]
+                        if isinstance(menu_estructurado, str):
+                            try:
+                                menu_estructurado = json.loads(menu_estructurado)
+                            except:
+                                menu_estructurado = []
+                        elif menu_estructurado is None:
+                            menu_estructurado = []
+                        
+                        return {
+                            'menu_estructurado': menu_estructurado,
+                            'instrucciones': row[1] or '',
+                            'horario': row[2] or '',
+                            'ubicacion': row[3] or '',
+                            'politicas': row[4] or '',
+                            'prompt_personalizado': row[5] or ''
+                        }
+                    return {}
         except Exception as e:
-            logger.error(f'Error llamando a DeepSeek: {e}')
-            return self._respuesta_fallback(texto, tenant, menu, numero)
+            logger.error(f'Error obteniendo contexto para {tenant_id}: {e}')
+            return {}
+    
+    def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
+        """Guarda la conversación en la base de datos"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO public.conversaciones_ia (tenant_id, cliente_numero, mensaje, respuesta)
+                        VALUES (%s, %s, %s, %s)
+                    """, (tenant_id, cliente_numero, mensaje, respuesta))
+                conn.commit()
+        except Exception as e:
+            logger.error(f'Error guardando conversación: {e}')
+    
+    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
+        """Obtiene el historial de conversación con el cliente"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT mensaje, respuesta, created_at 
+                        FROM public.conversaciones_ia 
+                        WHERE tenant_id = %s AND cliente_numero = %s 
+                        ORDER BY created_at DESC 
+                        LIMIT %s
+                    """, (tenant_id, cliente_numero, limit))
+                    rows = cur.fetchall()
+                    return list(reversed(rows))
+        except Exception as e:
+            logger.error(f'Error obteniendo historial: {e}')
+            return []
+    
+    def _formatear_historial_para_prompt(self, historial: list) -> str:
+        """Formatea el historial para incluirlo en el prompt de IA"""
+        if not historial:
+            return ""
+        
+        texto = "\n\nHISTORIAL DE LA CONVERSACIÓN:\n"
+        for h in historial:
+            texto += f"Cliente: {h[0]}\n"
+            texto += f"Asistente: {h[1]}\n"
+        return texto
+    
+    def _get_pedido_pendiente_confirmado(self, tenant_id: str, cliente_numero: str):
+        """Obtiene pedido pendiente (pendiente_pago) de la BD"""
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT * FROM {tenant_id}.pedidos
+                        WHERE cliente_numero = %s AND estado = 'pendiente_pago'
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (cliente_numero,))
+                    row = cur.fetchone()
+                    if row:
+                        columns = [desc[0] for desc in cur.description]
+                        pedido = dict(zip(columns, row))
+                        if pedido.get('items') and isinstance(pedido['items'], str):
+                            pedido['items'] = json.loads(pedido['items'])
+                        return pedido
+                    return None
+        except Exception as e:
+            logger.error(f'Error obteniendo pedido pendiente: {e}')
+            return None
+    
+    def _get_carrito_info(self, numero: str) -> str:
+        """Obtiene información del carrito para el prompt"""
+        carrito = self._carritos.get(numero, {})
+        if not carrito.get('items'):
+            return ""
+        
+        items_texto = ""
+        for item in carrito['items']:
+            items_texto += f"- {item['cantidad']}x {item['nombre']}: ${item['precio'] * item['cantidad']:,.0f}\n"
+        return f"Productos en carrito:\n{items_texto}Total: ${carrito.get('total', 0):,.0f}"
     
     def _detectar_productos_en_texto(self, texto: str, menu: list) -> list:
         """Detecta productos y cantidades en el texto"""
@@ -109,7 +154,6 @@ class MessageHandler:
         for producto in menu:
             nombre = producto['nombre'].lower()
             if nombre in texto_lower:
-                # Detectar cantidad
                 cantidad = 1
                 patron = rf'(\d+)\s*(unidades?)?\s*{re.escape(nombre)}'
                 match = re.search(patron, texto_lower)
@@ -133,7 +177,6 @@ class MessageHandler:
             self._carritos[numero] = {'items': [], 'total': 0}
         
         for p in productos:
-            # Buscar si el producto ya está en el carrito
             encontrado = False
             for item in self._carritos[numero]['items']:
                 if item['nombre'] == p['nombre']:
@@ -183,13 +226,12 @@ class MessageHandler:
 ✅ Responde **"sí, eso es todo"** para confirmar y pagar.
 ✏️ Puedes seguir agregando productos."""
     
-    def _finalizar_pedido(self, tenant: dict, numero: str, menu: list) -> str:
+    def _finalizar_pedido(self, tenant: dict, numero: str) -> str:
         """Finaliza el pedido y genera link de pago"""
         carrito = self._carritos.pop(numero, None)
         if not carrito or not carrito.get('items'):
             return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
         
-        # Crear pedido con múltiples items
         pedido_id = str(uuid.uuid4())
         items = carrito['items']
         total = carrito['total']
@@ -248,74 +290,164 @@ class MessageHandler:
             del self._carritos[numero]
         return "❌ Pedido cancelado. Puedes empezar de nuevo cuando quieras."
     
-    def _get_carrito_info(self, numero: str) -> str:
-        """Obtiene información del carrito para el prompt"""
-        carrito = self._carritos.get(numero, {})
-        if not carrito.get('items'):
-            return ""
+    def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
+                          pedidos_pendientes: list, contexto: dict) -> str:
+        """Usa DeepSeek con contexto personalizado y manejo de carrito"""
         
-        items_texto = ""
-        for item in carrito['items']:
-            items_texto += f"- {item['cantidad']}x {item['nombre']}: ${item['precio'] * item['cantidad']:,.0f}\n"
-        return f"Productos en carrito:\n{items_texto}Total: ${carrito.get('total', 0):,.0f}"
-    
-    def _get_pedido_pendiente_confirmado(self, tenant_id: str, cliente_numero: str):
-        """Obtiene pedido pendiente (pendiente_pago) de la BD"""
+        if not ai_client.client:
+            return self._respuesta_fallback(texto, tenant, menu, numero)
+        
+        pedido_pendiente = self._get_pedido_pendiente_confirmado(tenant['id'], numero)
+        texto_lower = texto.lower()
+        
+        # 1. Confirmación de pedido
+        if any(palabra in texto_lower for palabra in ['si eso es todo', 'confirmo', 'haz el pedido', 'procesar pedido', 'está bien']):
+            if self._carritos.get(numero, {}).get('items'):
+                return self._finalizar_pedido(tenant, numero)
+            elif pedido_pendiente:
+                return self._finalizar_pedido_existente(tenant, pedido_pendiente)
+        
+        # 2. Cancelar pedido
+        if any(palabra in texto_lower for palabra in ['cancelar pedido', 'no quiero nada']):
+            return self._cancelar_pedido(tenant, numero)
+        
+        # 3. Ver carrito actual
+        if any(palabra in texto_lower for palabra in ['ver carrito', 'qué tengo', 'mi pedido']):
+            return self._mostrar_carrito(tenant, numero)
+        
+        # 4. Detectar productos para agregar al carrito
+        productos_detectados = self._detectar_productos_en_texto(texto, menu)
+        
+        if productos_detectados:
+            self._agregar_al_carrito(numero, productos_detectados)
+            carrito = self._carritos.get(numero, {})
+            return self._mostrar_carrito_confirmacion(tenant, numero, carrito)
+        
+        # 5. Si no hay productos detectados, usar IA para respuesta general
+        historial = self._get_historial_conversacion(tenant['id'], numero, 5)
+        historial_texto = self._formatear_historial_para_prompt(historial)
+        
+        if contexto.get('prompt_personalizado'):
+            system_prompt = contexto['prompt_personalizado'] + historial_texto
+        else:
+            system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto) + historial_texto
+        
+        carrito_info = self._get_carrito_info(numero)
+        if carrito_info:
+            system_prompt += f"\n\nCARRITO ACTUAL DEL CLIENTE:\n{carrito_info}\nPregunta si quiere agregar más productos o confirmar el pedido."
+        
+        user_message = f"Cliente dice: \"{texto}\"\n\nGenera una respuesta amable y útil."
+        
         try:
-            with db_manager.get_connection(tenant_id) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"""
-                        SELECT * FROM {tenant_id}.pedidos
-                        WHERE cliente_numero = %s AND estado = 'pendiente_pago'
-                        ORDER BY created_at DESC LIMIT 1
-                    """, (cliente_numero,))
-                    row = cur.fetchone()
-                    if row:
-                        columns = [desc[0] for desc in cur.description]
-                        pedido = dict(zip(columns, row))
-                        if pedido.get('items') and isinstance(pedido['items'], str):
-                            pedido['items'] = json.loads(pedido['items'])
-                        return pedido
-                    return None
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            return response.choices[0].message.content
         except Exception as e:
-            logger.error(f'Error obteniendo pedido pendiente: {e}')
-            return None
-    
-    def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
-        """Guarda la conversación en la base de datos"""
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        INSERT INTO public.conversaciones_ia (tenant_id, cliente_numero, mensaje, respuesta)
-                        VALUES (%s, %s, %s, %s)
-                    """, (tenant_id, cliente_numero, mensaje, respuesta))
-                conn.commit()
-        except Exception as e:
-            logger.error(f'Error guardando conversación: {e}')
-    
-    def _obtener_contexto_tenant(self, tenant_id: str) -> dict:
-        # ... (mantener el mismo código que tenías)
-        pass
-    
-    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
-        # ... (mantener el mismo código que tenías)
-        pass
-    
-    def _formatear_historial_para_prompt(self, historial: list) -> str:
-        # ... (mantener el mismo código que tenías)
-        pass
+            logger.error(f'Error llamando a DeepSeek: {e}')
+            return self._respuesta_fallback(texto, tenant, menu, numero)
     
     def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
-        # ... (mantener el mismo código que tenías)
-        pass
+        """Construye el prompt del sistema con toda la información disponible"""
+        
+        nombre_negocio = tenant.get('nombre', 'Mi negocio')
+        
+        negocio_info = f"""Eres un asistente de ventas por WhatsApp para {nombre_negocio}.
+
+CONTEXTO DEL NEGOCIO:
+- Nombre: {nombre_negocio}
+- Tipo: {tenant.get('tipo_negocio', 'restaurante')}"""
+        
+        if contexto.get('horario'):
+            negocio_info += f"\n- Horario: {contexto['horario']}"
+        
+        if contexto.get('ubicacion'):
+            negocio_info += f"\n- Ubicación: {contexto['ubicacion']}"
+        
+        if contexto.get('politicas'):
+            negocio_info += f"\n\nPOLÍTICAS DEL NEGOCIO:\n{contexto['politicas']}"
+        
+        if contexto.get('instrucciones'):
+            negocio_info += f"\n\nINSTRUCCIONES PERSONALIZADAS:\n{contexto['instrucciones']}"
+        
+        menu_contexto = self._formatear_menu_para_ia(menu)
+        
+        pedidos_contexto = ""
+        if pedidos_pendientes:
+            pedidos_contexto = "\nPEDIDOS PENDIENTES DEL CLIENTE:\n"
+            for p in pedidos_pendientes:
+                pedidos_contexto += f"- Producto: ${p['total']}\n"
+        
+        reglas = """
+
+REGLAS IMPORTANTES:
+1. Ayuda al cliente a armar su pedido.
+2. Confirma los productos que el cliente quiere agregar.
+3. Pregunta si desea agregar algo más antes de finalizar.
+4. Cuando el cliente confirme, genera el link de pago.
+5. Responde en español, de forma breve y amable."""
+
+        return f"""{negocio_info}
+
+MENÚ COMPLETO:
+{menu_contexto}
+
+{pedidos_contexto}
+{reglas}"""
     
     def _formatear_menu_para_ia(self, menu: list) -> str:
-        # ... (mantener el mismo código que tenías)
-        pass
+        """Formatea el menú para incluirlo en el prompt de IA"""
+        if not menu:
+            return "No hay productos disponibles actualmente."
+        
+        categorias = {}
+        for p in menu:
+            cat = p.get('categoria')
+            if cat is None or cat == '':
+                cat = 'general'
+            if cat not in categorias:
+                categorias[cat] = []
+            categorias[cat].append(p)
+        
+        resultado = ""
+        for categoria, productos in categorias.items():
+            resultado += f"\n{categoria.upper()}:\n"
+            for p in productos:
+                resultado += f"  - {p['nombre']}: ${p['precio']:,.0f}"
+                if p.get('descripcion'):
+                    resultado += f" - {p['descripcion'][:80]}"
+                resultado += "\n"
+        
+        return resultado
     
     def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
-        # ... (mantener el mismo código que tenías)
-        pass
+        """Respuesta de fallback si la IA no está disponible"""
+        
+        texto_lower = texto.lower()
+        
+        for producto in menu:
+            if producto['nombre'].lower() in texto_lower:
+                return f"✅ Pedido: {producto['nombre']} - ${producto['precio']:,.0f}\n¿Deseas agregar algo más?"
+        
+        if 'menu' in texto_lower:
+            respuesta = "📋 *MENÚ*\n\n"
+            for p in menu:
+                respuesta += f"• {p['nombre']}: ${p['precio']:,.0f}\n"
+            return respuesta
+        
+        if 'horario' in texto_lower:
+            return "🕒 Horario: 12pm a 10pm"
+        
+        if 'ubicacion' in texto_lower:
+            return "📍 Ubicación: Cali, Colombia"
+        
+        return f"👋 Hola! Soy el asistente de {tenant['nombre']}. ¿Qué te gustaría ordenar?"
 
+# Instancia global
 message_handler = MessageHandler()
