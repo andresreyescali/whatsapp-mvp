@@ -301,7 +301,8 @@ class MessageHandler:
         texto_lower = texto.lower()
         
         # 1. Confirmación de pedido
-        if any(palabra in texto_lower for palabra in ['si eso es todo', 'confirmo', 'haz el pedido', 'procesar pedido', 'está bien']):
+        if any(palabra in texto_lower for palabra in ['si eso es todo', 'confirmo', 'haz el pedido', 'procesar pedido', 
+    'está bien', 'dale', 'ok', 'si', 'correcto', 'adelante']):
             if self._carritos.get(numero, {}).get('items'):
                 return self._finalizar_pedido(tenant, numero)
             elif pedido_pendiente:

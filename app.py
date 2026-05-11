@@ -1155,6 +1155,29 @@ def crear_pedido_prueba(tenant_id):
     
     return jsonify({'success': True, 'pedido': pedido})
 
+@app.route('/debug/crear_pedido_test/<tenant_id>', methods=['GET'])
+def crear_pedido_test(tenant_id):
+    """Crea un pedido de prueba directamente en la BD"""
+    import uuid
+    import json
+    from core.database import db_manager
+    
+    pedido_id = str(uuid.uuid4())
+    items = [{"nombre": "Brownie Test", "precio": 5000, "cantidad": 2}]
+    total = 10000
+    
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    INSERT INTO {tenant_id}.pedidos (id, cliente_numero, items, total, estado)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (pedido_id, "573155692656", json.dumps(items), total, "nuevo"))
+            conn.commit()
+        return jsonify({'success': True, 'pedido_id': pedido_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/debug/crear_pedido_manual/<tenant_id>', methods=['GET'])
 def crear_pedido_manual(tenant_id):
     """Crea un pedido manualmente para prueba"""
@@ -1196,6 +1219,18 @@ def ver_pedidos_recientes(tenant_id):
                 return jsonify(pedidos)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/debug/ver_carrito/<tenant_id>/<numero>', methods=['GET'])
+def debug_ver_carrito(tenant_id, numero):
+    """Ver el carrito actual del cliente en memoria"""
+    from whatsapp.message_handler import message_handler
+    carrito = message_handler._carritos.get(numero, {})
+    return jsonify({
+        'carrito': carrito,
+        'tiene_items': len(carrito.get('items', [])) > 0,
+        'total_items': len(carrito.get('items', [])),
+        'total_monto': carrito.get('total', 0)
+    })
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
