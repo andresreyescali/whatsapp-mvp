@@ -22,9 +22,6 @@
         background: #25D366;
         color: white;
     }
-    .tab:hover:not(.active) {
-        background: #f0f0f0;
-    }
     .pedido-card {
         background: white;
         border-radius: 12px;
@@ -77,9 +74,7 @@
         cursor: pointer;
         transition: opacity 0.2s;
     }
-    .btn-sm:hover {
-        opacity: 0.8;
-    }
+    .btn-sm:hover { opacity: 0.8; }
     .btn-detalle { background: #2196F3; color: white; }
     .btn-chat { background: #25D366; color: white; }
     .btn-historial { background: #9C27B0; color: white; }
@@ -92,7 +87,7 @@
         flex-wrap: wrap;
         align-items: center;
     }
-    .filtro-select {
+    .filtro-select, .filtro-input {
         padding: 8px 12px;
         border: 1px solid #ddd;
         border-radius: 8px;
@@ -125,12 +120,9 @@
         cursor: pointer;
         color: #999;
     }
-    .close:hover {
-        color: #333;
-    }
     .stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
         gap: 15px;
         margin-bottom: 20px;
     }
@@ -143,27 +135,11 @@
         cursor: pointer;
         transition: transform 0.2s;
     }
-    .stat-card:hover {
-        transform: translateY(-2px);
-    }
-    .stat-card .number {
-        font-size: 28px;
-        font-weight: bold;
-    }
-    .stat-card .label {
-        font-size: 12px;
-        opacity: 0.9;
-    }
-    .loading {
-        text-align: center;
-        padding: 40px;
-        color: #666;
-    }
-    .empty {
-        text-align: center;
-        padding: 40px;
-        color: #999;
-    }
+    .stat-card:hover { transform: translateY(-2px); }
+    .stat-card .number { font-size: 28px; font-weight: bold; }
+    .stat-card .label { font-size: 12px; opacity: 0.9; }
+    .loading { text-align: center; padding: 40px; color: #666; }
+    .empty { text-align: center; padding: 40px; color: #999; }
     .conversacion-card {
         background: white;
         border-radius: 12px;
@@ -171,32 +147,13 @@
         margin-bottom: 15px;
         box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
-    .mensaje-cliente {
-        background: #e3f2fd;
-        border-left: 3px solid #2196F3;
-        padding: 10px;
-        margin: 10px 0;
-        border-radius: 8px;
-    }
-    .mensaje-bot {
-        background: #e8f5e9;
-        border-left: 3px solid #4CAF50;
-        padding: 10px;
-        margin: 10px 0;
-        border-radius: 8px;
-    }
+    .mensaje-cliente { background: #e3f2fd; border-left: 3px solid #2196F3; padding: 10px; margin: 10px 0; border-radius: 8px; }
+    .mensaje-bot { background: #e8f5e9; border-left: 3px solid #4CAF50; padding: 10px; margin: 10px 0; border-radius: 8px; }
     @media (max-width: 768px) {
-        .pedido-header {
-            flex-direction: column;
-            align-items: flex-start;
-        }
-        .stats {
-            grid-template-columns: repeat(2, 1fr);
-        }
-        .tab {
-            padding: 8px 16px;
-            font-size: 14px;
-        }
+        .pedido-header { flex-direction: column; align-items: flex-start; }
+        .stats { grid-template-columns: repeat(2, 1fr); }
+        .tab { padding: 8px 16px; font-size: 14px; }
+        .filtros { flex-direction: column; align-items: stretch; }
     }
 </style>
 
@@ -208,22 +165,26 @@
 
 <!-- Tab: Pedidos -->
 <div id="tabPedidos">
-    <div class="stats" id="statsPedidos">
-        <div class="stat-card" onclick="filtrarPorEstado('nuevo')">
-            <div class="number" id="totalNuevos">0</div>
-            <div class="label">🆕 Nuevos</div>
+    <div class="stats">
+        <div class="stat-card" onclick="aplicarFiltroFecha('hoy')">
+            <div class="number" id="totalHoy">0</div>
+            <div class="label">📅 Hoy</div>
         </div>
-        <div class="stat-card" onclick="filtrarPorEstado('pagado')">
-            <div class="number" id="totalPagados">0</div>
-            <div class="label">✅ Pagados</div>
+        <div class="stat-card" onclick="aplicarFiltroFecha('ayer')">
+            <div class="number" id="totalAyer">0</div>
+            <div class="label">📅 Ayer</div>
         </div>
-        <div class="stat-card" onclick="filtrarPorEstado('enviado')">
-            <div class="number" id="totalEnviados">0</div>
-            <div class="label">🚚 Enviados</div>
+        <div class="stat-card" onclick="aplicarFiltroFecha('semana')">
+            <div class="number" id="totalSemana">0</div>
+            <div class="label">📅 Última semana</div>
         </div>
-        <div class="stat-card" onclick="filtrarPorEstado('cancelado')">
-            <div class="number" id="totalCancelados">0</div>
-            <div class="label">❌ Cancelados</div>
+        <div class="stat-card" onclick="aplicarFiltroFecha('mes')">
+            <div class="number" id="totalMes">0</div>
+            <div class="label">📅 Último mes</div>
+        </div>
+        <div class="stat-card" onclick="aplicarFiltroFecha('todos')">
+            <div class="number" id="totalTodos">0</div>
+            <div class="label">📅 Todos</div>
         </div>
     </div>
 
@@ -235,6 +196,17 @@
             <option value="enviado">🚚 Enviados</option>
             <option value="cancelado">❌ Cancelados</option>
         </select>
+        
+        <select id="filtroFecha" class="filtro-select" onchange="cargarPedidos()">
+            <option value="hoy">📅 Hoy</option>
+            <option value="ayer">📅 Ayer</option>
+            <option value="semana">📅 Última semana</option>
+            <option value="mes">📅 Último mes</option>
+            <option value="todos">📅 Todos los periodos</option>
+        </select>
+        
+        <input type="text" id="filtroCliente" class="filtro-input" placeholder="🔍 Buscar por cliente..." onkeyup="cargarPedidos()" style="min-width: 200px;">
+        
         <button class="btn-sm" style="background:#25D366; color:white; padding:8px 16px;" onclick="cargarPedidos()">🔄 Actualizar</button>
     </div>
 
@@ -288,7 +260,7 @@
 <script>
     const tenantId = '{{ tenant.id }}';
     const API_BASE = window.location.origin;
-    let estadoActual = 'todos';
+    let pedidosCache = [];
 
     function mostrarTab(tab) {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -303,32 +275,74 @@
         if (tab === 'configuracion') cargarConfiguracion();
     }
 
-    function filtrarPorEstado(estado) {
-        document.getElementById('filtroEstado').value = estado;
-        estadoActual = estado;
+    function aplicarFiltroFecha(fecha) {
+        document.getElementById('filtroFecha').value = fecha;
         cargarPedidos();
+    }
+
+    function filtrarPorFecha(pedidos, rango) {
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        
+        const ayer = new Date(hoy);
+        ayer.setDate(ayer.getDate() - 1);
+        
+        const semana = new Date(hoy);
+        semana.setDate(semana.getDate() - 7);
+        
+        const mes = new Date(hoy);
+        mes.setMonth(mes.getMonth() - 1);
+        
+        return pedidos.filter(p => {
+            const fechaPedido = new Date(p.created_at);
+            fechaPedido.setHours(0, 0, 0, 0);
+            
+            switch(rango) {
+                case 'hoy': return fechaPedido.getTime() === hoy.getTime();
+                case 'ayer': return fechaPedido.getTime() === ayer.getTime();
+                case 'semana': return fechaPedido >= semana;
+                case 'mes': return fechaPedido >= mes;
+                default: return true;
+            }
+        });
     }
 
     async function cargarPedidos() {
         const estado = document.getElementById('filtroEstado').value;
-        estadoActual = estado;
+        const fecha = document.getElementById('filtroFecha').value;
+        const cliente = document.getElementById('filtroCliente').value.toLowerCase();
         
         try {
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}`);
-            const pedidos = await response.json();
-            
-            console.log('Pedidos recibidos:', pedidos);
+            let pedidos = await response.json();
             
             if (!pedidos || pedidos.length === 0) {
                 document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos</div>';
-                actualizarStats([]);
+                actualizarStats(pedidos);
                 return;
             }
             
-            actualizarStats(pedidos);
+            // Aplicar filtro de fecha
+            pedidos = filtrarPorFecha(pedidos, fecha);
+            
+            // Aplicar filtro de cliente
+            if (cliente) {
+                pedidos = pedidos.filter(p => 
+                    (p.cliente_nombre && p.cliente_nombre.toLowerCase().includes(cliente)) ||
+                    p.cliente_numero.includes(cliente)
+                );
+            }
+            
+            pedidosCache = pedidos;
+            actualizarStats(pedidosCache);
+            
+            if (pedidosCache.length === 0) {
+                document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos con los filtros seleccionados</div>';
+                return;
+            }
             
             let html = '';
-            pedidos.forEach(p => {
+            pedidosCache.forEach(p => {
                 let estadoClass = '';
                 let estadoTexto = '';
                 
@@ -371,7 +385,6 @@
                             <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${p.cliente_numero}')">💬 WhatsApp</button>
                             ${p.estado === 'nuevo' || p.estado === 'pendiente_pago' ? `<button class="btn-sm btn-pagar" onclick="cambiarEstado('${p.id}', 'pagado')">✅ Marcar pagado</button>` : ''}
                             ${p.estado === 'pagado' ? `<button class="btn-sm btn-enviar" onclick="cambiarEstado('${p.id}', 'enviado')">🚚 Marcar enviado</button>` : ''}
-                            ${p.estado !== 'cancelado' && p.estado !== 'enviado' && p.estado !== 'pagado' ? `<button class="btn-sm" style="background:#f44336;color:white" onclick="cambiarEstado('${p.id}', 'cancelado')">❌ Cancelar</button>` : ''}
                         </div>
                     </div>
                 `;
@@ -384,21 +397,46 @@
     }
 
     function actualizarStats(pedidos) {
-        const stats = {
-            nuevo: pedidos.filter(p => p.estado === 'nuevo' || p.estado === 'pendiente_pago').length,
-            pagado: pedidos.filter(p => p.estado === 'pagado').length,
-            enviado: pedidos.filter(p => p.estado === 'enviado').length,
-            cancelado: pedidos.filter(p => p.estado === 'cancelado').length
-        };
-        document.getElementById('totalNuevos').innerText = stats.nuevo;
-        document.getElementById('totalPagados').innerText = stats.pagado;
-        document.getElementById('totalEnviados').innerText = stats.enviado;
-        document.getElementById('totalCancelados').innerText = stats.cancelado;
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const ayer = new Date(hoy);
+        ayer.setDate(ayer.getDate() - 1);
+        const semana = new Date(hoy);
+        semana.setDate(semana.getDate() - 7);
+        const mes = new Date(hoy);
+        mes.setMonth(mes.getMonth() - 1);
+        
+        const totalHoy = pedidos.filter(p => {
+            const fecha = new Date(p.created_at);
+            fecha.setHours(0, 0, 0, 0);
+            return fecha.getTime() === hoy.getTime();
+        }).length;
+        
+        const totalAyer = pedidos.filter(p => {
+            const fecha = new Date(p.created_at);
+            fecha.setHours(0, 0, 0, 0);
+            return fecha.getTime() === ayer.getTime();
+        }).length;
+        
+        const totalSemana = pedidos.filter(p => {
+            const fecha = new Date(p.created_at);
+            return fecha >= semana;
+        }).length;
+        
+        const totalMes = pedidos.filter(p => {
+            const fecha = new Date(p.created_at);
+            return fecha >= mes;
+        }).length;
+        
+        document.getElementById('totalHoy').innerText = totalHoy;
+        document.getElementById('totalAyer').innerText = totalAyer;
+        document.getElementById('totalSemana').innerText = totalSemana;
+        document.getElementById('totalMes').innerText = totalMes;
+        document.getElementById('totalTodos').innerText = pedidos.length;
     }
 
     async function cambiarEstado(pedidoId, nuevoEstado) {
-        const estadoTexto = nuevoEstado === 'pagado' ? 'pagado' : nuevoEstado === 'enviado' ? 'enviado' : 'cancelado';
-        if (!confirm(`¿Marcar este pedido como ${estadoTexto}?`)) return;
+        if (!confirm(`¿Marcar este pedido como ${nuevoEstado}?`)) return;
         
         try {
             const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/estado`, {
@@ -447,7 +485,6 @@
                     </ul>
                 </div>
                 <p><strong>💰 Total:</strong> $${pedido.total.toLocaleString()}</p>
-                ${pedido.notas ? `<p><strong>📝 Notas:</strong> ${escapeHtml(pedido.notas)}</p>` : ''}
             `;
             
             let actionsHtml = `
@@ -593,7 +630,6 @@
     // Cargar datos iniciales
     cargarPedidos();
     
-    // Cerrar modal al hacer clic fuera
     window.onclick = function(event) {
         if (event.target == document.getElementById('detalleModal')) {
             cerrarModal();

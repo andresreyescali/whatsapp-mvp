@@ -1169,15 +1169,31 @@ def crear_pedido_test(tenant_id):
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
+                # Verificar si la tabla existe
                 cur.execute(f"""
-                    INSERT INTO {tenant_id}.pedidos (id, cliente_numero, items, total, estado)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (pedido_id, "573155692656", json.dumps(items), total, "nuevo"))
+                    CREATE TABLE IF NOT EXISTS {tenant_id}.pedidos (
+                        id TEXT PRIMARY KEY,
+                        cliente_numero TEXT NOT NULL,
+                        cliente_nombre TEXT,
+                        items JSONB NOT NULL,
+                        total INTEGER NOT NULL,
+                        estado VARCHAR(50) DEFAULT 'nuevo',
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        pagado_at TIMESTAMP,
+                        enviado_at TIMESTAMP
+                    )
+                """)
+                
+                cur.execute(f"""
+                    INSERT INTO {tenant_id}.pedidos (id, cliente_numero, cliente_nombre, items, total, estado)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (pedido_id, "573155692656", "Cliente Test", json.dumps(items), total, "nuevo"))
             conn.commit()
-        return jsonify({'success': True, 'pedido_id': pedido_id})
+        return jsonify({'success': True, 'pedido_id': pedido_id, 'message': 'Pedido de prueba creado'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
+    
 @app.route('/debug/crear_pedido_manual/<tenant_id>', methods=['GET'])
 def crear_pedido_manual(tenant_id):
     """Crea un pedido manualmente para prueba"""
