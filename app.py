@@ -756,7 +756,7 @@ def panel_cliente(tenant_id):
 @login_required
 @tenant_owner_required
 def get_pedidos_tenant(tenant_id):
-    """Obtiene pedidos del tenant desde el schema del tenant"""
+    """Obtiene pedidos del tenant"""
     estado = request.args.get('estado', 'todos')
     
     try:
@@ -777,6 +777,9 @@ def get_pedidos_tenant(tenant_id):
                             pedido['items'] = json.loads(pedido['items'])
                         except:
                             pedido['items'] = []
+                    # Si no hay cliente_nombre, usar el número
+                    if not pedido.get('cliente_nombre'):
+                        pedido['cliente_nombre'] = pedido.get('cliente_numero', 'Desconocido')
                     pedidos.append(pedido)
                 
                 logger.info(f"Pedidos encontrados en {tenant_id}.pedidos: {len(pedidos)}")
@@ -784,7 +787,7 @@ def get_pedidos_tenant(tenant_id):
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
         return jsonify([])
-            
+                
 @app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
 @login_required
 def cambiar_estado_pedido(pedido_id):
@@ -1157,7 +1160,7 @@ def crear_pedido_prueba(tenant_id):
 
 @app.route('/debug/crear_pedido_test/<tenant_id>', methods=['GET'])
 def crear_pedido_test(tenant_id):
-    """Crea un pedido de prueba directamente en la BD"""
+    """Crea un pedido de prueba directamente en la BD usando la estructura existente"""
     import uuid
     import json
     from core.database import db_manager
@@ -1169,31 +1172,31 @@ def crear_pedido_test(tenant_id):
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                # Verificar si la tabla existe, si no, crearla
+                # Primero, verificar qué columnas existen
                 cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {tenant_id}.pedidos (
-                        id TEXT PRIMARY KEY,
-                        cliente_numero TEXT NOT NULL,
-                        cliente_nombre TEXT,
-                        items JSONB NOT NULL,
-                        total INTEGER NOT NULL,
-                        estado VARCHAR(50) DEFAULT 'nuevo',
-                        created_at TIMESTAMP DEFAULT NOW(),
-                        updated_at TIMESTAMP DEFAULT NOW(),
-                        pagado_at TIMESTAMP,
-                        enviado_at TIMESTAMP
-                    )
-                """)
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_schema = %s AND table_name = 'pedidos'
+                """, (tenant_id,))
+                columnas = [row[0] for row in cur.fetchall()]
                 
-                cur.execute(f"""
-                    INSERT INTO {tenant_id}.pedidos (id, cliente_numero, cliente_nombre, items, total, estado)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (pedido_id, "573155692656", "Cliente Test", json.dumps(items), total, "nuevo"))
+                # Construir INSERT según las columnas existentes
+                if 'cliente_nombre' in columnas:
+                    cur.execute(f"""
+                        INSERT INTO {tenant_id}.pedidos (id, cliente_numero, cliente_nombre, items, total, estado)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (pedido_id, "573155692656", "Cliente Test", json.dumps(items), total, "nuevo"))
+                else:
+                    cur.execute(f"""
+                        INSERT INTO {tenant_id}.pedidos (id, cliente_numero, items, total, estado)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (pedido_id, "573155692656", json.dumps(items), total, "nuevo"))
             conn.commit()
         return jsonify({'success': True, 'pedido_id': pedido_id, 'message': 'Pedido de prueba creado'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
+        return jsonify({'error': str(e), 'columnas': columnas if 'columnas' in locals() else []}), 500
+
+
 @app.route('/debug/crear_pedido_manual/<tenant_id>', methods=['GET'])
 def crear_pedido_manual(tenant_id):
     """Crea un pedido manualmente para prueba"""
