@@ -265,6 +265,59 @@ class MessageHandler:
 
 ✍️ Escribe **"ya pagué"** cuando completes el pago."""
     
+        def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
+            """Guarda el carrito en la base de datos"""
+            try:
+                with db_manager.get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Eliminar carrito anterior
+                        cur.execute("DELETE FROM public.carritos WHERE tenant_id = %s AND cliente_numero = %s", 
+                                (tenant_id, cliente_numero))
+                        # Insertar nuevo carrito
+                        cur.execute("""
+                            INSERT INTO public.carritos (tenant_id, cliente_numero, items, total)
+                            VALUES (%s, %s, %s, %s)
+                        """, (tenant_id, cliente_numero, json.dumps(items), total))
+                    conn.commit()
+            except Exception as e:
+                logger.error(f'Error guardando carrito: {e}')
+
+    def _cargar_carrito(self, tenant_id: str, cliente_numero: str) -> dict:
+        """Carga el carrito desde la base de datos"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT items, total FROM public.carritos 
+                        WHERE tenant_id = %s AND cliente_numero = %s
+                    """, (tenant_id, cliente_numero))
+                    row = cur.fetchone()
+                    if row:
+                        items = json.loads(row[0]) if row[0] else []
+                        return {'items': items, 'total': row[1]}
+                    return {'items': [], 'total': 0}
+        except Exception as e:
+            logger.error(f'Error cargando carrito: {e}')
+            return {'items': [], 'total': 0}
+
+    def _agregar_al_carrito(self, tenant_id: str, cliente_numero: str, productos: list):
+        """Agrega productos al carrito del cliente usando BD"""
+        carrito = self._cargar_carrito(tenant_id, cliente_numero)
+        
+        for p in productos:
+            encontrado = False
+            for item in carrito['items']:
+                if item['nombre'] == p['nombre']:
+                    item['cantidad'] += p['cantidad']
+                    encontrado = True
+                    break
+            if not encontrado:
+                carrito['items'].append(p)
+            carrito['total'] += p['precio'] * p['cantidad']
+        
+        self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
+        
+
     def _cancelar_pedido(self, tenant: dict, numero: str) -> str:
         """Cancela el pedido actual"""
         if numero in self._carritos:
@@ -273,59 +326,45 @@ class MessageHandler:
     
     def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
                       pedidos_pendientes: list, contexto: dict) -> str:
-        """Usa DeepSeek con contexto personalizado y manejo de carrito"""
         
         if not ai_client.client:
             return self._respuesta_fallback(texto, tenant, menu, numero)
         
-        pedido_pendiente = self._get_pedido_pendiente_confirmado(tenant['id'], numero)
         texto_lower = texto.lower()
         
-        # 1. Detectar pagos (natural)
-        if any(palabra in texto_lower for palabra in [
-            'pague', 'pago', 'pagado', 'transferí', 'consigné', 'gire', 'pagué',
-            'ya pague', 'listo el pago', 'pago realizado', 'dinero enviado',
-            'hice la transferencia', 'ya transferí', 'ya consigné'
-        ]):
+        # Cargar carrito desde BD
+        carrito_actual = self._cargar_carrito(tenant['id'], numero)
+        
+        # Detectar pagos
+        if any(palabra in texto_lower for palabra in ['pague', 'pago', 'pagado', 'transferí', 'consigné', 'pagué', 'ya pague', 'listo el pago']):
             order_repo.marcar_pagado(tenant['id'], numero)
             return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
         
-        # 2. Detectar confirmación de pedido (natural)
-        if any(palabra in texto_lower for palabra in [
-            'si', 'sí', 'dale', 'ok', 'okey', 'esta bien', 'está bien', 
-            'correcto', 'adelante', 'procesar', 'confirmo', 'confirmado',
-            'hagale', 'si eso es todo', 'eso es todo', 'todo bien'
-        ]):
-            if self._carritos.get(numero, {}).get('items'):
-                return self._finalizar_pedido(tenant, numero)
-            elif pedido_pendiente:
-                return self._finalizar_pedido_existente(tenant, pedido_pendiente)
+        # Detectar confirmación
+        if any(palabra in texto_lower for palabra in ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'esta bien', 'está bien', 'adelante']):
+            if carrito_actual['items']:
+                return self._finalizar_pedido(tenant, numero, carrito_actual)
+            elif pedidos_pendientes:
+                return self._finalizar_pedido_existente(tenant, pedidos_pendientes[0] if pedidos_pendientes else None)
         
-        # 3. Detectar cancelación (natural)
-        if any(palabra in texto_lower for palabra in [
-            'cancela', 'cancelar', 'no quiero', 'mejor no', 'dejalo así',
-            'olvídalo', 'olvidalo', 'ya no', 'nada gracias'
-        ]):
-            if numero in self._carritos:
-                del self._carritos[numero]
-            return "❌ Pedido cancelado. Estaré aquí cuando necesites algo más."
+        # Cancelar pedido
+        if any(palabra in texto_lower for palabra in ['cancela', 'cancelar', 'no quiero', 'mejor no']):
+            self._guardar_carrito(tenant['id'], numero, [], 0)
+            return "❌ Pedido cancelado. Estaré aquí cuando necesites algo."
         
-        # 4. Preguntar por el pedido (natural)
-        if any(palabra in texto_lower for palabra in [
-            'que pedí', 'que pedi', 'que tengo', 'mi pedido', 'que llevo',
-            'que he pedido', 'que he comprado', 'dimelo'
-        ]):
-            return self._mostrar_carrito(tenant, numero)
+        # Ver carrito
+        if any(palabra in texto_lower for palabra in ['que pedí', 'que tengo', 'mi pedido', 'ver carrito']):
+            return self._mostrar_carrito(tenant, numero, carrito_actual)
         
-        # 5. Detectar productos para agregar al carrito
+        # Detectar productos
         productos_detectados = self._detectar_productos_en_texto(texto, menu)
         
         if productos_detectados:
-            self._agregar_al_carrito(numero, productos_detectados)
-            carrito = self._carritos.get(numero, {})
-            return self._mostrar_carrito_confirmacion(tenant, numero, carrito)
+            self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
+            nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
+            return self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)
         
-        # 6. Respuesta natural con IA (sin instrucciones)
+        # Respuesta con IA (sin instrucciones)
         historial = self._get_historial_conversacion(tenant['id'], numero, 5)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
@@ -352,20 +391,11 @@ class MessageHandler:
                 temperature=0.7,
                 max_tokens=500
             )
-            respuesta = response.choices[0].message.content
-            
-            # Remover instrucciones si la IA las incluyó
-            frases_a_remover = [
-                'escribe "ya pagué"', 'escribe "ya pague"', 'escribe "menu"',
-                'escribe "horario"', 'escribe "ubicacion"', 'escribe "ver pedido"'
-            ]
-            for frase in frases_a_remover:
-                respuesta = respuesta.replace(frase, '')
-            
-            return respuesta.strip()
+            return response.choices[0].message.content
         except Exception as e:
-            logger.error(f'Error llamando a DeepSeek: {e}')
+            logger.error(f'Error: {e}')
             return self._respuesta_fallback(texto, tenant, menu, numero)
+        
         
     def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
         """Construye el prompt del sistema con toda la información disponible"""

@@ -63,7 +63,8 @@ class DatabaseManager:
                         activo BOOLEAN DEFAULT true
                     )
                     ''')
-                    
+                
+
                     # Tabla de usuarios
                     cur.execute('''
                     CREATE TABLE IF NOT EXISTS public.usuarios (
@@ -206,6 +207,19 @@ class DatabaseManager:
                         notas TEXT
                     );
                     ''')
+
+                    # Tabla de carritos temporales
+                    cur.execute('''
+                    CREATE TABLE IF NOT EXISTS public.carritos (
+                        id SERIAL PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        cliente_numero TEXT NOT NULL,
+                        items JSONB DEFAULT '[]',
+                        total INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    );
+                    ''')
                     
                     # ========== NUEVA TABLA: CONVERSACIONES ==========
                     cur.execute('''
@@ -232,6 +246,8 @@ class DatabaseManager:
                         created_at TIMESTAMP DEFAULT NOW()
                     );
                     ''')
+
+                    
 
 
 
