@@ -1048,6 +1048,28 @@ def verificar_tabla_conversaciones():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/debug/crear_tabla_carritos', methods=['GET'])
+def crear_tabla_carritos():
+    """Crea la tabla de carritos en la base de datos"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS public.carritos (
+                        id SERIAL PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        cliente_numero TEXT NOT NULL,
+                        items JSONB DEFAULT '[]',
+                        total INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+                conn.commit()
+        return jsonify({'success': True, 'message': 'Tabla carritos creada'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/debug/ver_historial/<tenant_id>/<cliente_numero>', methods=['GET'])
 def ver_historial(tenant_id, cliente_numero):
     """Ver el historial de conversaciones de un cliente"""

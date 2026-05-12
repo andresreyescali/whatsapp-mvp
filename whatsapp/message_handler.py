@@ -279,6 +279,7 @@ class MessageHandler:
                             VALUES (%s, %s, %s, %s)
                         """, (tenant_id, cliente_numero, json.dumps(items), total))
                     conn.commit()
+                    logger.info(f"Carrito guardado para {cliente_numero}: {len(items)} items, total ${total}")
             except Exception as e:
                 logger.error(f'Error guardando carrito: {e}')
 
