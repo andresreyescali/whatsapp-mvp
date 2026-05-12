@@ -189,45 +189,26 @@ class MessageHandler:
             self._carritos[numero]['total'] += p['precio'] * p['cantidad']
     
     def _mostrar_carrito_confirmacion(self, tenant: dict, numero: str, carrito: dict) -> str:
-        """Muestra el carrito y pide confirmación"""
+        """Muestra el carrito de forma natural y pregunta si quiere agregar más"""
         if not carrito.get('items'):
-            return "🛒 No tienes productos en tu pedido aún."
+            return "No tienes productos en tu pedido aún. ¿Qué te gustaría ordenar?"
         
         items_texto = ""
         for item in carrito['items']:
             subtotal = item['precio'] * item['cantidad']
-            items_texto += f"• {item['cantidad']}x {item['nombre']} - ${subtotal:,.0f}\n"
+            items_texto += f"• {item['cantidad']}x {item['nombre']}: ${subtotal:,.0f}\n"
         
-        return f"""🛒 **Tu pedido actual:**
-
-{items_texto}
-**Total:** ${carrito['total']:,.0f}
-
-✅ Responde **"sí, eso es todo"** para confirmar y generar el link de pago.
-✏️ Puedes seguir agregando productos.
-❌ Responde **"cancelar pedido"** si quieres empezar de nuevo."""
-    
-    def _mostrar_carrito(self, tenant: dict, numero: str) -> str:
-        """Muestra el carrito actual"""
-        carrito = self._carritos.get(numero, {})
-        if not carrito.get('items'):
-            return "🛒 No tienes productos en tu pedido aún. ¿Qué te gustaría ordenar?"
+        total = carrito['total']
         
-        items_texto = ""
-        for item in carrito['items']:
-            subtotal = item['precio'] * item['cantidad']
-            items_texto += f"• {item['cantidad']}x {item['nombre']} - ${subtotal:,.0f}\n"
-        
-        return f"""🛒 **Tu pedido actual:**
+        return f"""📋 **Tu pedido:**
 
-{items_texto}
-**Total:** ${carrito['total']:,.0f}
+    {items_texto}
+    **Total:** ${total:,.0f}
 
-✅ Responde **"sí, eso es todo"** para confirmar y pagar.
-✏️ Puedes seguir agregando productos."""
+    ¿Algo más que deseas agregar o procedemos con el pedido?"""
     
     def _finalizar_pedido(self, tenant: dict, numero: str) -> str:
-        """Finaliza el pedido y genera link de pago"""
+        """Finaliza el pedido y genera link de pago de forma natural"""
         carrito = self._carritos.pop(numero, None)
         if not carrito or not carrito.get('items'):
             return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
@@ -250,21 +231,21 @@ class MessageHandler:
             items_texto = ""
             for item in items:
                 subtotal = item['precio'] * item['cantidad']
-                items_texto += f"• {item['cantidad']}x {item['nombre']} - ${subtotal:,.0f}\n"
+                items_texto += f"• {item['cantidad']}x {item['nombre']}: ${subtotal:,.0f}\n"
             
-            return f"""✅ **¡Pedido confirmado!**
+            return f"""✅ **¡Pedido listo!**
 
-{items_texto}
-**Total:** ${total:,.0f}
+    {items_texto}
+    **Total a pagar:** ${total:,.0f}
 
-🔗 **Link de pago:** {link_pago}
+    🔗 **Link de pago:** {link_pago}
 
-✍️ Escribe **"ya pagué"** cuando completes el pago."""
-            
+    Cuando completes el pago, avísame para empezar a preparar tu pedido."""
+                
         except Exception as e:
             logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
-    
+            
     def _finalizar_pedido_existente(self, tenant: dict, pedido: dict) -> str:
         """Finaliza un pedido ya existente en la BD"""
         link_pago = generar_link_pago(pedido['total'], pedido['id'])
@@ -291,7 +272,7 @@ class MessageHandler:
         return "❌ Pedido cancelado. Puedes empezar de nuevo cuando quieras."
     
     def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
-                          pedidos_pendientes: list, contexto: dict) -> str:
+                      pedidos_pendientes: list, contexto: dict) -> str:
         """Usa DeepSeek con contexto personalizado y manejo de carrito"""
         
         if not ai_client.client:
@@ -300,23 +281,43 @@ class MessageHandler:
         pedido_pendiente = self._get_pedido_pendiente_confirmado(tenant['id'], numero)
         texto_lower = texto.lower()
         
-        # 1. Confirmación de pedido
-        if any(palabra in texto_lower for palabra in ['si eso es todo', 'confirmo', 'haz el pedido', 'procesar pedido', 
-    'está bien', 'dale', 'ok', 'si', 'correcto', 'adelante']):
+        # 1. Detectar pagos (natural)
+        if any(palabra in texto_lower for palabra in [
+            'pague', 'pago', 'pagado', 'transferí', 'consigné', 'gire', 'pagué',
+            'ya pague', 'listo el pago', 'pago realizado', 'dinero enviado',
+            'hice la transferencia', 'ya transferí', 'ya consigné'
+        ]):
+            order_repo.marcar_pagado(tenant['id'], numero)
+            return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
+        
+        # 2. Detectar confirmación de pedido (natural)
+        if any(palabra in texto_lower for palabra in [
+            'si', 'sí', 'dale', 'ok', 'okey', 'esta bien', 'está bien', 
+            'correcto', 'adelante', 'procesar', 'confirmo', 'confirmado',
+            'hagale', 'si eso es todo', 'eso es todo', 'todo bien'
+        ]):
             if self._carritos.get(numero, {}).get('items'):
                 return self._finalizar_pedido(tenant, numero)
             elif pedido_pendiente:
                 return self._finalizar_pedido_existente(tenant, pedido_pendiente)
         
-        # 2. Cancelar pedido
-        if any(palabra in texto_lower for palabra in ['cancelar pedido', 'no quiero nada']):
-            return self._cancelar_pedido(tenant, numero)
+        # 3. Detectar cancelación (natural)
+        if any(palabra in texto_lower for palabra in [
+            'cancela', 'cancelar', 'no quiero', 'mejor no', 'dejalo así',
+            'olvídalo', 'olvidalo', 'ya no', 'nada gracias'
+        ]):
+            if numero in self._carritos:
+                del self._carritos[numero]
+            return "❌ Pedido cancelado. Estaré aquí cuando necesites algo más."
         
-        # 3. Ver carrito actual
-        if any(palabra in texto_lower for palabra in ['ver carrito', 'qué tengo', 'mi pedido']):
+        # 4. Preguntar por el pedido (natural)
+        if any(palabra in texto_lower for palabra in [
+            'que pedí', 'que pedi', 'que tengo', 'mi pedido', 'que llevo',
+            'que he pedido', 'que he comprado', 'dimelo'
+        ]):
             return self._mostrar_carrito(tenant, numero)
         
-        # 4. Detectar productos para agregar al carrito
+        # 5. Detectar productos para agregar al carrito
         productos_detectados = self._detectar_productos_en_texto(texto, menu)
         
         if productos_detectados:
@@ -324,7 +325,7 @@ class MessageHandler:
             carrito = self._carritos.get(numero, {})
             return self._mostrar_carrito_confirmacion(tenant, numero, carrito)
         
-        # 5. Si no hay productos detectados, usar IA para respuesta general
+        # 6. Respuesta natural con IA (sin instrucciones)
         historial = self._get_historial_conversacion(tenant['id'], numero, 5)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
@@ -335,9 +336,11 @@ class MessageHandler:
         
         carrito_info = self._get_carrito_info(numero)
         if carrito_info:
-            system_prompt += f"\n\nCARRITO ACTUAL DEL CLIENTE:\n{carrito_info}\nPregunta si quiere agregar más productos o confirmar el pedido."
+            system_prompt += f"\n\nProductos ya agregados: {carrito_info}"
         
-        user_message = f"Cliente dice: \"{texto}\"\n\nGenera una respuesta amable y útil."
+        system_prompt += "\n\nIMPORTANTE: NO incluyas instrucciones como 'escribe X para hacer Y'. Solo responde naturalmente."
+        
+        user_message = f"Cliente dice: \"{texto}\"\nGenera una respuesta amable y natural."
         
         try:
             response = ai_client.client.chat.completions.create(
@@ -349,11 +352,21 @@ class MessageHandler:
                 temperature=0.7,
                 max_tokens=500
             )
-            return response.choices[0].message.content
+            respuesta = response.choices[0].message.content
+            
+            # Remover instrucciones si la IA las incluyó
+            frases_a_remover = [
+                'escribe "ya pagué"', 'escribe "ya pague"', 'escribe "menu"',
+                'escribe "horario"', 'escribe "ubicacion"', 'escribe "ver pedido"'
+            ]
+            for frase in frases_a_remover:
+                respuesta = respuesta.replace(frase, '')
+            
+            return respuesta.strip()
         except Exception as e:
             logger.error(f'Error llamando a DeepSeek: {e}')
             return self._respuesta_fallback(texto, tenant, menu, numero)
-    
+        
     def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
         """Construye el prompt del sistema con toda la información disponible"""
         
