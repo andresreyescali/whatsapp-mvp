@@ -1169,7 +1169,7 @@ def crear_pedido_test(tenant_id):
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                # Verificar si la tabla existe
+                # Verificar si la tabla existe, si no, crearla
                 cur.execute(f"""
                     CREATE TABLE IF NOT EXISTS {tenant_id}.pedidos (
                         id TEXT PRIMARY KEY,
@@ -1247,6 +1247,22 @@ def debug_ver_carrito(tenant_id, numero):
         'total_items': len(carrito.get('items', [])),
         'total_monto': carrito.get('total', 0)
     })
+
+@app.route('/debug/ver_tablas/<tenant_id>', methods=['GET'])
+def debug_ver_tablas(tenant_id):
+    """Ver qué tablas existen en el schema del tenant"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = %s
+                """, (tenant_id,))
+                tables = [row[0] for row in cur.fetchall()]
+                return jsonify({'schema': tenant_id, 'tablas': tables})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
