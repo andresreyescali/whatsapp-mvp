@@ -10,16 +10,19 @@ class OrderRepository:
         """Crea un nuevo pedido con número compuesto"""
         pedido_id = str(uuid.uuid4())
         
-        # Obtener el siguiente secuencial
+        # Asegurar que las columnas existen
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                # Asegurar que las columnas existen
                 try:
                     cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT")
                     cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER")
+                    conn.commit()
                 except Exception as e:
-                    logger.warning(f'Error agregando columnas: {e}')
-                
+                    logger.warning(f'Error agregando columnas (puede que ya existan): {e}')
+        
+        # Obtener el siguiente secuencial
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
                 cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant_id}.pedidos")
                 secuencial = cur.fetchone()[0]
         
