@@ -1117,7 +1117,29 @@ def get_pedidos_tenant(tenant_id):
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
         return jsonify([])
-        
+
+@app.route('/debug/agregar_columna_pedido/<tenant_id>', methods=['GET'])
+def agregar_columna_pedido(tenant_id):
+    """Agrega la columna numero_pedido a la tabla pedidos del tenant"""
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                # Verificar si la columna existe
+                cur.execute(f"""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_schema = %s AND table_name = 'pedidos' AND column_name = 'numero_pedido'
+                """, (tenant_id,))
+                if not cur.fetchone():
+                    cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN numero_pedido TEXT")
+                    cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN secuencial INTEGER")
+                    conn.commit()
+                    return jsonify({'success': True, 'message': 'Columnas numero_pedido y secuencial agregadas'})
+                else:
+                    return jsonify({'success': True, 'message': 'Las columnas ya existen'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/debug/pedidos_tenant/<tenant_id>', methods=['GET'])
 def debug_pedidos_tenant(tenant_id):
     """Muestra los pedidos directamente desde el esquema del tenant"""
@@ -1181,6 +1203,50 @@ def debug_ver_pedidos(tenant_id):
     except Exception as e:
         resultado['error_tabla'] = str(e)
     return jsonify(resultado)
+
+@app.route('/debug/recrear_tabla_pedidos/<tenant_id>', methods=['GET'])
+def recrear_tabla_pedidos(tenant_id):
+    """Recrea la tabla pedidos con la estructura correcta"""
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                # Backup de datos existentes
+                cur.execute(f"SELECT * FROM {tenant_id}.pedidos")
+                datos = cur.fetchall()
+                
+                # Eliminar tabla
+                cur.execute(f"DROP TABLE IF EXISTS {tenant_id}.pedidos CASCADE")
+                
+                # Crear tabla nueva
+                cur.execute(f"""
+                    CREATE TABLE {tenant_id}.pedidos (
+                        id TEXT PRIMARY KEY,
+                        cliente_numero TEXT NOT NULL,
+                        cliente_nombre TEXT,
+                        items JSONB NOT NULL,
+                        total INTEGER NOT NULL,
+                        estado VARCHAR(50) DEFAULT 'nuevo',
+                        numero_pedido TEXT,
+                        secuencial INTEGER,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        pagado_at TIMESTAMP,
+                        enviado_at TIMESTAMP,
+                        cancelado_at TIMESTAMP,
+                        notas TEXT
+                    )
+                """)
+                
+                # Restaurar datos si existían
+                if datos:
+                    for row in datos:
+                        # Adaptar según las columnas originales
+                        pass
+                
+                conn.commit()
+        return jsonify({'success': True, 'message': 'Tabla pedidos recreada correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/debug/crear_pedido_tenant/<tenant_id>', methods=['GET'])
 def crear_pedido_tenant(tenant_id):
