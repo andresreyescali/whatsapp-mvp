@@ -1392,6 +1392,17 @@ def debug_ver_carrito(tenant_id, numero):
         'total_monto': carrito.get('total', 0)
     })
 
+@app.route('/debug/carrito/<tenant_id>/<numero>', methods=['GET'])
+def debug_carrito(tenant_id, numero):
+    """Ver el carrito actual en la base de datos"""
+    from whatsapp.message_handler import message_handler
+    carrito = message_handler._cargar_carrito(tenant_id, numero)
+    return jsonify({
+        'items': carrito.get('items', []),
+        'total': carrito.get('total', 0),
+        'cantidad_items': len(carrito.get('items', []))
+    })
+
 @app.route('/debug/ver_carrito_bd/<tenant_id>/<cliente_numero>', methods=['GET'])
 def debug_ver_carrito_bd(tenant_id, cliente_numero):
     """Ver el carrito en la base de datos"""
