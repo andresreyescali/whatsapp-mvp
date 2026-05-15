@@ -752,39 +752,7 @@ def panel_cliente(tenant_id):
         return "Tenant no encontrado", 404
     return render_template('panel_cliente.html', tenant=tenant)
 
-@app.route('/api/tenant/<tenant_id>/pedidos', methods=['GET'])
-@login_required
-@tenant_owner_required
-def get_pedidos_tenant(tenant_id):
-    """Obtiene pedidos del tenant desde el esquema del tenant"""
-    estado = request.args.get('estado', 'todos')
-    
-    try:
-        # Usar conexión específica del tenant
-        with db_manager.get_connection(tenant_id) as conn:
-            with conn.cursor() as cur:
-                if estado == 'todos':
-                    cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
-                else:
-                    cur.execute("SELECT * FROM pedidos WHERE estado = %s ORDER BY created_at DESC", (estado,))
-                
-                rows = cur.fetchall()
-                columns = [desc[0] for desc in cur.description]
-                pedidos = []
-                for row in rows:
-                    pedido = dict(zip(columns, row))
-                    if pedido.get('items') and isinstance(pedido['items'], str):
-                        try:
-                            pedido['items'] = json.loads(pedido['items'])
-                        except:
-                            pedido['items'] = []
-                    pedidos.append(pedido)
-                
-                logger.info(f"Pedidos encontrados en {tenant_id}.pedidos: {len(pedidos)}")
-                return jsonify(pedidos)
-    except Exception as e:
-        logger.error(f'Error cargando pedidos: {e}')
-        return jsonify([])
+
                     
 @app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
 @login_required
@@ -1126,7 +1094,6 @@ def get_pedidos_tenant(tenant_id):
     estado = request.args.get('estado', 'todos')
     
     try:
-        # Usar conexión específica del tenant
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
                 if estado == 'todos':
@@ -1146,12 +1113,11 @@ def get_pedidos_tenant(tenant_id):
                             pedido['items'] = []
                     pedidos.append(pedido)
                 
-                logger.info(f"Pedidos encontrados en {tenant_id}.pedidos: {len(pedidos)}")
                 return jsonify(pedidos)
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
         return jsonify([])
-    
+        
 @app.route('/debug/pedidos_tenant/<tenant_id>', methods=['GET'])
 def debug_pedidos_tenant(tenant_id):
     """Muestra los pedidos directamente desde el esquema del tenant"""
