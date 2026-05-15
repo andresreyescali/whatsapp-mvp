@@ -88,8 +88,10 @@ class MessageHandler:
         try:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
+                    # Eliminar carrito anterior
                     cur.execute("DELETE FROM public.carritos WHERE tenant_id = %s AND cliente_numero = %s", 
-                               (tenant_id, cliente_numero))
+                            (tenant_id, cliente_numero))
+                    # Insertar nuevo carrito - convertir items a JSON string
                     cur.execute("""
                         INSERT INTO public.carritos (tenant_id, cliente_numero, items, total)
                         VALUES (%s, %s, %s, %s)
@@ -110,13 +112,18 @@ class MessageHandler:
                     """, (tenant_id, cliente_numero))
                     row = cur.fetchone()
                     if row:
-                        items = json.loads(row[0]) if row[0] else []
+                        # items puede ser string o dict, asegurarse de que sea lista
+                        items = row[0]
+                        if isinstance(items, str):
+                            items = json.loads(items)
+                        elif items is None:
+                            items = []
                         return {'items': items, 'total': row[1]}
                     return {'items': [], 'total': 0}
         except Exception as e:
             logger.error(f'Error cargando carrito: {e}')
             return {'items': [], 'total': 0}
-
+        
     def _agregar_al_carrito(self, tenant_id: str, cliente_numero: str, productos: list):
         """Agrega productos al carrito del cliente usando BD"""
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
@@ -133,7 +140,8 @@ class MessageHandler:
             carrito['total'] += p['precio'] * p['cantidad']
         
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
-
+        
+    
     # ==================== MÉTODOS DEL HISTORIAL ====================
 
     def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
@@ -231,7 +239,7 @@ class MessageHandler:
 {items_texto}
 **Total:** ${total:,.0f}"""
 
-    def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
+def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
         """Finaliza el pedido y genera link de pago"""
         if not carrito or not carrito.get('items'):
             return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
@@ -240,13 +248,28 @@ class MessageHandler:
         items = carrito['items']
         total = carrito['total']
         
+        # Obtener secuencial
+        with db_manager.get_connection(tenant['id']) as conn:
+            with conn.cursor() as cur:
+                # Asegurar que las columnas existen
+                try:
+                    cur.execute(f"ALTER TABLE {tenant['id']}.pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT")
+                    cur.execute(f"ALTER TABLE {tenant['id']}.pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER")
+                except:
+                    pass
+                
+                cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant['id']}.pedidos")
+                secuencial = cur.fetchone()[0]
+        
+        numero_pedido = db_manager.generar_numero_pedido(tenant['id'], secuencial)
+        
         try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        INSERT INTO {tenant['id']}.pedidos (id, cliente_numero, items, total, estado)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (pedido_id, numero, json.dumps(items), total, "nuevo"))
+                        INSERT INTO {tenant['id']}.pedidos (id, cliente_numero, items, total, estado, numero_pedido, secuencial)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (pedido_id, numero, json.dumps(items), total, "nuevo", numero_pedido, secuencial))
                 conn.commit()
             
             # Limpiar carrito
@@ -259,22 +282,26 @@ class MessageHandler:
                 subtotal = item['precio'] * item['cantidad']
                 items_texto += f"• {item['cantidad']}x {item['nombre']}: ${subtotal:,.0f}\n"
             
+            # Enviar email de confirmación
+            from orders.repository import order_repo
+            order_repo._enviar_email_confirmacion(tenant['id'], numero_pedido, items, total, numero)
+            
             return f"""✅ **¡Pedido listo!**
 
-{items_texto}
-**Total a pagar:** ${total:,.0f}
+    {items_texto}
+    **Total a pagar:** ${total:,.0f}
 
-🔗 **Link de pago:** {link_pago}
+    🔗 **Link de pago:** {link_pago}
 
-Cuando completes el pago, avísame para empezar a preparar tu pedido."""
-            
+    Cuando completes el pago, avísame para empezar a preparar tu pedido."""
+                
         except Exception as e:
             logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
-
+        
     # ==================== RESPUESTA PRINCIPAL CON IA ====================
 
-    def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
+def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
                           pedidos_pendientes: list, contexto: dict) -> str:
         """Usa DeepSeek con contexto personalizado y manejo de carrito"""
         
@@ -345,7 +372,7 @@ Cuando completes el pago, avísame para empezar a preparar tu pedido."""
             logger.error(f'Error llamando a DeepSeek: {e}')
             return self._respuesta_fallback(texto, tenant, menu, numero)
 
-    def _get_carrito_info(self, numero: str) -> str:
+def _get_carrito_info(self, numero: str) -> str:
         """Obtiene información del carrito para el prompt"""
         carrito = self._cargar_carrito(tenant_repo.get_all()[0]['id'] if tenant_repo.get_all() else None, numero) if tenant_repo.get_all() else {'items': [], 'total': 0}
         if not carrito.get('items'):
@@ -356,12 +383,12 @@ Cuando completes el pago, avísame para empezar a preparar tu pedido."""
             items_texto += f"- {item['cantidad']}x {item['nombre']}: ${item['precio'] * item['cantidad']:,.0f}\n"
         return f"Productos en carrito:\n{items_texto}Total: ${carrito.get('total', 0):,.0f}"
 
-    def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
+def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
         """Construye prompt del sistema"""
         nombre_negocio = tenant.get('nombre', 'Mi negocio')
         return f"""Eres un asistente de ventas por WhatsApp para {nombre_negocio}. Ayuda al cliente a armar su pedido de forma natural."""
 
-    def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
+def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
         """Respuesta de fallback"""
         return f"Hola! Soy el asistente de {tenant['nombre']}. ¿Qué te gustaría ordenar?"
 

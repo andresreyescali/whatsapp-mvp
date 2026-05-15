@@ -1392,6 +1392,32 @@ def debug_ver_carrito(tenant_id, numero):
         'total_monto': carrito.get('total', 0)
     })
 
+@app.route('/debug/ver_carrito_bd/<tenant_id>/<cliente_numero>', methods=['GET'])
+def debug_ver_carrito_bd(tenant_id, cliente_numero):
+    """Ver el carrito en la base de datos"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT items, total, created_at, updated_at 
+                    FROM public.carritos 
+                    WHERE tenant_id = %s AND cliente_numero = %s
+                """, (tenant_id, cliente_numero))
+                row = cur.fetchone()
+                if row:
+                    items = row[0]
+                    if isinstance(items, str):
+                        items = json.loads(items)
+                    return jsonify({
+                        'items': items,
+                        'total': row[1],
+                        'created_at': row[2],
+                        'updated_at': row[3]
+                    })
+                return jsonify({'items': [], 'total': 0, 'message': 'Carrito vacío'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/debug/ver_tablas/<tenant_id>', methods=['GET'])
 def debug_ver_tablas(tenant_id):
     """Ver qué tablas existen en el schema del tenant"""
