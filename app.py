@@ -51,10 +51,12 @@ register_webhook_routes(app)
 # ==================== DECORADORES DE AUTENTICACIÓN ====================
 
 def login_required(f):
-    """Decorador para requerir autenticación"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'usuario_id' not in session:
+            # Si es una petición API, devolver JSON
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'No autenticado', 'redirect': '/'}), 401
             return redirect('/')
         return f(*args, **kwargs)
     return decorated_function
@@ -62,27 +64,22 @@ def login_required(f):
 def tenant_owner_required(f):
     @wraps(f)
     def decorated_function(tenant_id, *args, **kwargs):
-        # Log para debugging
-        logger.info(f"Verificando acceso - Usuario: {session.get('usuario_id')}, Tenant: {tenant_id}")
-        
         if 'usuario_id' not in session:
-            logger.warning("No hay sesión activa")
-            return jsonify({'error': 'No autenticado'}), 401
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'No autenticado'}), 401
+            return redirect('/')
         
         if session.get('rol_sistema') == 'super_admin':
-            logger.info("Super admin - acceso concedido")
             return f(tenant_id, *args, **kwargs)
         
         negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
-        logger.info(f"Negocios del usuario: {[n['id'] for n in negocios]}")
-        
         for n in negocios:
             if n['id'] == tenant_id:
-                logger.info(f"Acceso concedido a {tenant_id}")
                 return f(tenant_id, *args, **kwargs)
         
-        logger.warning(f"Acceso denegado - Usuario {session.get('usuario_id')} no tiene acceso a {tenant_id}")
-        return jsonify({'error': 'No tienes acceso a este negocio'}), 403
+        if request.path.startswith('/api/'):
+            return jsonify({'error': 'No tienes acceso a este negocio'}), 403
+        return "No tienes acceso a este negocio", 403
     return decorated_function
 
 def tenant_owner_required_from_args(f):
