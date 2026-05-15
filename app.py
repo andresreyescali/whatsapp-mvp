@@ -1086,6 +1086,23 @@ def debug_pedidos(tenant_id):
         resultado['error_public'] = str(e)
     return jsonify(resultado)
 
+@app.route('/debug/ver_pedidos_directo/<tenant_id>', methods=['GET'])
+def debug_ver_pedidos_directo(tenant_id):
+    """Ver pedidos directamente desde la base de datos"""
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT numero_pedido, cliente_numero, items, total, estado, created_at FROM pedidos ORDER BY created_at DESC")
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+                pedidos = [dict(zip(columns, row)) for row in rows]
+                return jsonify({
+                    'total': len(pedidos),
+                    'pedidos': pedidos
+                })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/tenant/<tenant_id>/pedidos', methods=['GET'])
 @login_required
 @tenant_owner_required

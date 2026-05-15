@@ -347,10 +347,23 @@ class MessageHandler:
             order_repo.marcar_pagado(tenant['id'], numero)
             return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
         
-        # 2. Detectar confirmación de pedido
-        if any(palabra in texto_lower for palabra in ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'esta bien', 'está bien', 'adelante', 'procesar']):
-            if carrito_actual.get('items'):
-                return self._finalizar_pedido(tenant, numero, carrito_actual)
+        # 2. Detectar confirmación de pedido (ampliar palabras clave)
+            palabras_confirmacion = [
+                'si', 'sí', 'dale', 'ok', 'okey', 'correcto', 'confirmo', 'confirma',
+                'esta bien', 'está bien', 'adelante', 'procesar', 'procesa',
+                'eso es todo', 'si eso es todo', 'sí eso es todo',
+                'no eso es todo', 'no eso es todo gracias', 'gracias eso es todo',
+                'listo', 'de acuerdo', 'perfecto', 'vale', 'si gracias'
+            ]
+
+            if any(palabra in texto_lower for palabra in palabras_confirmacion):
+                logger.info(f"Confirmación detectada: {texto_lower}")
+                if carrito_actual.get('items'):
+                    logger.info(f"Carrito tiene {len(carrito_actual['items'])} items, finalizando pedido")
+                    return self._finalizar_pedido(tenant, numero, carrito_actual)
+                else:
+                    logger.info("Carrito vacío, no hay pedido para finalizar")
+
         
         # 3. Detectar cancelación
         if any(palabra in texto_lower for palabra in ['cancela', 'cancelar', 'no quiero', 'mejor no']):

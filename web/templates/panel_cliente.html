@@ -307,85 +307,30 @@
             return pedidos;
     }
 }
-
     async function cargarPedidos() {
-        const estado = document.getElementById('filtroEstado').value;
-        const fecha = document.getElementById('filtroFecha').value;
-        const cliente = document.getElementById('filtroCliente').value.toLowerCase();
+    const estado = document.getElementById('filtroEstado').value;
+    const fecha = document.getElementById('filtroFecha').value;
+    const cliente = document.getElementById('filtroCliente').value.toLowerCase();
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=todos`);
+        console.log('Respuesta del servidor:', response);
         
-        try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}`);
-            let pedidos = await response.json();
-            
-            if (!pedidos || pedidos.length === 0) {
-                document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos</div>';
-                actualizarStats([]);
-                return;
-            }
-            
-            // Aplicar filtro de fecha
-            pedidos = filtrarPorFecha(pedidos, fecha);
-            
-            // Aplicar filtro de cliente
-            if (cliente) {
-                pedidos = pedidos.filter(p => 
-                    (p.cliente_nombre && p.cliente_nombre.toLowerCase().includes(cliente)) ||
-                    p.cliente_numero.includes(cliente)
-                );
-            }
-            
-            actualizarStats(pedidos);
-            
-            if (pedidos.length === 0) {
-                document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos con los filtros seleccionados</div>';
-                return;
-            }
-            
-            let html = '';
-            pedidos.forEach(p => {
-                const estadoClass = p.estado === 'nuevo' ? 'estado-nuevo' : 
-                                (p.estado === 'pagado' ? 'estado-pagado' : 'estado-enviado');
-                const estadoTexto = p.estado === 'nuevo' ? '🆕 Nuevo' : 
-                                (p.estado === 'pagado' ? '✅ Pagado' : '🚚 Enviado');
-                const items = p.items || [];
-                const nombreCliente = p.cliente_nombre || p.cliente_numero;
-                const numeroPedido = p.numero_pedido || 'N/A';
-                
-                html += `
-                    <div class="pedido-card">
-                        <div class="pedido-header">
-                            <div>
-                                <strong>📋 Pedido:</strong> 
-                                <span style="font-family: monospace; font-size: 12px;">${numeroPedido}</span>
-                            </div>
-                            <div>
-                                <strong>📱 ${escapeHtml(nombreCliente)}</strong>
-                                <span class="estado-badge ${estadoClass}" style="margin-left: 10px;">${estadoTexto}</span>
-                            </div>
-                        </div>
-                        <div><strong>📞 Teléfono:</strong> ${p.cliente_numero}</div>
-                        <div><strong>🕒 Fecha:</strong> ${new Date(p.created_at).toLocaleString()}</div>
-                        <div class="pedido-items">
-                            <strong>🛒 Productos:</strong>
-                            <ul>
-                                ${items.map(i => `<li>${i.cantidad || 1}x ${escapeHtml(i.nombre)} - $${(i.precio * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
-                            </ul>
-                        </div>
-                        <div><strong>💰 Total:</strong> $${p.total.toLocaleString()}</div>
-                        <div class="pedido-actions">
-                            <button class="btn-sm btn-detalle" onclick="verDetalle('${p.id}')">📋 Ver detalle</button>
-                            <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${p.cliente_numero}')">💬 WhatsApp</button>
-                        </div>
-                    </div>
-                `;
-            });
-            document.getElementById('pedidosContainer').innerHTML = html;
-        } catch (error) {
-            console.error('Error:', error);
-            document.getElementById('pedidosContainer').innerHTML = '<div class="empty">❌ Error al cargar pedidos</div>';
+        const pedidos = await response.json();
+        console.log('Pedidos recibidos:', pedidos);
+        
+        if (!pedidos || pedidos.length === 0) {
+            document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos</div>';
+            return;
         }
+        
+        // Mostrar pedidos...
+    } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('pedidosContainer').innerHTML = '<div class="empty">❌ Error al cargar pedidos: ' + error.message + '</div>';
     }
-
+}
+    
     function actualizarStats(pedidos) {
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
