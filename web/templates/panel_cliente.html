@@ -281,31 +281,32 @@
     }
 
     function filtrarPorFecha(pedidos, rango) {
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        
-        const ayer = new Date(hoy);
-        ayer.setDate(ayer.getDate() - 1);
-        
-        const semana = new Date(hoy);
-        semana.setDate(semana.getDate() - 7);
-        
-        const mes = new Date(hoy);
-        mes.setMonth(mes.getMonth() - 1);
-        
-        return pedidos.filter(p => {
-            const fechaPedido = new Date(p.created_at);
-            fechaPedido.setHours(0, 0, 0, 0);
-            
-            switch(rango) {
-                case 'hoy': return fechaPedido.getTime() === hoy.getTime();
-                case 'ayer': return fechaPedido.getTime() === ayer.getTime();
-                case 'semana': return fechaPedido >= semana;
-                case 'mes': return fechaPedido >= mes;
-                default: return true;
-            }
-        });
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const ayer = new Date(hoy);
+    ayer.setDate(ayer.getDate() - 1);
+    const semana = new Date(hoy);
+    semana.setDate(semana.getDate() - 7);
+    const mes = new Date(hoy);
+    mes.setMonth(mes.getMonth() - 1);
+    
+    switch(rango) {
+        case 'hoy':
+            return pedidos.filter(p => new Date(p.created_at) >= hoy);
+        case 'ayer':
+            return pedidos.filter(p => {
+                const fecha = new Date(p.created_at);
+                fecha.setHours(0, 0, 0, 0);
+                return fecha.getTime() === ayer.getTime();
+            });
+        case 'semana':
+            return pedidos.filter(p => new Date(p.created_at) >= semana);
+        case 'mes':
+            return pedidos.filter(p => new Date(p.created_at) >= mes);
+        default:
+            return pedidos;
     }
+}
 
     async function cargarPedidos() {
         const estado = document.getElementById('filtroEstado').value;
@@ -318,7 +319,7 @@
             
             if (!pedidos || pedidos.length === 0) {
                 document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos</div>';
-                actualizarStats(pedidos);
+                actualizarStats([]);
                 return;
             }
             
@@ -333,58 +334,47 @@
                 );
             }
             
-            pedidosCache = pedidos;
-            actualizarStats(pedidosCache);
+            actualizarStats(pedidos);
             
-            if (pedidosCache.length === 0) {
+            if (pedidos.length === 0) {
                 document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos con los filtros seleccionados</div>';
                 return;
             }
             
             let html = '';
-            pedidosCache.forEach(p => {
-                let estadoClass = '';
-                let estadoTexto = '';
-                
-                if (p.estado === 'nuevo' || p.estado === 'pendiente_pago') {
-                    estadoClass = 'estado-nuevo';
-                    estadoTexto = '🆕 Nuevo';
-                } else if (p.estado === 'pagado') {
-                    estadoClass = 'estado-pagado';
-                    estadoTexto = '✅ Pagado';
-                } else if (p.estado === 'enviado') {
-                    estadoClass = 'estado-enviado';
-                    estadoTexto = '🚚 Enviado';
-                } else if (p.estado === 'cancelado') {
-                    estadoClass = 'estado-cancelado';
-                    estadoTexto = '❌ Cancelado';
-                } else {
-                    estadoClass = 'estado-nuevo';
-                    estadoTexto = p.estado || 'Nuevo';
-                }
-                
-                const items = p.items ? (Array.isArray(p.items) ? p.items : JSON.parse(p.items)) : [];
+            pedidos.forEach(p => {
+                const estadoClass = p.estado === 'nuevo' ? 'estado-nuevo' : 
+                                (p.estado === 'pagado' ? 'estado-pagado' : 'estado-enviado');
+                const estadoTexto = p.estado === 'nuevo' ? '🆕 Nuevo' : 
+                                (p.estado === 'pagado' ? '✅ Pagado' : '🚚 Enviado');
+                const items = p.items || [];
                 const nombreCliente = p.cliente_nombre || p.cliente_numero;
+                const numeroPedido = p.numero_pedido || 'N/A';
                 
                 html += `
                     <div class="pedido-card">
                         <div class="pedido-header">
-                            <span><strong>📱 ${escapeHtml(nombreCliente)}</strong></span>
-                            <span class="estado-badge ${estadoClass}">${estadoTexto}</span>
+                            <div>
+                                <strong>📋 Pedido:</strong> 
+                                <span style="font-family: monospace; font-size: 12px;">${numeroPedido}</span>
+                            </div>
+                            <div>
+                                <strong>📱 ${escapeHtml(nombreCliente)}</strong>
+                                <span class="estado-badge ${estadoClass}" style="margin-left: 10px;">${estadoTexto}</span>
+                            </div>
                         </div>
+                        <div><strong>📞 Teléfono:</strong> ${p.cliente_numero}</div>
+                        <div><strong>🕒 Fecha:</strong> ${new Date(p.created_at).toLocaleString()}</div>
                         <div class="pedido-items">
                             <strong>🛒 Productos:</strong>
-                            <ul style="margin: 5px 0 0 20px;">
+                            <ul>
                                 ${items.map(i => `<li>${i.cantidad || 1}x ${escapeHtml(i.nombre)} - $${(i.precio * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
                             </ul>
                         </div>
                         <div><strong>💰 Total:</strong> $${p.total.toLocaleString()}</div>
-                        <div><strong>🕒 Fecha:</strong> ${new Date(p.created_at).toLocaleString()}</div>
                         <div class="pedido-actions">
                             <button class="btn-sm btn-detalle" onclick="verDetalle('${p.id}')">📋 Ver detalle</button>
                             <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${p.cliente_numero}')">💬 WhatsApp</button>
-                            ${p.estado === 'nuevo' || p.estado === 'pendiente_pago' ? `<button class="btn-sm btn-pagar" onclick="cambiarEstado('${p.id}', 'pagado')">✅ Marcar pagado</button>` : ''}
-                            ${p.estado === 'pagado' ? `<button class="btn-sm btn-enviar" onclick="cambiarEstado('${p.id}', 'enviado')">🚚 Marcar enviado</button>` : ''}
                         </div>
                     </div>
                 `;
@@ -406,34 +396,17 @@
         const mes = new Date(hoy);
         mes.setMonth(mes.getMonth() - 1);
         
-        const totalHoy = pedidos.filter(p => {
-            const fecha = new Date(p.created_at);
-            fecha.setHours(0, 0, 0, 0);
-            return fecha.getTime() === hoy.getTime();
-        }).length;
-        
-        const totalAyer = pedidos.filter(p => {
+        document.getElementById('totalHoy').innerText = pedidos.filter(p => new Date(p.created_at) >= hoy).length;
+        document.getElementById('totalAyer').innerText = pedidos.filter(p => {
             const fecha = new Date(p.created_at);
             fecha.setHours(0, 0, 0, 0);
             return fecha.getTime() === ayer.getTime();
         }).length;
-        
-        const totalSemana = pedidos.filter(p => {
-            const fecha = new Date(p.created_at);
-            return fecha >= semana;
-        }).length;
-        
-        const totalMes = pedidos.filter(p => {
-            const fecha = new Date(p.created_at);
-            return fecha >= mes;
-        }).length;
-        
-        document.getElementById('totalHoy').innerText = totalHoy;
-        document.getElementById('totalAyer').innerText = totalAyer;
-        document.getElementById('totalSemana').innerText = totalSemana;
-        document.getElementById('totalMes').innerText = totalMes;
+        document.getElementById('totalSemana').innerText = pedidos.filter(p => new Date(p.created_at) >= semana).length;
+        document.getElementById('totalMes').innerText = pedidos.filter(p => new Date(p.created_at) >= mes).length;
         document.getElementById('totalTodos').innerText = pedidos.length;
     }
+
 
     async function cambiarEstado(pedidoId, nuevoEstado) {
         if (!confirm(`¿Marcar este pedido como ${nuevoEstado}?`)) return;

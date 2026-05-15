@@ -1096,12 +1096,25 @@ def get_pedidos_tenant(tenant_id):
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
+                # Verificar si la tabla existe
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = %s AND table_name = 'pedidos'
+                    )
+                """, (tenant_id,))
+                if not cur.fetchone()[0]:
+                    return jsonify([])
+                
                 if estado == 'todos':
                     cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
                 else:
                     cur.execute("SELECT * FROM pedidos WHERE estado = %s ORDER BY created_at DESC", (estado,))
                 
                 rows = cur.fetchall()
+                if not rows:
+                    return jsonify([])
+                
                 columns = [desc[0] for desc in cur.description]
                 pedidos = []
                 for row in rows:
@@ -1113,11 +1126,12 @@ def get_pedidos_tenant(tenant_id):
                             pedido['items'] = []
                     pedidos.append(pedido)
                 
+                logger.info(f"Pedidos encontrados en {tenant_id}.pedidos: {len(pedidos)}")
                 return jsonify(pedidos)
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
         return jsonify([])
-
+    
 @app.route('/debug/agregar_columna_pedido/<tenant_id>', methods=['GET'])
 def agregar_columna_pedido(tenant_id):
     """Agrega la columna numero_pedido a la tabla pedidos del tenant"""

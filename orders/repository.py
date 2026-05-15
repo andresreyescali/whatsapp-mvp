@@ -67,6 +67,7 @@ class OrderRepository:
             
             tenant = tenant_repo.find_by_id(tenant_id)
             if not tenant:
+                logger.error(f"Tenant no encontrado: {tenant_id}")
                 return
             
             # Obtener email del dueño del negocio
@@ -80,7 +81,10 @@ class OrderRepository:
                     row = cur.fetchone()
                     if row:
                         email_to = row[0]
+                        logger.info(f"Enviando email de confirmación a {email_to} para pedido {numero_pedido}")
                         email_sender.enviar_confirmacion_pedido(email_to, tenant['nombre'], numero_pedido, items, total, cliente_numero)
+                    else:
+                        logger.error(f"No se encontró email del dueño para tenant {tenant_id}")
         except Exception as e:
             logger.error(f'Error enviando email de confirmación: {e}')
     
