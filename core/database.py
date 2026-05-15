@@ -1,6 +1,7 @@
 import psycopg
 from core.config import config
 from core.logger import logger
+from datetime import datetime
 
 class DatabaseManager:
     def __init__(self):
@@ -41,6 +42,28 @@ class DatabaseManager:
                 conn.close()
         logger.info('Todas las conexiones cerradas')
     
+    def generar_numero_pedido(self, tenant_id: str, secuencial: int) -> str:
+        """Genera número de pedido compuesto: ID_Negocio + Fecha + Hora + Secuencial"""
+        # Extraer el número del tenant (ej: tenant_6378bafe -> 6378BAFE)
+        tenant_num = tenant_id.replace('tenant_', '').replace('-', '').upper()
+        # Limitar a 8 caracteres
+        if len(tenant_num) > 8:
+            tenant_num = tenant_num[:8]
+        elif len(tenant_num) < 8:
+            tenant_num = tenant_num.ljust(8, '0')
+        
+        # Fecha y hora: YYYYMMDDHHMMSS
+        ahora = datetime.now()
+        fecha_hora = ahora.strftime('%Y%m%d%H%M%S')
+        
+        # Secuencial con 4 dígitos
+        sec = str(secuencial).zfill(4)
+        
+        # Formato: ID_Negocio(8) + FechaHora(14) + Secuencial(4) = 26 caracteres
+        numero_pedido = f"{tenant_num}{fecha_hora}{sec}"
+        
+        return numero_pedido
+    
     def init_global_tables(self):
         """Inicializa tablas globales con manejo de errores"""
         logger.info('Inicializando tablas globales...')
@@ -63,8 +86,7 @@ class DatabaseManager:
                         activo BOOLEAN DEFAULT true
                     )
                     ''')
-                
-
+                    
                     # Tabla de usuarios
                     cur.execute('''
                     CREATE TABLE IF NOT EXISTS public.usuarios (
@@ -207,8 +229,21 @@ class DatabaseManager:
                         notas TEXT
                     );
                     ''')
-
-                    # Tabla de carritos temporales
+                    
+                    # Tabla de conversaciones IA
+                    cur.execute('''
+                    CREATE TABLE IF NOT EXISTS public.conversaciones_ia (
+                        id SERIAL PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        cliente_numero TEXT NOT NULL,
+                        mensaje TEXT NOT NULL,
+                        respuesta TEXT,
+                        tipo VARCHAR(20) DEFAULT 'cliente',
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                    ''')
+                    
+                    # Tabla de carritos
                     cur.execute('''
                     CREATE TABLE IF NOT EXISTS public.carritos (
                         id SERIAL PRIMARY KEY,
@@ -221,45 +256,13 @@ class DatabaseManager:
                     );
                     ''')
                     
-                    # ========== NUEVA TABLA: CONVERSACIONES ==========
-                    cur.execute('''
-                    CREATE TABLE IF NOT EXISTS public.conversaciones (
-                        id SERIAL PRIMARY KEY,
-                        tenant_id TEXT NOT NULL,
-                        cliente_numero TEXT NOT NULL,
-                        mensaje TEXT NOT NULL,
-                        respuesta TEXT,
-                        tipo VARCHAR(50) DEFAULT 'cliente',
-                        created_at TIMESTAMP DEFAULT NOW()
-                    );
-                    ''')
-                    
-                    # Tabla de conversaciones de IA
-                    cur.execute('''
-                    CREATE TABLE IF NOT EXISTS public.conversaciones_ia (
-                        id SERIAL PRIMARY KEY,
-                        tenant_id TEXT NOT NULL,
-                        cliente_numero TEXT NOT NULL,
-                        mensaje TEXT NOT NULL,
-                        respuesta TEXT,
-                        tipo VARCHAR(20) DEFAULT 'cliente',
-                        created_at TIMESTAMP DEFAULT NOW()
-                    );
-                    ''')
-
-                    
-
-
-
                     # Índices
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_tenants_phone_id ON public.tenants(phone_id)')
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_usuario_negocio_usuario ON public.usuario_negocio(usuario_id)')
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_usuario_negocio_tenant ON public.usuario_negocio(tenant_id)')
-                    cur.execute('CREATE INDEX IF NOT EXISTS idx_conversaciones_tenant ON public.conversaciones(tenant_id)')
-                    cur.execute('CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON public.conversaciones(cliente_numero)')
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_conversaciones_tenant ON public.conversaciones_ia(tenant_id)')
                     cur.execute('CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON public.conversaciones_ia(cliente_numero)')
-
+                    
                 conn.commit()
             
             logger.info('Tablas globales listas')
