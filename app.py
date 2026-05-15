@@ -756,10 +756,11 @@ def panel_cliente(tenant_id):
 @login_required
 @tenant_owner_required
 def get_pedidos_tenant(tenant_id):
-    """Obtiene pedidos del tenant"""
+    """Obtiene pedidos del tenant desde el esquema del tenant"""
     estado = request.args.get('estado', 'todos')
     
     try:
+        # Usar conexión específica del tenant
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
                 if estado == 'todos':
@@ -777,9 +778,6 @@ def get_pedidos_tenant(tenant_id):
                             pedido['items'] = json.loads(pedido['items'])
                         except:
                             pedido['items'] = []
-                    # Si no hay cliente_nombre, usar el número
-                    if not pedido.get('cliente_nombre'):
-                        pedido['cliente_nombre'] = pedido.get('cliente_numero', 'Desconocido')
                     pedidos.append(pedido)
                 
                 logger.info(f"Pedidos encontrados en {tenant_id}.pedidos: {len(pedidos)}")
@@ -787,7 +785,7 @@ def get_pedidos_tenant(tenant_id):
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
         return jsonify([])
-                
+                    
 @app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
 @login_required
 def cambiar_estado_pedido(pedido_id):
@@ -1120,6 +1118,58 @@ def debug_pedidos(tenant_id):
         resultado['error_public'] = str(e)
     return jsonify(resultado)
 
+@app.route('/api/tenant/<tenant_id>/pedidos', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_pedidos_tenant(tenant_id):
+    """Obtiene pedidos del tenant desde el esquema del tenant"""
+    estado = request.args.get('estado', 'todos')
+    
+    try:
+        # Usar conexión específica del tenant
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                if estado == 'todos':
+                    cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
+                else:
+                    cur.execute("SELECT * FROM pedidos WHERE estado = %s ORDER BY created_at DESC", (estado,))
+                
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+                pedidos = []
+                for row in rows:
+                    pedido = dict(zip(columns, row))
+                    if pedido.get('items') and isinstance(pedido['items'], str):
+                        try:
+                            pedido['items'] = json.loads(pedido['items'])
+                        except:
+                            pedido['items'] = []
+                    pedidos.append(pedido)
+                
+                logger.info(f"Pedidos encontrados en {tenant_id}.pedidos: {len(pedidos)}")
+                return jsonify(pedidos)
+    except Exception as e:
+        logger.error(f'Error cargando pedidos: {e}')
+        return jsonify([])
+    
+@app.route('/debug/pedidos_tenant/<tenant_id>', methods=['GET'])
+def debug_pedidos_tenant(tenant_id):
+    """Muestra los pedidos directamente desde el esquema del tenant"""
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+                pedidos = [dict(zip(columns, row)) for row in rows]
+                return jsonify({
+                    'total': len(pedidos),
+                    'pedidos': pedidos,
+                    'tenant_id': tenant_id
+                })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/debug/ver_pedidos/<tenant_id>', methods=['GET'])
 def debug_ver_pedidos(tenant_id):
     """Diagnóstico para ver dónde están los pedidos"""
@@ -1165,6 +1215,43 @@ def debug_ver_pedidos(tenant_id):
     except Exception as e:
         resultado['error_tabla'] = str(e)
     return jsonify(resultado)
+
+@app.route('/debug/crear_pedido_tenant/<tenant_id>', methods=['GET'])
+def crear_pedido_tenant(tenant_id):
+    """Crea un pedido de prueba directamente en el esquema del tenant"""
+    import uuid
+    import json
+    from datetime import datetime
+    
+    pedido_id = str(uuid.uuid4())
+    items = [{"nombre": "Brownie Test", "precio": 5000, "cantidad": 2}]
+    total = 10000
+    numero_pedido = f"TEST{datetime.now().strftime('%Y%m%d%H%M%S')}0001"
+    
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                # Verificar si la tabla existe
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS pedidos (
+                        id TEXT PRIMARY KEY,
+                        cliente_numero TEXT,
+                        items JSONB,
+                        total INTEGER,
+                        estado TEXT DEFAULT 'nuevo',
+                        numero_pedido TEXT,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+                
+                cur.execute("""
+                    INSERT INTO pedidos (id, cliente_numero, items, total, estado, numero_pedido)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (pedido_id, "573155692656", json.dumps(items), total, "nuevo", numero_pedido))
+            conn.commit()
+        return jsonify({'success': True, 'pedido_id': pedido_id, 'numero_pedido': numero_pedido})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/debug/crear_pedido_prueba/<tenant_id>', methods=['GET'])
 def crear_pedido_prueba(tenant_id):
