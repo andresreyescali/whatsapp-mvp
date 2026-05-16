@@ -383,7 +383,7 @@ class MessageHandler:
             return self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)
         
         # 6. Respuesta con IA
-        historial = self._get_historial_conversacion(tenant['id'], numero, 5)
+        historial = self._get_historial_conversacion(tenant['id'], numero, 100)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
         if contexto.get('prompt_personalizado'):
