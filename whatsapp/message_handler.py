@@ -67,6 +67,55 @@ class MessageHandler:
         except Exception as e:
             logger.error(f'Error obteniendo contexto para {tenant_id}: {e}')
             return {}
+    def _extraer_datos_cliente(self, texto: str) -> dict:
+        """Extrae datos del cliente del mensaje (nombre, cédula, teléfono, dirección, fecha)"""
+        import re
+        texto_lower = texto.lower()
+        datos = {}
+        
+        # Patrones de búsqueda
+        patrones = {
+            'nombre': r'(?:soy|me llamo|mi nombre es|nombre:?)\s*([A-Za-záéíóúñ\s]+?)(?:\s*(?:y|,|cc|tel|$))',
+            'cc': r'(?:cédula|cedula|cc|identificación|documento:?)\s*(\d{5,12})',
+            'telefono': r'(?:tel|teléfono|telefono|cel|whatsapp:?)\s*(\d{7,15})',
+            'email': r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+            'direccion': r'(?:dirección|direccion|vivo en|mi dirección es:?)\s*([^,.]+(?:[,.][^,.]+)?)',
+            'fecha_entrega': r'(?:para|entregar|recoger|para el|el día)\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+de\s+[a-z]+\s+del?\s+\d{2,4}|mañana|hoy|pasado mañana)',
+            'hora_entrega': r'(?:a las|a la|alas|a las)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)?)',
+            'recojo_en_tienda': r'(?:recojo|recoger|retiro|retirar)\s*(?:en la tienda|en tienda|local)',
+            'pago_contraentrega': r'(?:pago\s+contra\s+entrega|contraentrega|pago\s+en\s+efectivo|efectivo|transferencia)'
+        }
+        
+        for campo, patron in patrones.items():
+            match = re.search(patron, texto, re.IGNORECASE)
+            if match:
+                datos[campo] = match.group(1).strip() if match.groups() else True
+        
+        return datos
+
+    def _formatear_datos_cliente(self, datos: dict) -> str:
+        """Formatea los datos del cliente para confirmación"""
+        texto = ""
+        if datos.get('nombre'):
+            texto += f"📝 **Nombre:** {datos['nombre']}\n"
+        if datos.get('cc'):
+            texto += f"🆔 **Cédula:** {datos['cc']}\n"
+        if datos.get('telefono'):
+            texto += f"📞 **Teléfono:** {datos['telefono']}\n"
+        if datos.get('email'):
+            texto += f"📧 **Email:** {datos['email']}\n"
+        if datos.get('direccion'):
+            texto += f"📍 **Dirección:** {datos['direccion']}\n"
+        if datos.get('fecha_entrega'):
+            texto += f"📅 **Fecha de entrega:** {datos['fecha_entrega']}\n"
+        if datos.get('hora_entrega'):
+            texto += f"⏰ **Hora:** {datos['hora_entrega']}\n"
+        if datos.get('recojo_en_tienda'):
+            texto += f"🏪 **Recojo en tienda**\n"
+        if datos.get('pago_contraentrega'):
+            texto += f"💰 **Pago:** Contraentrega / Efectivo\n"
+        
+        return texto
 
     def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
         """Guarda la conversación en el esquema del tenant"""
@@ -281,66 +330,143 @@ class MessageHandler:
 {items_texto}
 **Total:** ${total:,.0f}"""
 
+    def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
+        """Obtiene un cliente existente o lo crea con los datos proporcionados"""
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    # Buscar cliente por teléfono
+                    cur.execute(f"SELECT id, nombre, cc, email, direccion FROM {tenant_id}.clientes WHERE numero_telefono = %s", (numero,))
+                    row = cur.fetchone()
+                    
+                    if row:
+                        cliente_id = row[0]
+                        # Actualizar datos faltantes
+                        if datos_cliente:
+                            updates = []
+                            params = []
+                            if datos_cliente.get('nombre') and not row[1]:
+                                updates.append("nombre = %s")
+                                params.append(datos_cliente['nombre'])
+                            if datos_cliente.get('cc') and not row[2]:
+                                updates.append("cc = %s")
+                                params.append(datos_cliente['cc'])
+                            if datos_cliente.get('email') and not row[3]:
+                                updates.append("email = %s")
+                                params.append(datos_cliente['email'])
+                            if updates:
+                                params.append(cliente_id)
+                                cur.execute(f"UPDATE {tenant_id}.clientes SET {', '.join(updates)}, updated_at = NOW() WHERE id = %s", params)
+                                conn.commit()
+                        return cliente_id
+                    else:
+                        # Crear nuevo cliente
+                        cliente_id = str(uuid.uuid4())
+                        cur.execute(f"""
+                            INSERT INTO {tenant_id}.clientes (id, numero_telefono, nombre, cc, email, direccion, direccion_despacho)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            cliente_id, numero,
+                            datos_cliente.get('nombre') if datos_cliente else None,
+                            datos_cliente.get('cc') if datos_cliente else None,
+                            datos_cliente.get('email') if datos_cliente else None,
+                            datos_cliente.get('direccion') if datos_cliente else None,
+                            datos_cliente.get('direccion_despacho') if datos_cliente else None
+                        ))
+                        conn.commit()
+                        return cliente_id
+        except Exception as e:
+            logger.error(f'Error gestionando cliente: {e}')
+            return None
+
     def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
-            """Finaliza el pedido y genera link de pago"""
-            if not carrito or not carrito.get('items'):
-                return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
-            
-            pedido_id = str(uuid.uuid4())
-            items = carrito['items']
-            total = carrito['total']
-            
-            # Obtener secuencial
+        """Finaliza el pedido, guarda datos del cliente y genera link de pago"""
+        if not carrito or not carrito.get('items'):
+            return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
+        
+        # Obtener datos del cliente guardados previamente
+        datos_cliente = self._datos_cliente.get(numero, {})
+        
+        # Obtener o crear cliente en la base de datos
+        cliente_id = self._obtener_o_crear_cliente(tenant['id'], numero, datos_cliente)
+        if not cliente_id:
+            return "❌ Hubo un error con tus datos. Por favor intenta de nuevo."
+        
+        pedido_id = str(uuid.uuid4())
+        items = carrito['items']
+        total = carrito['total']
+        
+        # Obtener secuencial para número de pedido
+        with db_manager.get_connection(tenant['id']) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant['id']}.pedidos")
+                secuencial = cur.fetchone()[0]
+        
+        numero_pedido = db_manager.generar_numero_pedido(tenant['id'], secuencial)
+        
+        # Preparar dirección de entrega
+        direccion_entrega = datos_cliente.get('direccion', '')
+        if datos_cliente.get('recojo_en_tienda'):
+            direccion_entrega = "Recojo en tienda"
+        
+        try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
-                    # Asegurar que las columnas existen
-                    try:
-                        cur.execute(f"ALTER TABLE {tenant['id']}.pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT")
-                        cur.execute(f"ALTER TABLE {tenant['id']}.pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER")
-                    except:
-                        pass
+                    cur.execute(f"""
+                        INSERT INTO {tenant['id']}.pedidos 
+                        (id, cliente_id, numero_pedido, items, total, estado, direccion_entrega, notas)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        pedido_id, cliente_id, numero_pedido, json.dumps(items), 
+                        total, "nuevo", direccion_entrega, 
+                        f"Fecha entrega: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()
+                    ))
+                conn.commit()
+            
+            # Limpiar carrito y datos del cliente
+            self._guardar_carrito(tenant['id'], numero, [], 0)
+            if numero in self._datos_cliente:
+                del self._datos_cliente[numero]
+            
+            link_pago = generar_link_pago(total, pedido_id)
+            
+            # Formatear items para el mensaje
+            items_texto = ""
+            for item in items:
+                subtotal = item['precio'] * item['cantidad']
+                items_texto += f"• {item['cantidad']}x {item['nombre']}: ${subtotal:,.0f}\n"
+            
+            # Formatear datos del cliente para confirmación
+            datos_texto = ""
+            if datos_cliente.get('nombre'):
+                datos_texto += f"\n📝 **Cliente:** {datos_cliente['nombre']}"
+            if datos_cliente.get('cc'):
+                datos_texto += f"\n🆔 **Cédula:** {datos_cliente['cc']}"
+            if datos_cliente.get('telefono'):
+                datos_texto += f"\n📞 **Teléfono:** {datos_cliente['telefono']}"
+            if datos_cliente.get('email'):
+                datos_texto += f"\n📧 **Email:** {datos_cliente['email']}"
+            if direccion_entrega:
+                datos_texto += f"\n📍 **Entrega:** {direccion_entrega}"
+            if datos_cliente.get('fecha_entrega'):
+                datos_texto += f"\n📅 **Fecha:** {datos_cliente['fecha_entrega']}"
+            if datos_cliente.get('hora_entrega'):
+                datos_texto += f"\n⏰ **Hora:** {datos_cliente['hora_entrega']}"
+            
+            return f"""✅ **¡Pedido #{numero_pedido} confirmado!**{datos_texto}
+
+    📋 **Productos:**
+    {items_texto}
+    💰 **Total:** ${total:,.0f}
+
+    🔗 **Link de pago:** {link_pago}
+
+    📌 Cuando completes el pago, avísame para empezar a preparar tu pedido."""
+                
+        except Exception as e:
+            logger.error(f'Error creando pedido: {e}')
+            return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
                     
-                    cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant['id']}.pedidos")
-                    secuencial = cur.fetchone()[0]
-            
-            numero_pedido = db_manager.generar_numero_pedido(tenant['id'], secuencial)
-            
-            try:
-                with db_manager.get_connection(tenant['id']) as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(f"""
-                            INSERT INTO {tenant['id']}.pedidos (id, cliente_numero, items, total, estado, numero_pedido, secuencial)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """, (pedido_id, numero, json.dumps(items), total, "nuevo", numero_pedido, secuencial))
-                    conn.commit()
-                
-                # Limpiar carrito
-                self._guardar_carrito(tenant['id'], numero, [], 0)
-                
-                link_pago = generar_link_pago(total, pedido_id)
-                
-                items_texto = ""
-                for item in items:
-                    subtotal = item['precio'] * item['cantidad']
-                    items_texto += f"• {item['cantidad']}x {item['nombre']}: ${subtotal:,.0f}\n"
-                
-                # Enviar email de confirmación
-                from orders.repository import order_repo
-                order_repo._enviar_email_confirmacion(tenant['id'], numero_pedido, items, total, numero)
-                
-                return f"""✅ **¡Pedido listo!**
-
-        {items_texto}
-        **Total a pagar:** ${total:,.0f}
-
-        🔗 **Link de pago:** {link_pago}
-
-        Cuando completes el pago, avísame para empezar a preparar tu pedido."""
-                    
-            except Exception as e:
-                logger.error(f'Error creando pedido: {e}')
-                return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
-            
         # ==================== RESPUESTA PRINCIPAL CON IA ====================
 
     def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
@@ -407,7 +533,35 @@ class MessageHandler:
             nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
             return self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)
         
-        # 6. Respuesta con IA
+        # En _responder_con_ia, después de la detección de productos y antes de la IA
+
+        # 6. DETECTAR DATOS DEL CLIENTE (prioridad alta)
+        datos_cliente = self._extraer_datos_cliente(texto)
+        if datos_cliente and any(datos_cliente.values()):
+            # Guardar datos en el carrito o en sesión
+            if numero not in self._datos_cliente:
+                self._datos_cliente[numero] = {}
+            self._datos_cliente[numero].update(datos_cliente)
+            
+            # Verificar si ya tenemos todos los datos necesarios
+            datos_actuales = self._datos_cliente.get(numero, {})
+            
+            # Si ya tenemos productos en el carrito, preguntar si confirma
+            if carrito_actual.get('items'):
+                datos_formateados = self._formatear_datos_cliente(datos_actuales)
+                return f"""📋 **He registrado tus datos:**
+
+        {datos_formateados}
+
+        ✅ **Tu pedido está listo para confirmar.**
+
+        ¿Confirmas el pedido con estos datos?"""
+            else:
+                # Primero pedir que agregue productos
+                return "He registrado tus datos. ¿Qué productos deseas ordenar?"
+            
+
+        # 7. Respuesta con IA
         historial = self._get_historial_conversacion(tenant['id'], numero, 100)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
