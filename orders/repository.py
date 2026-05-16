@@ -140,35 +140,43 @@ class OrderRepository:
             return []
     
     def marcar_pagado(self, tenant_id: str, cliente_numero: str) -> int:
-        """Marca pedidos como pagados y envía email"""
-        try:
-            with db_manager.get_connection(tenant_id) as conn:
-                with conn.cursor() as cur:
-                    # Obtener el pedido antes de actualizar
-                    cur.execute(f"""
-                        SELECT numero_pedido FROM {tenant_id}.pedidos
-                        WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
-                        ORDER BY created_at DESC LIMIT 1
-                    """, (cliente_numero,))
-                    row = cur.fetchone()
-                    numero_pedido = row[0] if row else None
-                    
-                    cur.execute(f"""
-                        UPDATE {tenant_id}.pedidos
-                        SET estado = 'pagado', pagado_at = NOW()
-                        WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
-                    """, (cliente_numero,))
-                    updated = cur.rowcount
-                conn.commit()
+    """Marca pedidos como pagados y envía email"""
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                # Asegurar que la columna numero_pedido existe
+                try:
+                    cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT")
+                    cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER")
+                    cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS pagado_at TIMESTAMP")
+                except Exception as e:
+                    logger.warning(f"Error agregando columnas (puede que ya existan): {e}")
+                
+                # Obtener el pedido antes de actualizar
+                cur.execute(f"""
+                    SELECT numero_pedido FROM {tenant_id}.pedidos
+                    WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
+                    ORDER BY created_at DESC LIMIT 1
+                """, (cliente_numero,))
+                row = cur.fetchone()
+                numero_pedido = row[0] if row else None
+                
+                cur.execute(f"""
+                    UPDATE {tenant_id}.pedidos
+                    SET estado = 'pagado', pagado_at = NOW()
+                    WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
+                """, (cliente_numero,))
+                updated = cur.rowcount
+            conn.commit()
+        
+        if updated > 0 and numero_pedido:
+            self._enviar_email_actualizacion(tenant_id, numero_pedido, 'pagado')
+            logger.info(f'{updated} pedido(s) marcado(s) como pagado para {cliente_numero}')
+        return updated
+    except Exception as e:
+        logger.error(f'Error marcando pedido como pagado: {e}')
+        raise
             
-            if updated > 0 and numero_pedido:
-                self._enviar_email_actualizacion(tenant_id, numero_pedido, 'pagado')
-                logger.info(f'{updated} pedido(s) marcado(s) como pagado para {cliente_numero}')
-            return updated
-        except Exception as e:
-            logger.error(f'Error marcando pedido como pagado: {e}')
-            raise
-    
     def actualizar_estado(self, tenant_id: str, pedido_id: str, nuevo_estado: str) -> bool:
         """Actualiza el estado de un pedido específico y envía email"""
         try:
