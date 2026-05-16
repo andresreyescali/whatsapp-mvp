@@ -1473,6 +1473,67 @@ def debug_ver_tablas(tenant_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/migrar_todos_tenants', methods=['GET'])
+def migrar_todos_tenants():
+    """Migra todos los tenants existentes al nuevo esquema"""
+    if session.get('rol_sistema') != 'super_admin':
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    tenants = tenant_repo.get_all()
+    resultados = []
+    
+    for tenant in tenants:
+        tenant_id = tenant['id']
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    # Crear tabla de clientes si no existe
+                    cur.execute(f'''
+                    CREATE TABLE IF NOT EXISTS {tenant_id}.clientes (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        numero_telefono TEXT UNIQUE NOT NULL,
+                        nombre TEXT,
+                        cc TEXT,
+                        email TEXT,
+                        direccion TEXT,
+                        direccion_despacho TEXT,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    )
+                    ''')
+                    
+                    # Agregar columna cliente_id a pedidos
+                    cur.execute(f'''
+                    DO $$ 
+                    BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' AND table_name = 'pedidos' AND column_name = 'cliente_id') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN cliente_id UUID REFERENCES {tenant_id}.clientes(id);
+                        END IF;
+                    END $$;
+                    ''')
+                    
+                    # Agregar columna numero_pedido si no existe
+                    cur.execute(f'''
+                    DO $$ 
+                    BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' AND table_name = 'pedidos' AND column_name = 'numero_pedido') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN numero_pedido TEXT;
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN secuencial INTEGER;
+                        END IF;
+                    END $$;
+                    ''')
+                    
+                    conn.commit()
+                    resultados.append({'tenant': tenant_id, 'status': 'ok'})
+        except Exception as e:
+            resultados.append({'tenant': tenant_id, 'status': 'error', 'error': str(e)})
+        except Exception as e:
+            resultados.append({'tenant': tenant_id, 'status': 'error', 'error': str(e)})
+    
+    return jsonify({'resultados': resultados, 'total': len(tenants)})
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)

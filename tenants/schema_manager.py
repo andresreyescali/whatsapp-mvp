@@ -6,46 +6,75 @@ class SchemaManager:
     """Gestiona esquemas y tablas de tenants"""
     
     def create_tenant_schema(self, tenant_id: str, tipo_negocio: str):
-        """Crea schema y tablas para un nuevo tenant"""
-        logger.info(f'Creando schema para tenant {tenant_id} (tipo: {tipo_negocio})')
-        
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                # Crear schema
-                cur.execute(f'CREATE SCHEMA IF NOT EXISTS {tenant_id}')
-                
-                # Tabla de productos
-                cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {tenant_id}.productos (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    nombre TEXT NOT NULL,
-                    descripcion TEXT,
-                    precio INTEGER NOT NULL,
-                    categoria TEXT,
-                    disponible BOOLEAN DEFAULT true,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-                ''')
-                
-                # Tabla de pedidos
-                cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {tenant_id}.pedidos (
-                    id TEXT PRIMARY KEY,
-                    cliente_numero TEXT,
-                    items JSONB,
-                    total INTEGER,
-                    estado TEXT DEFAULT 'pendiente_pago',
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-                ''')
-                
-                # Insertar menú de ejemplo
-                self._insert_default_menu(cur, tenant_id, tipo_negocio)
-                
-            conn.commit()
-        
-        logger.info(f'Schema creado exitosamente para {tenant_id}')
-    
+            """Crea schema y tablas para un nuevo tenant (versión completa)"""
+            logger.info(f'Creando schema para tenant {tenant_id} (tipo: {tipo_negocio})')
+            
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    # 1. Crear el esquema
+                    cur.execute(f'CREATE SCHEMA IF NOT EXISTS {tenant_id}')
+                    
+                    # 2. Tabla de clientes
+                    cur.execute(f'''
+                    CREATE TABLE IF NOT EXISTS {tenant_id}.clientes (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        numero_telefono TEXT UNIQUE NOT NULL,
+                        nombre TEXT,
+                        cc TEXT,
+                        email TEXT,
+                        direccion TEXT,
+                        direccion_despacho TEXT,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        ultimo_pedido TIMESTAMP
+                    )
+                    ''')
+                    
+                    # 3. Tabla de productos (menú)
+                    cur.execute(f'''
+                    CREATE TABLE IF NOT EXISTS {tenant_id}.productos (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        nombre TEXT NOT NULL,
+                        descripcion TEXT,
+                        precio INTEGER NOT NULL,
+                        categoria TEXT,
+                        disponible BOOLEAN DEFAULT true,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                    ''')
+                    
+                    # 4. Tabla de pedidos (con referencia a cliente)
+                    cur.execute(f'''
+                    CREATE TABLE IF NOT EXISTS {tenant_id}.pedidos (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+                        numero_pedido TEXT UNIQUE,
+                        items JSONB NOT NULL,
+                        total INTEGER NOT NULL,
+                        estado VARCHAR(50) DEFAULT 'nuevo',
+                        direccion_entrega TEXT,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        pagado_at TIMESTAMP,
+                        enviado_at TIMESTAMP,
+                        cancelado_at TIMESTAMP,
+                        notas TEXT
+                    )
+                    ''')
+                    
+                    # 5. Índices para búsqueda rápida
+                    cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON {tenant_id}.pedidos(cliente_id)')
+                    cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON {tenant_id}.pedidos(estado)')
+                    cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_created ON {tenant_id}.pedidos(created_at DESC)')
+                    cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON {tenant_id}.clientes(numero_telefono)')
+                    
+                    # 6. Insertar menú de ejemplo
+                    self._insert_default_menu(cur, tenant_id, tipo_negocio)
+                    
+                conn.commit()
+            
+            logger.info(f'Schema creado exitosamente para {tenant_id}')
+
     def _insert_default_menu(self, cursor, tenant_id: str, tipo_negocio: str):
         """Inserta menú de ejemplo según tipo de negocio"""
         
