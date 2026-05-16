@@ -69,18 +69,33 @@ class MessageHandler:
             return {}
 
     def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
-        """Guarda la conversación en la base de datos"""
+        """Guarda la conversación en el esquema del tenant"""
         try:
-            with db_manager.get_connection() as conn:
+            with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("""
-                        INSERT INTO public.conversaciones_ia (tenant_id, cliente_numero, mensaje, respuesta)
-                        VALUES (%s, %s, %s, %s)
-                    """, (tenant_id, cliente_numero, mensaje, respuesta))
+                    # Verificar si la tabla existe, si no, crearla
+                    cur.execute(f"""
+                        CREATE TABLE IF NOT EXISTS {tenant_id}.conversaciones (
+                            id SERIAL PRIMARY KEY,
+                            cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+                            cliente_numero TEXT NOT NULL,
+                            mensaje TEXT NOT NULL,
+                            respuesta TEXT,
+                            tipo VARCHAR(20) DEFAULT 'cliente',
+                            created_at TIMESTAMP DEFAULT NOW()
+                        )
+                    """)
+                    
+                    # Insertar conversación
+                    cur.execute(f"""
+                        INSERT INTO {tenant_id}.conversaciones (cliente_numero, mensaje, respuesta)
+                        VALUES (%s, %s, %s)
+                    """, (cliente_numero, mensaje, respuesta))
                 conn.commit()
+                logger.info(f"Conversación guardada en {tenant_id}.conversaciones")
         except Exception as e:
             logger.error(f'Error guardando conversación: {e}')
-
+            
     # ==================== MÉTODOS DEL CARRITO ====================
 
     def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
@@ -145,23 +160,33 @@ class MessageHandler:
     # ==================== MÉTODOS DEL HISTORIAL ====================
 
     def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
-        """Obtiene el historial de conversación con el cliente"""
+        """Obtiene el historial de conversación desde el esquema del tenant"""
         try:
-            with db_manager.get_connection() as conn:
+            with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("""
+                    # Verificar si la tabla existe
+                    cur.execute(f"""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables 
+                            WHERE table_schema = %s AND table_name = 'conversaciones'
+                        )
+                    """, (tenant_id,))
+                    if not cur.fetchone()[0]:
+                        return []
+                    
+                    cur.execute(f"""
                         SELECT mensaje, respuesta, created_at 
-                        FROM public.conversaciones_ia 
-                        WHERE tenant_id = %s AND cliente_numero = %s 
+                        FROM {tenant_id}.conversaciones 
+                        WHERE cliente_numero = %s 
                         ORDER BY created_at DESC 
                         LIMIT %s
-                    """, (tenant_id, cliente_numero, limit))
+                    """, (cliente_numero, limit))
                     rows = cur.fetchall()
                     return list(reversed(rows))
         except Exception as e:
             logger.error(f'Error obteniendo historial: {e}')
             return []
-
+        
     def _formatear_historial_para_prompt(self, historial: list) -> str:
         """Formatea el historial para incluirlo en el prompt de IA"""
         if not historial:
