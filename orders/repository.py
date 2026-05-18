@@ -6,16 +6,25 @@ from core.logger import logger
 class OrderRepository:
     """Gestión de pedidos por tenant"""
     
+    def _get_schema_name(self, tenant_id: str) -> str:
+        """Obtiene el schema_name de un tenant"""
+        from tenants.repository import tenant_repo
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if tenant and tenant.get('schema_name'):
+            return tenant['schema_name']
+        return f"tenant_{tenant_id.replace('-', '_')}"
+    
     def create(self, tenant_id: str, cliente_numero: str, producto_nombre: str, precio: int, cantidad: int = 1) -> dict:
         """Crea un nuevo pedido con número compuesto"""
         pedido_id = str(uuid.uuid4())
+        schema_name = self._get_schema_name(tenant_id)
         
         # Asegurar que las columnas existen
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
                 try:
-                    cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT")
-                    cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER")
+                    cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT')
+                    cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER')
                     conn.commit()
                 except Exception as e:
                     logger.warning(f'Error agregando columnas (puede que ya existan): {e}')
@@ -23,7 +32,7 @@ class OrderRepository:
         # Obtener el siguiente secuencial
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant_id}.pedidos")
+                cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
                 secuencial = cur.fetchone()[0]
         
         # Generar número compuesto
@@ -36,7 +45,7 @@ class OrderRepository:
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        INSERT INTO {tenant_id}.pedidos (id, cliente_numero, items, total, estado, numero_pedido, secuencial)
+                        INSERT INTO "{schema_name}".pedidos (id, cliente_numero, items, total, estado, numero_pedido, secuencial)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """, (pedido_id, cliente_numero, json.dumps(items), total, "nuevo", numero_pedido, secuencial))
                 conn.commit()
@@ -116,10 +125,11 @@ class OrderRepository:
     def get_pendientes(self, tenant_id: str, cliente_numero: str):
         """Obtiene pedidos pendientes del cliente (nuevos o pendiente_pago)"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        SELECT * FROM {tenant_id}.pedidos
+                        SELECT * FROM "{schema_name}".pedidos
                         WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
                         ORDER BY created_at DESC
                     """, (cliente_numero,))
@@ -142,19 +152,20 @@ class OrderRepository:
     def marcar_pagado(self, tenant_id: str, cliente_numero: str) -> int:
         """Marca pedidos como pagados y envía email"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Asegurar que la columna numero_pedido existe
+                    # Asegurar que las columnas existen
                     try:
-                        cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT")
-                        cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER")
-                        cur.execute(f"ALTER TABLE {tenant_id}.pedidos ADD COLUMN IF NOT EXISTS pagado_at TIMESTAMP")
+                        cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT')
+                        cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER')
+                        cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN IF NOT EXISTS pagado_at TIMESTAMP')
                     except Exception as e:
                         logger.warning(f"Error agregando columnas (puede que ya existan): {e}")
                     
                     # Obtener el pedido antes de actualizar
                     cur.execute(f"""
-                        SELECT numero_pedido FROM {tenant_id}.pedidos
+                        SELECT numero_pedido FROM "{schema_name}".pedidos
                         WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
                         ORDER BY created_at DESC LIMIT 1
                     """, (cliente_numero,))
@@ -162,7 +173,7 @@ class OrderRepository:
                     numero_pedido = row[0] if row else None
                     
                     cur.execute(f"""
-                        UPDATE {tenant_id}.pedidos
+                        UPDATE "{schema_name}".pedidos
                         SET estado = 'pagado', pagado_at = NOW()
                         WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
                     """, (cliente_numero,))
@@ -180,10 +191,11 @@ class OrderRepository:
     def actualizar_estado(self, tenant_id: str, pedido_id: str, nuevo_estado: str) -> bool:
         """Actualiza el estado de un pedido específico y envía email"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     # Obtener número de pedido antes de actualizar
-                    cur.execute(f"SELECT numero_pedido FROM {tenant_id}.pedidos WHERE id = %s", (pedido_id,))
+                    cur.execute(f'SELECT numero_pedido FROM "{schema_name}".pedidos WHERE id = %s', (pedido_id,))
                     row = cur.fetchone()
                     numero_pedido = row[0] if row else None
                     
@@ -195,13 +207,13 @@ class OrderRepository:
                     
                     if fecha_campo:
                         cur.execute(f"""
-                            UPDATE {tenant_id}.pedidos 
+                            UPDATE "{schema_name}".pedidos 
                             SET estado = %s, updated_at = NOW(), {fecha_campo} = NOW()
                             WHERE id = %s
                         """, (nuevo_estado, pedido_id))
                     else:
                         cur.execute(f"""
-                            UPDATE {tenant_id}.pedidos 
+                            UPDATE "{schema_name}".pedidos 
                             SET estado = %s, updated_at = NOW()
                             WHERE id = %s
                         """, (nuevo_estado, pedido_id))
@@ -220,10 +232,11 @@ class OrderRepository:
     def get_all(self, tenant_id: str, limit: int = 100):
         """Obtiene todos los pedidos del tenant"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        SELECT * FROM {tenant_id}.pedidos
+                        SELECT * FROM "{schema_name}".pedidos
                         ORDER BY created_at DESC
                         LIMIT %s
                     """, (limit,))
@@ -242,5 +255,6 @@ class OrderRepository:
         except Exception as e:
             logger.error(f'Error obteniendo pedidos: {e}')
             return []
+
 
 order_repo = OrderRepository()

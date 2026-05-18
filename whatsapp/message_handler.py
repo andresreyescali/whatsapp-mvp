@@ -101,29 +101,17 @@ class MessageHandler:
     def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
         """Guarda la conversación en el esquema del tenant"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Crear tabla si no existe
                     cur.execute(f"""
-                        CREATE TABLE IF NOT EXISTS {tenant_id}.conversaciones (
-                            id SERIAL PRIMARY KEY,
-                            cliente_numero TEXT NOT NULL,
-                            mensaje TEXT NOT NULL,
-                            respuesta TEXT,
-                            tipo VARCHAR(20) DEFAULT 'cliente',
-                            created_at TIMESTAMP DEFAULT NOW()
-                        )
-                    """)
-                    
-                    cur.execute(f"""
-                        INSERT INTO {tenant_id}.conversaciones (cliente_numero, mensaje, respuesta, tipo, created_at)
+                        INSERT INTO "{schema_name}".conversaciones (cliente_numero, mensaje, respuesta, tipo, created_at)
                         VALUES (%s, %s, %s, %s, NOW())
                     """, (cliente_numero, mensaje, respuesta, 'ia'))
                 conn.commit()
-                logger.info(f"Conversación guardada en {tenant_id}.conversaciones")
         except Exception as e:
-            logger.error(f'Error guardando conversación: {e}')
-    
+            logger.error(f'Error guardando conversación: {e}')    
+            
     # ==================== MÉTODOS DEL CARRITO ====================
 
     def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
