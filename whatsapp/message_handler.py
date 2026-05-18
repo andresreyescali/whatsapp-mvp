@@ -276,6 +276,59 @@ class MessageHandler:
         
         return productos_encontrados
 
+    def _detectar_productos_con_ia(self, texto: str, menu: list) -> list:
+        """Usa IA para detectar productos y cantidades"""
+        if not ai_client.client or not menu:
+            return []
+        
+        prompt = f"""
+        Extrae productos del siguiente mensaje.
+        
+        MENÚ DISPONIBLE:
+        {json.dumps([{'nombre': p['nombre']} for p in menu[:50]], indent=2)}
+        
+        MENSAJE: "{texto}"
+        
+        Devuelve SOLO un JSON con la lista de productos encontrados:
+        {{
+            "productos": [
+                {{"nombre": "nombre exacto del producto", "cantidad": 1}}
+            ]
+        }}
+        
+        Si no hay productos, devuelve {{"productos": []}}
+        """
+        
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=300
+            )
+            contenido = response.choices[0].message.content
+            contenido = contenido.replace('```json', '').replace('```', '').strip()
+            resultado = json.loads(contenido)
+            
+            productos_encontrados = []
+            for p in resultado.get('productos', []):
+                nombre = p.get('nombre', '')
+                cantidad = p.get('cantidad', 1)
+                # Buscar el producto en el menú
+                for producto in menu:
+                    if producto['nombre'].lower() == nombre.lower() or nombre.lower() in producto['nombre'].lower():
+                        productos_encontrados.append({
+                            'nombre': producto['nombre'],
+                            'precio': producto['precio'],
+                            'cantidad': cantidad
+                        })
+                        break
+            return productos_encontrados
+        except Exception as e:
+            logger.error(f'Error detectando productos con IA: {e}')
+            return []
+
+
     # ==================== RESPUESTAS DEL CARRITO ====================
 
     def _actualizar_cantidad_en_carrito(self, tenant_id: str, cliente_numero: str, producto_nombre: str, nueva_cantidad: int):
@@ -471,7 +524,8 @@ class MessageHandler:
 
     def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
                       pedidos_pendientes: list, contexto: dict) -> str:
-    
+        """Usa DeepSeek con contexto personalizado y manejo de carrito"""
+        
         if not ai_client.client:
             return self._respuesta_fallback(texto, tenant, menu, numero)
         
@@ -480,41 +534,15 @@ class MessageHandler:
         # Cargar carrito desde BD
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
         
-        # 0. CORRECCIÓN DE CANTIDAD - PRIORIDAD ALTA
-        # Detectar frases como "son 32", "eran 32", "corrige a 32", "cambia a 32"
-        import re
-        correccion_match = re.search(r'(son|eran|corrige|cambia|actualiza)\s*(a)?\s*(\d+)', texto_lower)
-        if correccion_match:
-            nueva_cantidad = int(correccion_match.group(3))
-            # Buscar qué producto modificar (el último agregado o mencionado)
-            for producto in menu:
-                if producto['nombre'].lower() in texto_lower:
-                    self._actualizar_cantidad_en_carrito(tenant['id'], numero, producto['nombre'], nueva_cantidad)
-                    carrito_actualizado = self._cargar_carrito(tenant['id'], numero)
-                    return self._mostrar_carrito_confirmacion(tenant, numero, carrito_actualizado)
-        
-        # 1. Detectar pagos
+        # 1. Detectar pagos (natural)
         if any(palabra in texto_lower for palabra in ['pague', 'pago', 'pagado', 'transferí', 'consigné', 'pagué', 'ya pague', 'listo el pago']):
             order_repo.marcar_pagado(tenant['id'], numero)
             return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
         
-        # 2. Detectar confirmación de pedido (ampliar palabras clave)
-            palabras_confirmacion = [
-                'si', 'sí', 'dale', 'ok', 'okey', 'correcto', 'confirmo', 'confirma',
-                'esta bien', 'está bien', 'adelante', 'procesar', 'procesa',
-                'eso es todo', 'si eso es todo', 'sí eso es todo',
-                'no eso es todo', 'no eso es todo gracias', 'gracias eso es todo',
-                'listo', 'de acuerdo', 'perfecto', 'vale', 'si gracias'
-            ]
-
-            if any(palabra in texto_lower for palabra in palabras_confirmacion):
-                logger.info(f"Confirmación detectada: {texto_lower}")
-                if carrito_actual.get('items'):
-                    logger.info(f"Carrito tiene {len(carrito_actual['items'])} items, finalizando pedido")
-                    return self._finalizar_pedido(tenant, numero, carrito_actual)
-                else:
-                    logger.info("Carrito vacío, no hay pedido para finalizar")
-
+        # 2. Detectar confirmación de pedido
+        if any(palabra in texto_lower for palabra in ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'esta bien', 'está bien', 'adelante', 'procesar', 'confirmar pedido']):
+            if carrito_actual.get('items'):
+                return self._finalizar_pedido(tenant, numero, carrito_actual)
         
         # 3. Detectar cancelación
         if any(palabra in texto_lower for palabra in ['cancela', 'cancelar', 'no quiero', 'mejor no']):
@@ -525,56 +553,58 @@ class MessageHandler:
         if any(palabra in texto_lower for palabra in ['que pedí', 'que tengo', 'mi pedido', 'ver carrito']):
             return self._mostrar_carrito(tenant, numero, carrito_actual)
         
-        # 5. Detectar productos para agregar al carrito
-        productos_detectados = self._detectar_productos_en_texto(texto, menu)
+        # 5. Detectar productos para agregar al carrito (usando IA)
+        productos_detectados = self._detectar_productos_con_ia(texto, menu)
         
         if productos_detectados:
             self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
             nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
+            
+            # Extraer datos del cliente con IA
+            datos_extraidos = self._extraer_datos_con_ia(texto)
+            if datos_extraidos and any(datos_extraidos.values()):
+                if numero not in self._datos_cliente:
+                    self._datos_cliente[numero] = {}
+                self._datos_cliente[numero].update(datos_extraidos)
+                
+                datos_formateados = self._formatear_datos_cliente(self._datos_cliente[numero])
+                if datos_formateados:
+                    return f"""{self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)}
+
+    📋 **Datos registrados:**
+    {datos_formateados}
+
+    ¿Confirmas el pedido con estos datos?"""
+            
             return self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)
         
-        # En _responder_con_ia, después de la detección de productos y antes de la IA
-
-        # 6. DETECTAR DATOS DEL CLIENTE (prioridad alta)
-        datos_cliente = self._extraer_datos_cliente(texto)
-        if datos_cliente and any(datos_cliente.values()):
-            # Guardar datos en el carrito o en sesión
-            if numero not in self._datos_cliente:
-                self._datos_cliente[numero] = {}
-            self._datos_cliente[numero].update(datos_cliente)
-            
-            # Verificar si ya tenemos todos los datos necesarios
-            datos_actuales = self._datos_cliente.get(numero, {})
-            
-            # Si ya tenemos productos en el carrito, preguntar si confirma
-            if carrito_actual.get('items'):
-                datos_formateados = self._formatear_datos_cliente(datos_actuales)
-                return f"""📋 **He registrado tus datos:**
-
-        {datos_formateados}
-
-        ✅ **Tu pedido está listo para confirmar.**
-
-        ¿Confirmas el pedido con estos datos?"""
-            else:
-                # Primero pedir que agregue productos
-                return "He registrado tus datos. ¿Qué productos deseas ordenar?"
-            
-
-        # 7. Respuesta con IA
-        historial = self._get_historial_conversacion(tenant['id'], numero, 100)
+        # 6. Si no hay productos detectados, usar IA para respuesta general Y extraer datos
+        historial = self._get_historial_conversacion(tenant['id'], numero, 5)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
+        # Extraer datos del cliente con IA incluso si no hay productos
+        datos_extraidos = self._extraer_datos_con_ia(texto)
+        if datos_extraidos and any(datos_extraidos.values()):
+            if numero not in self._datos_cliente:
+                self._datos_cliente[numero] = {}
+            self._datos_cliente[numero].update(datos_extraidos)
+        
+        # Construir prompt del sistema
         if contexto.get('prompt_personalizado'):
             system_prompt = contexto['prompt_personalizado'] + historial_texto
         else:
             system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto) + historial_texto
         
+        # Agregar información del carrito y datos del cliente
         carrito_info = self._get_carrito_info(numero)
         if carrito_info:
-            system_prompt += f"\n\nProductos ya agregados: {carrito_info}"
+            system_prompt += f"\n\nProductos en carrito:\n{carrito_info}"
         
-        system_prompt += "\n\nIMPORTANTE: NO incluyas instrucciones como 'escribe X para hacer Y'. Solo responde naturalmente."
+        datos_cliente_info = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
+        if datos_cliente_info:
+            system_prompt += f"\n\nDatos del cliente registrados:\n{datos_cliente_info}"
+        
+        system_prompt += "\n\nIMPORTANTE: Si el cliente proporcionó información de contacto (nombre, cédula, teléfono, dirección, fecha/hora de entrega, forma de pago), confírmala y pregunta si desea finalizar el pedido."
         
         user_message = f"Cliente dice: \"{texto}\"\nGenera una respuesta amable y natural."
         
@@ -592,7 +622,7 @@ class MessageHandler:
         except Exception as e:
             logger.error(f'Error llamando a DeepSeek: {e}')
             return self._respuesta_fallback(texto, tenant, menu, numero)
-
+        
     def _get_carrito_info(self, numero: str) -> str:
             """Obtiene información del carrito para el prompt"""
             carrito = self._cargar_carrito(tenant_repo.get_all()[0]['id'] if tenant_repo.get_all() else None, numero) if tenant_repo.get_all() else {'items': [], 'total': 0}
@@ -612,6 +642,51 @@ class MessageHandler:
     def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
             """Respuesta de fallback"""
             return f"Hola! Soy el asistente de {tenant['nombre']}. ¿Qué te gustaría ordenar?"
+
+       # ==================== EXTRAER DATOS CON IA (NO USA REGEX) ====================
+
+    def _extraer_datos_con_ia(self, texto: str) -> dict:
+        """Usa IA para extraer datos del cliente del mensaje"""
+        if not ai_client.client:
+            return {}
+        
+        prompt = f"""
+        Extrae información del cliente del siguiente mensaje.
+        
+        MENSAJE: "{texto}"
+        
+        Devuelve SOLO un JSON con estos campos (si no los encuentras, déjalos vacíos):
+        {{
+            "nombre": "nombre completo",
+            "cc": "número de cédula",
+            "telefono": "número de teléfono",
+            "email": "correo electrónico",
+            "direccion": "dirección completa",
+            "fecha_entrega": "fecha de entrega o recogida",
+            "hora_entrega": "hora de entrega o recogida",
+            "recojo_en_tienda": true/false,
+            "pago_contraentrega": true/false
+        }}
+        
+        IMPORTANTE: 
+        - Si dice "recojo en tienda" o "recoger en tienda", pon recojo_en_tienda: true
+        - Si dice "pago contraentrega", "efectivo", "contra entrega", pon pago_contraentrega: true
+        """
+        
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=300
+            )
+            contenido = response.choices[0].message.content
+            # Limpiar markdown
+            contenido = contenido.replace('```json', '').replace('```', '').strip()
+            return json.loads(contenido)
+        except Exception as e:
+            logger.error(f'Error extrayendo datos con IA: {e}')
+            return {}
 
     # Instancia global
 message_handler = MessageHandler()
