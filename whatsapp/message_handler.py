@@ -12,7 +12,12 @@ from core.database import db_manager
 
 class MessageHandler:
     """Procesa mensajes de WhatsApp usando IA con contexto personalizado y memoria"""
-
+    
+    def __init__(self):
+        """Inicializa el manejador de mensajes"""
+        self._datos_cliente = {}  # Almacena datos de clientes por número
+        self._carritos_cache = {}  # Caché opcional para carritos
+    
     def process(self, phone_id: str, numero: str, texto: str):
         """Procesa mensaje entrante y envía respuesta"""
         logger.info(f'Procesando mensaje de {numero}: {texto}')
@@ -67,6 +72,7 @@ class MessageHandler:
         except Exception as e:
             logger.error(f'Error obteniendo contexto para {tenant_id}: {e}')
             return {}
+    
     def _extraer_datos_cliente(self, texto: str) -> dict:
         """Extrae datos del cliente del mensaje (nombre, cédula, teléfono, dirección, fecha)"""
         import re
@@ -95,6 +101,9 @@ class MessageHandler:
 
     def _formatear_datos_cliente(self, datos: dict) -> str:
         """Formatea los datos del cliente para confirmación"""
+        if not datos:
+            return ""
+        
         texto = ""
         if datos.get('nombre'):
             texto += f"📝 **Nombre:** {datos['nombre']}\n"
@@ -205,6 +214,20 @@ class MessageHandler:
         
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
         
+    def _actualizar_cantidad_en_carrito(self, tenant_id: str, cliente_numero: str, producto_nombre: str, nueva_cantidad: int):
+        """Actualiza la cantidad de un producto en el carrito"""
+        carrito = self._cargar_carrito(tenant_id, cliente_numero)
+        
+        for item in carrito['items']:
+            if item['nombre'] == producto_nombre:
+                vieja_cantidad = item['cantidad']
+                diferencia = nueva_cantidad - vieja_cantidad
+                item['cantidad'] = nueva_cantidad
+                carrito['total'] += item['precio'] * diferencia
+                logger.info(f"Cantidad actualizada: {producto_nombre} de {vieja_cantidad} a {nueva_cantidad}")
+                break
+        
+        self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
     
     # ==================== MÉTODOS DEL HISTORIAL ====================
 
@@ -328,24 +351,7 @@ class MessageHandler:
             logger.error(f'Error detectando productos con IA: {e}')
             return []
 
-
     # ==================== RESPUESTAS DEL CARRITO ====================
-
-    def _actualizar_cantidad_en_carrito(self, tenant_id: str, cliente_numero: str, producto_nombre: str, nueva_cantidad: int):
-        """Actualiza la cantidad de un producto en el carrito"""
-        carrito = self._cargar_carrito(tenant_id, cliente_numero)
-        
-        for item in carrito['items']:
-            if item['nombre'] == producto_nombre:
-                vieja_cantidad = item['cantidad']
-                diferencia = nueva_cantidad - vieja_cantidad
-                item['cantidad'] = nueva_cantidad
-                carrito['total'] += item['precio'] * diferencia
-                logger.info(f"Cantidad actualizada: {producto_nombre} de {vieja_cantidad} a {nueva_cantidad}")
-                break
-        
-        self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
-        
 
     def _mostrar_carrito_confirmacion(self, tenant: dict, numero: str, carrito: dict) -> str:
         """Muestra el carrito y pregunta si quiere agregar más"""
@@ -388,6 +394,22 @@ class MessageHandler:
         try:
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
+                    # Asegurar que la tabla clientes existe
+                    cur.execute(f"""
+                        CREATE TABLE IF NOT EXISTS {tenant_id}.clientes (
+                            id UUID PRIMARY KEY,
+                            numero_telefono TEXT UNIQUE NOT NULL,
+                            nombre TEXT,
+                            cc TEXT,
+                            email TEXT,
+                            direccion TEXT,
+                            direccion_despacho TEXT,
+                            created_at TIMESTAMP DEFAULT NOW(),
+                            updated_at TIMESTAMP DEFAULT NOW()
+                        )
+                    """)
+                    conn.commit()
+                    
                     # Buscar cliente por teléfono
                     cur.execute(f"SELECT id, nombre, cc, email, direccion FROM {tenant_id}.clientes WHERE numero_telefono = %s", (numero,))
                     row = cur.fetchone()
@@ -407,6 +429,9 @@ class MessageHandler:
                             if datos_cliente.get('email') and not row[3]:
                                 updates.append("email = %s")
                                 params.append(datos_cliente['email'])
+                            if datos_cliente.get('direccion') and not row[4]:
+                                updates.append("direccion = %s")
+                                params.append(datos_cliente['direccion'])
                             if updates:
                                 params.append(cliente_id)
                                 cur.execute(f"UPDATE {tenant_id}.clientes SET {', '.join(updates)}, updated_at = NOW() WHERE id = %s", params)
@@ -452,6 +477,28 @@ class MessageHandler:
         # Obtener secuencial para número de pedido
         with db_manager.get_connection(tenant['id']) as conn:
             with conn.cursor() as cur:
+                # Asegurar tabla pedidos existe
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {tenant['id']}.pedidos (
+                        id UUID PRIMARY KEY,
+                        cliente_id UUID,
+                        cliente_numero TEXT NOT NULL,
+                        numero_pedido TEXT NOT NULL,
+                        secuencial INTEGER NOT NULL,
+                        items JSONB NOT NULL,
+                        total INTEGER NOT NULL,
+                        estado TEXT DEFAULT 'nuevo',
+                        direccion_entrega TEXT,
+                        notas TEXT,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        pagado_at TIMESTAMP,
+                        enviado_at TIMESTAMP,
+                        cancelado_at TIMESTAMP
+                    )
+                """)
+                conn.commit()
+                
                 cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant['id']}.pedidos")
                 secuencial = cur.fetchone()[0]
         
@@ -467,10 +514,10 @@ class MessageHandler:
                 with conn.cursor() as cur:
                     cur.execute(f"""
                         INSERT INTO {tenant['id']}.pedidos 
-                        (id, cliente_id, numero_pedido, items, total, estado, direccion_entrega, notas)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
-                        pedido_id, cliente_id, numero_pedido, json.dumps(items), 
+                        pedido_id, cliente_id, numero, numero_pedido, secuencial, json.dumps(items), 
                         total, "nuevo", direccion_entrega, 
                         f"Fecha entrega: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()
                     ))
@@ -508,19 +555,19 @@ class MessageHandler:
             
             return f"""✅ **¡Pedido #{numero_pedido} confirmado!**{datos_texto}
 
-    📋 **Productos:**
-    {items_texto}
-    💰 **Total:** ${total:,.0f}
+📋 **Productos:**
+{items_texto}
+💰 **Total:** ${total:,.0f}
 
-    🔗 **Link de pago:** {link_pago}
+🔗 **Link de pago:** {link_pago}
 
-    📌 Cuando completes el pago, avísame para empezar a preparar tu pedido."""
+📌 Cuando completes el pago, avísame para empezar a preparar tu pedido."""
                 
         except Exception as e:
             logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
-                    
-        # ==================== RESPUESTA PRINCIPAL CON IA ====================
+    
+    # ==================== RESPUESTA PRINCIPAL CON IA ====================
 
     def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
                       pedidos_pendientes: list, contexto: dict) -> str:
@@ -571,10 +618,10 @@ class MessageHandler:
                 if datos_formateados:
                     return f"""{self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)}
 
-    📋 **Datos registrados:**
-    {datos_formateados}
+📋 **Datos registrados:**
+{datos_formateados}
 
-    ¿Confirmas el pedido con estos datos?"""
+¿Confirmas el pedido con estos datos?"""
             
             return self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)
         
@@ -596,9 +643,9 @@ class MessageHandler:
             system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto) + historial_texto
         
         # Agregar información del carrito y datos del cliente
-        carrito_info = self._get_carrito_info(numero)
+        carrito_info = self._get_carrito_info_para_prompt(tenant['id'], numero)
         if carrito_info:
-            system_prompt += f"\n\nProductos en carrito:\n{carrito_info}"
+            system_prompt += f"\n\n{carrito_info}"
         
         datos_cliente_info = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
         if datos_cliente_info:
@@ -622,28 +669,62 @@ class MessageHandler:
         except Exception as e:
             logger.error(f'Error llamando a DeepSeek: {e}')
             return self._respuesta_fallback(texto, tenant, menu, numero)
+    
+    def _get_carrito_info_para_prompt(self, tenant_id: str, numero: str) -> str:
+        """Obtiene información del carrito para el prompt"""
+        if not tenant_id:
+            return ""
         
-    def _get_carrito_info(self, numero: str) -> str:
-            """Obtiene información del carrito para el prompt"""
-            carrito = self._cargar_carrito(tenant_repo.get_all()[0]['id'] if tenant_repo.get_all() else None, numero) if tenant_repo.get_all() else {'items': [], 'total': 0}
-            if not carrito.get('items'):
-                return ""
-            
-            items_texto = ""
-            for item in carrito['items']:
-                items_texto += f"- {item['cantidad']}x {item['nombre']}: ${item['precio'] * item['cantidad']:,.0f}\n"
-            return f"Productos en carrito:\n{items_texto}Total: ${carrito.get('total', 0):,.0f}"
+        carrito = self._cargar_carrito(tenant_id, numero)
+        if not carrito.get('items'):
+            return ""
+        
+        items_texto = ""
+        for item in carrito['items']:
+            items_texto += f"- {item['cantidad']}x {item['nombre']}: ${item['precio'] * item['cantidad']:,.0f}\n"
+        return f"Productos en carrito:\n{items_texto}Total: ${carrito.get('total', 0):,.0f}"
 
     def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
-            """Construye prompt del sistema"""
-            nombre_negocio = tenant.get('nombre', 'Mi negocio')
-            return f"""Eres un asistente de ventas por WhatsApp para {nombre_negocio}. Ayuda al cliente a armar su pedido de forma natural."""
+        """Construye prompt del sistema"""
+        nombre_negocio = tenant.get('nombre', 'Mi negocio')
+        horario = contexto.get('horario', 'No especificado')
+        ubicacion = contexto.get('ubicacion', 'No especificada')
+        instrucciones = contexto.get('instrucciones', '')
+        
+        prompt = f"""Eres un asistente de ventas por WhatsApp para {nombre_negocio}.
+
+INFORMACIÓN DEL NEGOCIO:
+- Horario: {horario}
+- Ubicación: {ubicacion}
+- Instrucciones especiales: {instrucciones}
+
+MENÚ DISPONIBLE:
+"""
+        # Agregar primeros 20 productos del menú
+        for i, producto in enumerate(menu[:20]):
+            prompt += f"- {producto['nombre']}: ${producto['precio']:,.0f}\n"
+        
+        if len(menu) > 20:
+            prompt += f"... y {len(menu) - 20} productos más.\n"
+        
+        prompt += """
+REGLAS IMPORTANTES:
+1. Sé amable, natural y servicial
+2. Ayuda al cliente a armar su pedido
+3. Confirma los datos del cliente cuando los proporcione
+4. Si el cliente no especifica cantidad, asume 1 unidad
+5. No inventes productos que no están en el menú
+6. El link de pago se genera automáticamente al finalizar el pedido
+7. Pregunta por datos de contacto si no los tiene: nombre, cédula, dirección, fecha/hora de entrega
+8. Si el cliente dice "recojo en tienda", no preguntes por dirección de despacho
+"""
+        return prompt
 
     def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
-            """Respuesta de fallback"""
-            return f"Hola! Soy el asistente de {tenant['nombre']}. ¿Qué te gustaría ordenar?"
+        """Respuesta de fallback"""
+        return f"Hola! Soy el asistente de {tenant['nombre']}. ¿Qué te gustaría ordenar? Tenemos {len(menu)} productos disponibles."
 
-       # ==================== EXTRAER DATOS CON IA (NO USA REGEX) ====================
+    # ==================== EXTRAER DATOS CON IA (NO USA REGEX) ====================
 
     def _extraer_datos_con_ia(self, texto: str) -> dict:
         """Usa IA para extraer datos del cliente del mensaje"""
@@ -688,5 +769,6 @@ class MessageHandler:
             logger.error(f'Error extrayendo datos con IA: {e}')
             return {}
 
-    # Instancia global
+
+# Instancia global
 message_handler = MessageHandler()

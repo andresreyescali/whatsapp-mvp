@@ -1,126 +1,422 @@
 import uuid
+import json
 from core.database import db_manager
 from core.logger import logger
 
-class TenantRepository:
-    """Repositorio para gestión de tenants"""
+class OrderRepository:
+    """Gestión de pedidos por tenant"""
     
-    def find_by_phone_id(self, phone_id: str):
-        """Busca tenant por phone_id de WhatsApp"""
+    def _verificar_columnas_pedidos(self, tenant_id: str, conn):
+        """Verifica y crea las columnas necesarias en la tabla pedidos"""
         try:
+            with conn.cursor() as cur:
+                # Verificar/crear columna cliente_numero
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'cliente_numero') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN cliente_numero TEXT;
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna numero_pedido
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'numero_pedido') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN numero_pedido TEXT;
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna secuencial
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'secuencial') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN secuencial INTEGER;
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna items (si no existe o es tipo incorrecto)
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'items') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN items JSONB;
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna pagado_at
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'pagado_at') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN pagado_at TIMESTAMP;
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna enviado_at
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'enviado_at') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN enviado_at TIMESTAMP;
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna cancelado_at
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'cancelado_at') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN cancelado_at TIMESTAMP;
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna updated_at
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'updated_at') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN updated_at TIMESTAMP DEFAULT NOW();
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna direccion_entrega
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'direccion_entrega') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN direccion_entrega TEXT;
+                        END IF;
+                    END $$;
+                """)
+                
+                # Verificar/crear columna notas
+                cur.execute(f"""
+                    DO $$ 
+                    BEGIN 
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                       WHERE table_schema = '{tenant_id}' 
+                                       AND table_name = 'pedidos' 
+                                       AND column_name = 'notas') THEN
+                            ALTER TABLE {tenant_id}.pedidos ADD COLUMN notas TEXT;
+                        END IF;
+                    END $$;
+                """)
+                
+                conn.commit()
+                logger.info(f"Columnas verificadas/creadas para tabla pedidos en {tenant_id}")
+        except Exception as e:
+            logger.warning(f'Error verificando/creando columnas (puede que ya existan): {e}')
+    
+    def create(self, tenant_id: str, cliente_numero: str, producto_nombre: str, precio: int, cantidad: int = 1) -> dict:
+        """Crea un nuevo pedido con número compuesto"""
+        pedido_id = str(uuid.uuid4())
+        
+        # Verificar que las columnas existen
+        with db_manager.get_connection(tenant_id) as conn:
+            self._verificar_columnas_pedidos(tenant_id, conn)
+        
+        # Obtener el siguiente secuencial
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant_id}.pedidos")
+                row = cur.fetchone()
+                secuencial = row[0] if row else 1
+        
+        # Generar número compuesto
+        numero_pedido = db_manager.generar_numero_pedido(tenant_id, secuencial)
+        
+        items = [{"nombre": producto_nombre, "precio": precio, "cantidad": cantidad}]
+        total = precio * cantidad
+        
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        INSERT INTO {tenant_id}.pedidos 
+                        (id, cliente_numero, items, total, estado, numero_pedido, secuencial, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    """, (pedido_id, cliente_numero, json.dumps(items), total, "nuevo", numero_pedido, secuencial))
+                conn.commit()
+            
+            logger.info(f'Pedido {numero_pedido} creado para {cliente_numero} en tenant {tenant_id}')
+            
+            # Enviar email de confirmación
+            self._enviar_email_confirmacion(tenant_id, numero_pedido, items, total, cliente_numero)
+            
+            return {
+                "id": pedido_id,
+                "numero_pedido": numero_pedido,
+                "secuencial": secuencial,
+                "cliente_numero": cliente_numero,
+                "items": items,
+                "total": total,
+                "estado": "nuevo"
+            }
+        except Exception as e:
+            logger.error(f'Error creando pedido: {e}')
+            raise
+    
+    def _enviar_email_confirmacion(self, tenant_id: str, numero_pedido: str, items: list, total: int, cliente_numero: str):
+        """Envía email de confirmación al dueño del negocio"""
+        try:
+            from utils.email_brevo import email_sender
+            from tenants.repository import tenant_repo
+            
+            tenant = tenant_repo.find_by_id(tenant_id)
+            if not tenant:
+                logger.error(f"Tenant no encontrado: {tenant_id}")
+                return
+            
+            # Obtener email del dueño del negocio
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        'SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, configuracion, created_at, activo '
-                        'FROM public.tenants WHERE phone_id = %s AND activo = true',
-                        (phone_id,)
-                    )
+                    cur.execute("""
+                        SELECT u.email FROM public.usuarios u
+                        JOIN public.usuario_negocio un ON u.id = un.usuario_id
+                        WHERE un.tenant_id = %s AND un.rol_id = 1
+                    """, (tenant_id,))
                     row = cur.fetchone()
                     if row:
-                        columns = ['id', 'nombre', 'tipo_negocio', 'schema_name', 'phone_id', 
-                                  'token', 'usar_ia', 'configuracion', 'created_at', 'activo']
-                        return dict(zip(columns, row))
-                    return None
+                        email_to = row[0]
+                        logger.info(f"Enviando email de confirmación a {email_to} para pedido {numero_pedido}")
+                        email_sender.enviar_confirmacion_pedido(email_to, tenant['nombre'], numero_pedido, items, total, cliente_numero)
+                    else:
+                        logger.error(f"No se encontró email del dueño para tenant {tenant_id}")
         except Exception as e:
-            logger.error(f'Error en find_by_phone_id: {e}')
-            return None
+            logger.error(f'Error enviando email de confirmación: {e}')
     
-    def find_by_id(self, tenant_id: str):
-        """Busca tenant por ID"""
+    def _enviar_email_actualizacion(self, tenant_id: str, numero_pedido: str, estado: str):
+        """Envía email de actualización de pedido"""
         try:
+            from utils.email_brevo import email_sender
+            from tenants.repository import tenant_repo
+            
+            tenant = tenant_repo.find_by_id(tenant_id)
+            if not tenant:
+                return
+            
+            # Obtener email del dueño del negocio
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        'SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, configuracion, created_at, activo '
-                        'FROM public.tenants WHERE id = %s',
-                        (tenant_id,)
-                    )
+                    cur.execute("""
+                        SELECT u.email FROM public.usuarios u
+                        JOIN public.usuario_negocio un ON u.id = un.usuario_id
+                        WHERE un.tenant_id = %s AND un.rol_id = 1
+                    """, (tenant_id,))
                     row = cur.fetchone()
                     if row:
-                        columns = ['id', 'nombre', 'tipo_negocio', 'schema_name', 'phone_id', 
-                                  'token', 'usar_ia', 'configuracion', 'created_at', 'activo']
-                        return dict(zip(columns, row))
-                    return None
+                        email_to = row[0]
+                        email_sender.enviar_actualizacion_pedido(email_to, tenant['nombre'], numero_pedido, estado)
         except Exception as e:
-            logger.error(f'Error en find_by_id: {e}')
-            return None
+            logger.error(f'Error enviando email de actualización: {e}')
     
-    def create(self, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante'):
-        """Crea un nuevo tenant"""
-        tenant_id = f'tenant_{uuid.uuid4().hex[:8]}'
+    def get_pendientes(self, tenant_id: str, cliente_numero: str):
+        """Obtiene pedidos pendientes del cliente (nuevos o pendiente_pago)"""
         try:
-            with db_manager.get_connection() as conn:
+            # Verificar columnas antes de consultar
+            with db_manager.get_connection(tenant_id) as conn:
+                self._verificar_columnas_pedidos(tenant_id, conn)
+            
+            with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute('''
-                        INSERT INTO public.tenants (id, nombre, tipo_negocio, schema_name, phone_id, token)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    ''', (tenant_id, nombre, tipo_negocio, tenant_id, phone_id, token))
-                conn.commit()
-            logger.info(f'Tenant creado: {nombre} ({tenant_id})')
-            return {'id': tenant_id, 'nombre': nombre, 'phone_id': phone_id, 'token': token}
-        except Exception as e:
-            logger.error(f'Error creando tenant: {e}')
-            raise
-    
-    def update_ia_config(self, tenant_id: str, usar_ia: bool):
-        """Actualiza configuración de IA del tenant"""
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute('UPDATE public.tenants SET usar_ia = %s WHERE id = %s', (usar_ia, tenant_id))
-                conn.commit()
-            logger.info(f'IA {"activada" if usar_ia else "desactivada"} para {tenant_id}')
-        except Exception as e:
-            logger.error(f'Error actualizando IA: {e}')
-            raise
-    
-    def update_tenant(self, tenant_id: str, nombre: str, phone_id: str, token: str, usar_ia: bool):
-        """Actualiza todos los datos de un tenant"""
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute('''
-                        UPDATE public.tenants 
-                        SET nombre = %s, phone_id = %s, token = %s, usar_ia = %s
-                        WHERE id = %s
-                    ''', (nombre, phone_id, token, usar_ia, tenant_id))
-                conn.commit()
-            logger.info(f'Tenant {tenant_id} actualizado')
-            return True
-        except Exception as e:
-            logger.error(f'Error actualizando tenant: {e}')
-            raise
-    
-    def get_all(self):
-        """Obtiene todos los tenants con todos los campos necesarios"""
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute('SELECT id, nombre, phone_id, token, usar_ia, created_at FROM public.tenants ORDER BY created_at DESC')
+                    cur.execute(f"""
+                        SELECT * FROM {tenant_id}.pedidos
+                        WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
+                        ORDER BY created_at DESC
+                    """, (cliente_numero,))
                     rows = cur.fetchall()
-                    columns = ['id', 'nombre', 'phone_id', 'token', 'usar_ia', 'created_at']
-                    return [dict(zip(columns, row)) for row in rows]
+                    columns = [desc[0] for desc in cur.description]
+                    pedidos = []
+                    for row in rows:
+                        pedido = dict(zip(columns, row))
+                        if pedido.get('items') and isinstance(pedido['items'], str):
+                            try:
+                                pedido['items'] = json.loads(pedido['items'])
+                            except:
+                                pedido['items'] = []
+                        pedidos.append(pedido)
+                    return pedidos
         except Exception as e:
-            logger.error(f'Error obteniendo tenants: {e}')
+            logger.error(f'Error obteniendo pedidos pendientes: {e}')
             return []
     
-    def delete(self, tenant_id: str):
-        """Elimina un tenant y todos sus datos"""
+    def marcar_pagado(self, tenant_id: str, cliente_numero: str) -> int:
+        """Marca pedidos como pagados y envía email"""
         try:
-            with db_manager.get_connection() as conn:
+            # Verificar columnas antes de actualizar
+            with db_manager.get_connection(tenant_id) as conn:
+                self._verificar_columnas_pedidos(tenant_id, conn)
+            
+            with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Eliminar métricas
-                    cur.execute("DELETE FROM public.metricas_tenants WHERE tenant_id = %s", (tenant_id,))
-                    # Eliminar tenant de la tabla
-                    cur.execute("DELETE FROM public.tenants WHERE id = %s", (tenant_id,))
-                    # Eliminar el schema completo
-                    cur.execute(f"DROP SCHEMA IF EXISTS {tenant_id} CASCADE")
+                    # Obtener el número de pedido antes de actualizar
+                    try:
+                        cur.execute(f"""
+                            SELECT numero_pedido FROM {tenant_id}.pedidos
+                            WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
+                            ORDER BY created_at DESC LIMIT 1
+                        """, (cliente_numero,))
+                        row = cur.fetchone()
+                        numero_pedido = row[0] if row else None
+                    except Exception as e:
+                        logger.warning(f'Error obteniendo numero_pedido: {e}')
+                        numero_pedido = None
+                    
+                    # Actualizar pedidos a pagado
+                    cur.execute(f"""
+                        UPDATE {tenant_id}.pedidos
+                        SET estado = 'pagado', pagado_at = NOW(), updated_at = NOW()
+                        WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
+                    """, (cliente_numero,))
+                    updated = cur.rowcount
+                
                 conn.commit()
-            logger.info(f'Tenant {tenant_id} eliminado permanentemente')
-            return True
+            
+            if updated > 0 and numero_pedido:
+                self._enviar_email_actualizacion(tenant_id, numero_pedido, 'pagado')
+                logger.info(f'{updated} pedido(s) marcado(s) como pagado para {cliente_numero}')
+            elif updated > 0:
+                logger.info(f'{updated} pedido(s) marcado(s) como pagado para {cliente_numero} (sin número de pedido)')
+            
+            return updated
+            
         except Exception as e:
-            logger.error(f'Error eliminando tenant {tenant_id}: {e}')
+            logger.error(f'Error marcando pedido como pagado: {e}')
             raise
+    
+    def actualizar_estado(self, tenant_id: str, pedido_id: str, nuevo_estado: str) -> bool:
+        """Actualiza el estado de un pedido específico y envía email"""
+        try:
+            # Verificar columnas antes de actualizar
+            with db_manager.get_connection(tenant_id) as conn:
+                self._verificar_columnas_pedidos(tenant_id, conn)
+            
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    # Obtener número de pedido antes de actualizar
+                    cur.execute(f"SELECT numero_pedido FROM {tenant_id}.pedidos WHERE id = %s", (pedido_id,))
+                    row = cur.fetchone()
+                    numero_pedido = row[0] if row else None
+                    
+                    fecha_campo = {
+                        'pagado': 'pagado_at',
+                        'enviado': 'enviado_at',
+                        'cancelado': 'cancelado_at'
+                    }.get(nuevo_estado)
+                    
+                    if fecha_campo:
+                        cur.execute(f"""
+                            UPDATE {tenant_id}.pedidos 
+                            SET estado = %s, updated_at = NOW(), {fecha_campo} = NOW()
+                            WHERE id = %s
+                        """, (nuevo_estado, pedido_id))
+                    else:
+                        cur.execute(f"""
+                            UPDATE {tenant_id}.pedidos 
+                            SET estado = %s, updated_at = NOW()
+                            WHERE id = %s
+                        """, (nuevo_estado, pedido_id))
+                    
+                    updated = cur.rowcount
+                conn.commit()
+            
+            if updated > 0 and numero_pedido:
+                self._enviar_email_actualizacion(tenant_id, numero_pedido, nuevo_estado)
+            
+            return updated > 0
+        except Exception as e:
+            logger.error(f'Error actualizando estado del pedido: {e}')
+            raise
+    
+    def get_all(self, tenant_id: str, limit: int = 100):
+        """Obtiene todos los pedidos del tenant"""
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT * FROM {tenant_id}.pedidos
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (limit,))
+                    rows = cur.fetchall()
+                    columns = [desc[0] for desc in cur.description]
+                    pedidos = []
+                    for row in rows:
+                        pedido = dict(zip(columns, row))
+                        if pedido.get('items') and isinstance(pedido['items'], str):
+                            try:
+                                pedido['items'] = json.loads(pedido['items'])
+                            except:
+                                pedido['items'] = []
+                        pedidos.append(pedido)
+                    return pedidos
+        except Exception as e:
+            logger.error(f'Error obteniendo pedidos: {e}')
+            return []
+
+    def get_by_numero(self, tenant_id: str, numero_pedido: str) -> dict:
+        """Obtiene un pedido por su número"""
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT * FROM {tenant_id}.pedidos
+                        WHERE numero_pedido = %s
+                        LIMIT 1
+                    """, (numero_pedido,))
+                    row = cur.fetchone()
+                    if row:
+                        columns = [desc[0] for desc in cur.description]
+                        pedido = dict(zip(columns, row))
+                        if pedido.get('items') and isinstance(pedido['items'], str):
+                            try:
+                                pedido['items'] = json.loads(pedido['items'])
+                            except:
+                                pedido['items'] = []
+                        return pedido
+                    return None
+        except Exception as e:
+            logger.error(f'Error obteniendo pedido por número: {e}')
+            return None
+
 
 # Instancia global
-tenant_repo = TenantRepository()
+order_repo = OrderRepository()
