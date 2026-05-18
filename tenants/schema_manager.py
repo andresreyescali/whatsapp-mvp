@@ -104,8 +104,118 @@ class SchemaManager:
         
         logger.info(f'Schema creado exitosamente para {tenant_id}')
     
+    def ensure_schema(self, tenant_id: str):
+        """Asegura que el esquema del tenant existe y tiene todas las tablas necesarias"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Crear esquema si no existe
+                    cur.execute(f'CREATE SCHEMA IF NOT EXISTS {tenant_id}')
+                    
+                    # Verificar y crear tablas si no existen
+                    self._ensure_tables_exist(tenant_id, cur)
+                    
+                    conn.commit()
+                    logger.info(f"Esquema asegurado para tenant {tenant_id}")
+        except Exception as e:
+            logger.error(f"Error asegurando esquema para {tenant_id}: {e}")
+            raise
+    
+    def _ensure_tables_exist(self, tenant_id: str, cur):
+        """Verifica y crea las tablas necesarias si no existen"""
+        
+        # Tabla de clientes
+        cur.execute(f'''
+        CREATE TABLE IF NOT EXISTS {tenant_id}.clientes (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            numero_telefono TEXT UNIQUE NOT NULL,
+            nombre TEXT,
+            cc TEXT,
+            email TEXT,
+            direccion TEXT,
+            direccion_despacho TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            ultimo_pedido TIMESTAMP
+        )
+        ''')
+        
+        # Tabla de productos
+        cur.execute(f'''
+        CREATE TABLE IF NOT EXISTS {tenant_id}.productos (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            nombre TEXT NOT NULL,
+            descripcion TEXT,
+            precio INTEGER NOT NULL,
+            categoria TEXT,
+            disponible BOOLEAN DEFAULT true,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        ''')
+        
+        # Tabla de pedidos
+        cur.execute(f'''
+        CREATE TABLE IF NOT EXISTS {tenant_id}.pedidos (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+            numero_pedido TEXT UNIQUE,
+            items JSONB NOT NULL,
+            total INTEGER NOT NULL,
+            estado VARCHAR(50) DEFAULT 'nuevo',
+            direccion_entrega TEXT,
+            notas TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            pagado_at TIMESTAMP,
+            enviado_at TIMESTAMP,
+            cancelado_at TIMESTAMP
+        )
+        ''')
+        
+        # Tabla de conversaciones
+        cur.execute(f'''
+        CREATE TABLE IF NOT EXISTS {tenant_id}.conversaciones (
+            id SERIAL PRIMARY KEY,
+            cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+            cliente_numero TEXT NOT NULL,
+            mensaje TEXT NOT NULL,
+            respuesta TEXT,
+            tipo VARCHAR(20) DEFAULT 'cliente',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        ''')
+        
+        # Tabla de carritos
+        cur.execute(f'''
+        CREATE TABLE IF NOT EXISTS {tenant_id}.carritos (
+            id SERIAL PRIMARY KEY,
+            cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+            cliente_numero TEXT NOT NULL,
+            items JSONB DEFAULT '[]',
+            total INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+        ''')
+        
+        # Índices
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON {tenant_id}.pedidos(cliente_id)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON {tenant_id}.pedidos(estado)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_created ON {tenant_id}.pedidos(created_at DESC)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON {tenant_id}.clientes(numero_telefono)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON {tenant_id}.conversaciones(cliente_numero)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_created ON {tenant_id}.conversaciones(created_at DESC)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON {tenant_id}.carritos(cliente_numero)')
+    
     def _insert_default_products(self, cursor, tenant_id: str, tipo_negocio: str):
         """Inserta productos de ejemplo según el tipo de negocio"""
+        
+        # Verificar si ya hay productos
+        cursor.execute(f"SELECT COUNT(*) FROM {tenant_id}.productos")
+        count = cursor.fetchone()[0]
+        if count > 0:
+            logger.info(f"Ya existen {count} productos en {tenant_id}, omitiendo inserción de productos de ejemplo")
+            return
         
         if tipo_negocio == "restaurante":
             cursor.execute(f'''
@@ -293,4 +403,6 @@ class SchemaManager:
             logger.error(f'Error eliminando producto {product_id}: {e}')
             raise
 
+
+# Instancia global
 schema_manager = SchemaManager()
