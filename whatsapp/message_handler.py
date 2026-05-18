@@ -27,7 +27,10 @@ class MessageHandler:
             logger.warning(f'Tenant no encontrado para phone_id: {phone_id}')
             return
         
-        menu = schema_manager.get_menu(tenant['id'])
+        # Asegurar que el esquema del tenant existe
+        schema_manager.ensure_schema(tenant['id'])
+        
+        menu = self._obtener_menu_desde_contexto(tenant['id'])
         pedidos_pendientes = order_repo.get_pendientes(tenant['id'], numero)
         contexto = self._obtener_contexto_tenant(tenant['id'])
         
@@ -37,8 +40,30 @@ class MessageHandler:
             whatsapp_client.send_message(tenant, numero, respuesta)
             self._guardar_conversacion(tenant['id'], numero, texto, respuesta)
 
+    def _obtener_menu_desde_contexto(self, tenant_id: str) -> list:
+        """Obtiene el menú estructurado desde public.tenant_context"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('''
+                        SELECT menu_estructurado 
+                        FROM public.tenant_context 
+                        WHERE tenant_id = %s
+                    ''', (tenant_id,))
+                    row = cur.fetchone()
+                    
+                    if row and row[0]:
+                        menu = row[0]
+                        if isinstance(menu, str):
+                            menu = json.loads(menu)
+                        return menu if isinstance(menu, list) else []
+                    return []
+        except Exception as e:
+            logger.error(f'Error obteniendo menú para {tenant_id}: {e}')
+            return []
+
     def _obtener_contexto_tenant(self, tenant_id: str) -> dict:
-        """Obtiene el contexto personalizado del tenant desde la base de datos"""
+        """Obtiene el contexto personalizado del tenant desde public.tenant_context"""
         try:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
@@ -73,69 +98,15 @@ class MessageHandler:
             logger.error(f'Error obteniendo contexto para {tenant_id}: {e}')
             return {}
     
-    def _extraer_datos_cliente(self, texto: str) -> dict:
-        """Extrae datos del cliente del mensaje (nombre, cédula, teléfono, dirección, fecha)"""
-        import re
-        texto_lower = texto.lower()
-        datos = {}
-        
-        # Patrones de búsqueda
-        patrones = {
-            'nombre': r'(?:soy|me llamo|mi nombre es|nombre:?)\s*([A-Za-záéíóúñ\s]+?)(?:\s*(?:y|,|cc|tel|$))',
-            'cc': r'(?:cédula|cedula|cc|identificación|documento:?)\s*(\d{5,12})',
-            'telefono': r'(?:tel|teléfono|telefono|cel|whatsapp:?)\s*(\d{7,15})',
-            'email': r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-            'direccion': r'(?:dirección|direccion|vivo en|mi dirección es:?)\s*([^,.]+(?:[,.][^,.]+)?)',
-            'fecha_entrega': r'(?:para|entregar|recoger|para el|el día)\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+de\s+[a-z]+\s+del?\s+\d{2,4}|mañana|hoy|pasado mañana)',
-            'hora_entrega': r'(?:a las|a la|alas|a las)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)?)',
-            'recojo_en_tienda': r'(?:recojo|recoger|retiro|retirar)\s*(?:en la tienda|en tienda|local)',
-            'pago_contraentrega': r'(?:pago\s+contra\s+entrega|contraentrega|pago\s+en\s+efectivo|efectivo|transferencia)'
-        }
-        
-        for campo, patron in patrones.items():
-            match = re.search(patron, texto, re.IGNORECASE)
-            if match:
-                datos[campo] = match.group(1).strip() if match.groups() else True
-        
-        return datos
-
-    def _formatear_datos_cliente(self, datos: dict) -> str:
-        """Formatea los datos del cliente para confirmación"""
-        if not datos:
-            return ""
-        
-        texto = ""
-        if datos.get('nombre'):
-            texto += f"📝 **Nombre:** {datos['nombre']}\n"
-        if datos.get('cc'):
-            texto += f"🆔 **Cédula:** {datos['cc']}\n"
-        if datos.get('telefono'):
-            texto += f"📞 **Teléfono:** {datos['telefono']}\n"
-        if datos.get('email'):
-            texto += f"📧 **Email:** {datos['email']}\n"
-        if datos.get('direccion'):
-            texto += f"📍 **Dirección:** {datos['direccion']}\n"
-        if datos.get('fecha_entrega'):
-            texto += f"📅 **Fecha de entrega:** {datos['fecha_entrega']}\n"
-        if datos.get('hora_entrega'):
-            texto += f"⏰ **Hora:** {datos['hora_entrega']}\n"
-        if datos.get('recojo_en_tienda'):
-            texto += f"🏪 **Recojo en tienda**\n"
-        if datos.get('pago_contraentrega'):
-            texto += f"💰 **Pago:** Contraentrega / Efectivo\n"
-        
-        return texto
-
     def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
         """Guarda la conversación en el esquema del tenant"""
         try:
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Verificar si la tabla existe, si no, crearla
+                    # Crear tabla si no existe
                     cur.execute(f"""
                         CREATE TABLE IF NOT EXISTS {tenant_id}.conversaciones (
                             id SERIAL PRIMARY KEY,
-                            cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
                             cliente_numero TEXT NOT NULL,
                             mensaje TEXT NOT NULL,
                             respuesta TEXT,
@@ -144,61 +115,70 @@ class MessageHandler:
                         )
                     """)
                     
-                    # Insertar conversación
                     cur.execute(f"""
-                        INSERT INTO {tenant_id}.conversaciones (cliente_numero, mensaje, respuesta)
-                        VALUES (%s, %s, %s)
-                    """, (cliente_numero, mensaje, respuesta))
+                        INSERT INTO {tenant_id}.conversaciones (cliente_numero, mensaje, respuesta, tipo, created_at)
+                        VALUES (%s, %s, %s, %s, NOW())
+                    """, (cliente_numero, mensaje, respuesta, 'ia'))
                 conn.commit()
                 logger.info(f"Conversación guardada en {tenant_id}.conversaciones")
         except Exception as e:
             logger.error(f'Error guardando conversación: {e}')
-            
+    
     # ==================== MÉTODOS DEL CARRITO ====================
 
     def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
-        """Guarda el carrito en la base de datos"""
+        """Guarda el carrito en el esquema del tenant"""
         try:
-            with db_manager.get_connection() as conn:
+            with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Eliminar carrito anterior
-                    cur.execute("DELETE FROM public.carritos WHERE tenant_id = %s AND cliente_numero = %s", 
-                            (tenant_id, cliente_numero))
-                    # Insertar nuevo carrito - convertir items a JSON string
-                    cur.execute("""
-                        INSERT INTO public.carritos (tenant_id, cliente_numero, items, total)
-                        VALUES (%s, %s, %s, %s)
-                    """, (tenant_id, cliente_numero, json.dumps(items), total))
+                    # Asegurar tabla
+                    cur.execute(f"""
+                        CREATE TABLE IF NOT EXISTS {tenant_id}.carritos (
+                            id SERIAL PRIMARY KEY,
+                            cliente_numero TEXT NOT NULL UNIQUE,
+                            items JSONB NOT NULL,
+                            total INTEGER DEFAULT 0,
+                            created_at TIMESTAMP DEFAULT NOW(),
+                            updated_at TIMESTAMP DEFAULT NOW()
+                        )
+                    """)
+                    
+                    # UPSERT
+                    cur.execute(f"""
+                        INSERT INTO {tenant_id}.carritos (cliente_numero, items, total, created_at, updated_at)
+                        VALUES (%s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (cliente_numero) 
+                        DO UPDATE SET items = EXCLUDED.items, total = EXCLUDED.total, updated_at = NOW()
+                    """, (cliente_numero, json.dumps(items), total))
                 conn.commit()
                 logger.info(f"Carrito guardado para {cliente_numero}: {len(items)} items, total ${total}")
         except Exception as e:
             logger.error(f'Error guardando carrito: {e}')
 
     def _cargar_carrito(self, tenant_id: str, cliente_numero: str) -> dict:
-        """Carga el carrito desde la base de datos"""
+        """Carga el carrito desde el esquema del tenant"""
         try:
-            with db_manager.get_connection() as conn:
+            with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("""
-                        SELECT items, total FROM public.carritos 
-                        WHERE tenant_id = %s AND cliente_numero = %s
-                    """, (tenant_id, cliente_numero))
+                    cur.execute(f"""
+                        SELECT items, total FROM {tenant_id}.carritos 
+                        WHERE cliente_numero = %s
+                    """, (cliente_numero,))
                     row = cur.fetchone()
                     if row:
-                        # items puede ser string o dict, asegurarse de que sea lista
                         items = row[0]
                         if isinstance(items, str):
                             items = json.loads(items)
                         elif items is None:
                             items = []
-                        return {'items': items, 'total': row[1]}
+                        return {'items': items, 'total': row[1] or 0}
                     return {'items': [], 'total': 0}
         except Exception as e:
             logger.error(f'Error cargando carrito: {e}')
             return {'items': [], 'total': 0}
         
     def _agregar_al_carrito(self, tenant_id: str, cliente_numero: str, productos: list):
-        """Agrega productos al carrito del cliente usando BD"""
+        """Agrega productos al carrito del cliente"""
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
         
         for p in productos:
@@ -224,7 +204,6 @@ class MessageHandler:
                 diferencia = nueva_cantidad - vieja_cantidad
                 item['cantidad'] = nueva_cantidad
                 carrito['total'] += item['precio'] * diferencia
-                logger.info(f"Cantidad actualizada: {producto_nombre} de {vieja_cantidad} a {nueva_cantidad}")
                 break
         
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
@@ -254,7 +233,7 @@ class MessageHandler:
                         LIMIT %s
                     """, (cliente_numero, limit))
                     rows = cur.fetchall()
-                    return list(reversed(rows))
+                    return list(reversed(rows)) if rows else []
         except Exception as e:
             logger.error(f'Error obteniendo historial: {e}')
             return []
@@ -273,17 +252,16 @@ class MessageHandler:
     # ==================== DETECCIÓN DE PRODUCTOS ====================
 
     def _detectar_productos_en_texto(self, texto: str, menu: list) -> list:
-        """Detecta productos y cantidades en el texto (mejorado)"""
-        import re
+        """Detecta productos y cantidades en el texto"""
         productos_encontrados = []
         texto_lower = texto.lower()
         
         for producto in menu:
-            nombre = producto['nombre'].lower()
-            if nombre in texto_lower:
+            nombre = producto.get('nombre', '').lower()
+            if nombre and nombre in texto_lower:
                 cantidad = 1
                 
-                # Buscar número antes del producto (ej: "32 empanadas", "100 empanadas")
+                # Buscar número antes del producto
                 patron = rf'(\d+)\s*{re.escape(nombre)}'
                 match = re.search(patron, texto_lower)
                 if match:
@@ -292,7 +270,7 @@ class MessageHandler:
                 
                 productos_encontrados.append({
                     'nombre': producto['nombre'],
-                    'precio': producto['precio'],
+                    'precio': producto.get('precio', 0),
                     'cantidad': cantidad
                 })
                 logger.info(f"Producto detectado: {producto['nombre']} x{cantidad}")
@@ -304,11 +282,13 @@ class MessageHandler:
         if not ai_client.client or not menu:
             return []
         
+        productos_simplificados = [{'nombre': p.get('nombre', ''), 'precio': p.get('precio', 0)} for p in menu[:30]]
+        
         prompt = f"""
         Extrae productos del siguiente mensaje.
         
         MENÚ DISPONIBLE:
-        {json.dumps([{'nombre': p['nombre']} for p in menu[:50]], indent=2)}
+        {json.dumps(productos_simplificados, indent=2, ensure_ascii=False)}
         
         MENSAJE: "{texto}"
         
@@ -327,7 +307,7 @@ class MessageHandler:
                 model=ai_client.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=300
+                max_tokens=500
             )
             contenido = response.choices[0].message.content
             contenido = contenido.replace('```json', '').replace('```', '').strip()
@@ -335,14 +315,14 @@ class MessageHandler:
             
             productos_encontrados = []
             for p in resultado.get('productos', []):
-                nombre = p.get('nombre', '')
+                nombre_buscado = p.get('nombre', '').lower()
                 cantidad = p.get('cantidad', 1)
-                # Buscar el producto en el menú
+                
                 for producto in menu:
-                    if producto['nombre'].lower() == nombre.lower() or nombre.lower() in producto['nombre'].lower():
+                    if producto.get('nombre', '').lower() == nombre_buscado or nombre_buscado in producto.get('nombre', '').lower():
                         productos_encontrados.append({
                             'nombre': producto['nombre'],
-                            'precio': producto['precio'],
+                            'precio': producto.get('precio', 0),
                             'cantidad': cantidad
                         })
                         break
@@ -390,11 +370,11 @@ class MessageHandler:
 **Total:** ${total:,.0f}"""
 
     def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
-        """Obtiene un cliente existente o lo crea con los datos proporcionados"""
+        """Obtiene o crea un cliente en el esquema del tenant"""
         try:
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Asegurar que la tabla clientes existe
+                    # Asegurar tabla
                     cur.execute(f"""
                         CREATE TABLE IF NOT EXISTS {tenant_id}.clientes (
                             id UUID PRIMARY KEY,
@@ -408,15 +388,13 @@ class MessageHandler:
                             updated_at TIMESTAMP DEFAULT NOW()
                         )
                     """)
-                    conn.commit()
                     
-                    # Buscar cliente por teléfono
+                    # Buscar cliente
                     cur.execute(f"SELECT id, nombre, cc, email, direccion FROM {tenant_id}.clientes WHERE numero_telefono = %s", (numero,))
                     row = cur.fetchone()
                     
                     if row:
                         cliente_id = row[0]
-                        # Actualizar datos faltantes
                         if datos_cliente:
                             updates = []
                             params = []
@@ -438,18 +416,16 @@ class MessageHandler:
                                 conn.commit()
                         return cliente_id
                     else:
-                        # Crear nuevo cliente
                         cliente_id = str(uuid.uuid4())
                         cur.execute(f"""
-                            INSERT INTO {tenant_id}.clientes (id, numero_telefono, nombre, cc, email, direccion, direccion_despacho)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO {tenant_id}.clientes (id, numero_telefono, nombre, cc, email, direccion)
+                            VALUES (%s, %s, %s, %s, %s, %s)
                         """, (
                             cliente_id, numero,
                             datos_cliente.get('nombre') if datos_cliente else None,
                             datos_cliente.get('cc') if datos_cliente else None,
                             datos_cliente.get('email') if datos_cliente else None,
-                            datos_cliente.get('direccion') if datos_cliente else None,
-                            datos_cliente.get('direccion_despacho') if datos_cliente else None
+                            datos_cliente.get('direccion') if datos_cliente else None
                         ))
                         conn.commit()
                         return cliente_id
@@ -458,14 +434,12 @@ class MessageHandler:
             return None
 
     def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
-        """Finaliza el pedido, guarda datos del cliente y genera link de pago"""
+        """Finaliza el pedido en el esquema del tenant"""
         if not carrito or not carrito.get('items'):
             return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
         
-        # Obtener datos del cliente guardados previamente
         datos_cliente = self._datos_cliente.get(numero, {})
         
-        # Obtener o crear cliente en la base de datos
         cliente_id = self._obtener_o_crear_cliente(tenant['id'], numero, datos_cliente)
         if not cliente_id:
             return "❌ Hubo un error con tus datos. Por favor intenta de nuevo."
@@ -474,10 +448,9 @@ class MessageHandler:
         items = carrito['items']
         total = carrito['total']
         
-        # Obtener secuencial para número de pedido
         with db_manager.get_connection(tenant['id']) as conn:
             with conn.cursor() as cur:
-                # Asegurar tabla pedidos existe
+                # Asegurar tabla
                 cur.execute(f"""
                     CREATE TABLE IF NOT EXISTS {tenant['id']}.pedidos (
                         id UUID PRIMARY KEY,
@@ -497,14 +470,12 @@ class MessageHandler:
                         cancelado_at TIMESTAMP
                     )
                 """)
-                conn.commit()
                 
                 cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant['id']}.pedidos")
-                secuencial = cur.fetchone()[0]
+                secuencial = cur.fetchone()[0] or 1
         
-        numero_pedido = db_manager.generar_numero_pedido(tenant['id'], secuencial)
+        numero_pedido = self._generar_numero_pedido(secuencial)
         
-        # Preparar dirección de entrega
         direccion_entrega = datos_cliente.get('direccion', '')
         if datos_cliente.get('recojo_en_tienda'):
             direccion_entrega = "Recojo en tienda"
@@ -517,41 +488,24 @@ class MessageHandler:
                         (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
-                        pedido_id, cliente_id, numero, numero_pedido, secuencial, json.dumps(items), 
-                        total, "nuevo", direccion_entrega, 
-                        f"Fecha entrega: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()
+                        pedido_id, cliente_id, numero, numero_pedido, secuencial, json.dumps(items),
+                        total, 'nuevo', direccion_entrega,
+                        f"Fecha: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()
                     ))
                 conn.commit()
             
-            # Limpiar carrito y datos del cliente
             self._guardar_carrito(tenant['id'], numero, [], 0)
             if numero in self._datos_cliente:
                 del self._datos_cliente[numero]
             
             link_pago = generar_link_pago(total, pedido_id)
             
-            # Formatear items para el mensaje
             items_texto = ""
             for item in items:
                 subtotal = item['precio'] * item['cantidad']
                 items_texto += f"• {item['cantidad']}x {item['nombre']}: ${subtotal:,.0f}\n"
             
-            # Formatear datos del cliente para confirmación
-            datos_texto = ""
-            if datos_cliente.get('nombre'):
-                datos_texto += f"\n📝 **Cliente:** {datos_cliente['nombre']}"
-            if datos_cliente.get('cc'):
-                datos_texto += f"\n🆔 **Cédula:** {datos_cliente['cc']}"
-            if datos_cliente.get('telefono'):
-                datos_texto += f"\n📞 **Teléfono:** {datos_cliente['telefono']}"
-            if datos_cliente.get('email'):
-                datos_texto += f"\n📧 **Email:** {datos_cliente['email']}"
-            if direccion_entrega:
-                datos_texto += f"\n📍 **Entrega:** {direccion_entrega}"
-            if datos_cliente.get('fecha_entrega'):
-                datos_texto += f"\n📅 **Fecha:** {datos_cliente['fecha_entrega']}"
-            if datos_cliente.get('hora_entrega'):
-                datos_texto += f"\n⏰ **Hora:** {datos_cliente['hora_entrega']}"
+            datos_texto = self._formatear_datos_cliente(datos_cliente)
             
             return f"""✅ **¡Pedido #{numero_pedido} confirmado!**{datos_texto}
 
@@ -567,31 +521,87 @@ class MessageHandler:
             logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
     
+    def _generar_numero_pedido(self, secuencial: int) -> str:
+        """Genera número de pedido formateado"""
+        return f"PED-{secuencial:06d}"
+    
+    def _formatear_datos_cliente(self, datos: dict) -> str:
+        """Formatea los datos del cliente para confirmación"""
+        if not datos:
+            return ""
+        
+        texto = ""
+        if datos.get('nombre'):
+            texto += f"\n📝 **Nombre:** {datos['nombre']}"
+        if datos.get('cc'):
+            texto += f"\n🆔 **Cédula:** {datos['cc']}"
+        if datos.get('telefono'):
+            texto += f"\n📞 **Teléfono:** {datos['telefono']}"
+        if datos.get('email'):
+            texto += f"\n📧 **Email:** {datos['email']}"
+        if datos.get('direccion'):
+            texto += f"\n📍 **Dirección:** {datos['direccion']}"
+        if datos.get('fecha_entrega'):
+            texto += f"\n📅 **Fecha de entrega:** {datos['fecha_entrega']}"
+        if datos.get('hora_entrega'):
+            texto += f"\n⏰ **Hora:** {datos['hora_entrega']}"
+        if datos.get('recojo_en_tienda'):
+            texto += f"\n🏪 **Recojo en tienda**"
+        if datos.get('pago_contraentrega'):
+            texto += f"\n💰 **Pago:** Contraentrega / Efectivo"
+        
+        return texto
+
+    def _extraer_datos_cliente(self, texto: str) -> dict:
+        """Extrae datos del cliente usando regex (fallback)"""
+        texto_lower = texto.lower()
+        datos = {}
+        
+        patrones = {
+            'nombre': r'(?:soy|me llamo|mi nombre es|nombre:?)\s*([A-Za-záéíóúñ\s]+?)(?:\s*(?:y|,|cc|tel|$))',
+            'cc': r'(?:cédula|cedula|cc|identificación|documento:?)\s*(\d{5,12})',
+            'telefono': r'(?:tel|teléfono|telefono|cel|whatsapp:?)\s*(\d{7,15})',
+            'email': r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+            'direccion': r'(?:dirección|direccion|vivo en|mi dirección es:?)\s*([^,.]+(?:[,.][^,.]+)?)',
+            'fecha_entrega': r'(?:para|entregar|recoger|para el|el día)\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+de\s+[a-z]+\s+del?\s+\d{2,4}|mañana|hoy|pasado mañana)',
+            'hora_entrega': r'(?:a las|a la|alas|a las)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)?)'
+        }
+        
+        for campo, patron in patrones.items():
+            match = re.search(patron, texto, re.IGNORECASE)
+            if match:
+                datos[campo] = match.group(1).strip()
+        
+        if re.search(r'(?:recojo|recoger|retiro|retirar)\s*(?:en la tienda|en tienda|local)', texto_lower):
+            datos['recojo_en_tienda'] = True
+        if re.search(r'(?:pago\s+contra\s+entrega|contraentrega|pago\s+en\s+efectivo|efectivo)', texto_lower):
+            datos['pago_contraentrega'] = True
+        
+        return datos
+    
     # ==================== RESPUESTA PRINCIPAL CON IA ====================
 
     def _responder_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, 
                       pedidos_pendientes: list, contexto: dict) -> str:
-        """Usa DeepSeek con contexto personalizado y manejo de carrito"""
+        """Usa IA con contexto personalizado y manejo de carrito"""
         
         if not ai_client.client:
             return self._respuesta_fallback(texto, tenant, menu, numero)
         
         texto_lower = texto.lower()
-        
-        # Cargar carrito desde BD
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
         
-        # 1. Detectar pagos (natural)
+        # 1. Pagos
         if any(palabra in texto_lower for palabra in ['pague', 'pago', 'pagado', 'transferí', 'consigné', 'pagué', 'ya pague', 'listo el pago']):
             order_repo.marcar_pagado(tenant['id'], numero)
             return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
         
-        # 2. Detectar confirmación de pedido
+        # 2. Confirmación
         if any(palabra in texto_lower for palabra in ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'esta bien', 'está bien', 'adelante', 'procesar', 'confirmar pedido']):
             if carrito_actual.get('items'):
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
         
-        # 3. Detectar cancelación
+        # 3. Cancelación
         if any(palabra in texto_lower for palabra in ['cancela', 'cancelar', 'no quiero', 'mejor no']):
             self._guardar_carrito(tenant['id'], numero, [], 0)
             return "❌ Pedido cancelado. Estaré aquí cuando necesites algo."
@@ -600,15 +610,17 @@ class MessageHandler:
         if any(palabra in texto_lower for palabra in ['que pedí', 'que tengo', 'mi pedido', 'ver carrito']):
             return self._mostrar_carrito(tenant, numero, carrito_actual)
         
-        # 5. Detectar productos para agregar al carrito (usando IA)
-        productos_detectados = self._detectar_productos_con_ia(texto, menu)
+        # 5. Detectar productos
+        productos_detectados = self._detectar_productos_con_ia(texto, menu) or self._detectar_productos_en_texto(texto, menu)
         
         if productos_detectados:
             self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
             nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
             
-            # Extraer datos del cliente con IA
             datos_extraidos = self._extraer_datos_con_ia(texto)
+            if not datos_extraidos:
+                datos_extraidos = self._extraer_datos_cliente(texto)
+                
             if datos_extraidos and any(datos_extraidos.values()):
                 if numero not in self._datos_cliente:
                     self._datos_cliente[numero] = {}
@@ -625,33 +637,40 @@ class MessageHandler:
             
             return self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)
         
-        # 6. Si no hay productos detectados, usar IA para respuesta general Y extraer datos
+        # 6. Respuesta general
         historial = self._get_historial_conversacion(tenant['id'], numero, 5)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
-        # Extraer datos del cliente con IA incluso si no hay productos
         datos_extraidos = self._extraer_datos_con_ia(texto)
+        if not datos_extraidos:
+            datos_extraidos = self._extraer_datos_cliente(texto)
+            
         if datos_extraidos and any(datos_extraidos.values()):
             if numero not in self._datos_cliente:
                 self._datos_cliente[numero] = {}
             self._datos_cliente[numero].update(datos_extraidos)
         
-        # Construir prompt del sistema
         if contexto.get('prompt_personalizado'):
             system_prompt = contexto['prompt_personalizado'] + historial_texto
         else:
             system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto) + historial_texto
         
-        # Agregar información del carrito y datos del cliente
         carrito_info = self._get_carrito_info_para_prompt(tenant['id'], numero)
         if carrito_info:
             system_prompt += f"\n\n{carrito_info}"
         
         datos_cliente_info = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
         if datos_cliente_info:
-            system_prompt += f"\n\nDatos del cliente registrados:\n{datos_cliente_info}"
+            system_prompt += f"\n\n📋 Datos del cliente registrados:\n{datos_cliente_info}"
         
-        system_prompt += "\n\nIMPORTANTE: Si el cliente proporcionó información de contacto (nombre, cédula, teléfono, dirección, fecha/hora de entrega, forma de pago), confírmala y pregunta si desea finalizar el pedido."
+        system_prompt += """
+
+REGLAS IMPORTANTES:
+- Confirma los datos que el cliente haya proporcionado
+- Pregunta por datos faltantes (nombre, dirección, fecha/hora)
+- Cuando tenga todos los datos, pregunta si desea finalizar el pedido
+- Sé amable y conversacional
+- Responde en español"""
         
         user_message = f"Cliente dice: \"{texto}\"\nGenera una respuesta amable y natural."
         
@@ -667,14 +686,11 @@ class MessageHandler:
             )
             return response.choices[0].message.content
         except Exception as e:
-            logger.error(f'Error llamando a DeepSeek: {e}')
+            logger.error(f'Error llamando a IA: {e}')
             return self._respuesta_fallback(texto, tenant, menu, numero)
     
     def _get_carrito_info_para_prompt(self, tenant_id: str, numero: str) -> str:
         """Obtiene información del carrito para el prompt"""
-        if not tenant_id:
-            return ""
-        
         carrito = self._cargar_carrito(tenant_id, numero)
         if not carrito.get('items'):
             return ""
@@ -682,7 +698,7 @@ class MessageHandler:
         items_texto = ""
         for item in carrito['items']:
             items_texto += f"- {item['cantidad']}x {item['nombre']}: ${item['precio'] * item['cantidad']:,.0f}\n"
-        return f"Productos en carrito:\n{items_texto}Total: ${carrito.get('total', 0):,.0f}"
+        return f"📦 Productos en carrito:\n{items_texto}💰 Total: ${carrito.get('total', 0):,.0f}"
 
     def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
         """Construye prompt del sistema"""
@@ -690,22 +706,23 @@ class MessageHandler:
         horario = contexto.get('horario', 'No especificado')
         ubicacion = contexto.get('ubicacion', 'No especificada')
         instrucciones = contexto.get('instrucciones', '')
+        politicas = contexto.get('politicas', '')
         
         prompt = f"""Eres un asistente de ventas por WhatsApp para {nombre_negocio}.
 
-INFORMACIÓN DEL NEGOCIO:
+🏪 INFORMACIÓN DEL NEGOCIO:
 - Horario: {horario}
 - Ubicación: {ubicacion}
-- Instrucciones especiales: {instrucciones}
+- Instrucciones: {instrucciones}
+- Políticas: {politicas}
 
-MENÚ DISPONIBLE:
+📋 MENÚ DISPONIBLE:
 """
-        # Agregar primeros 20 productos del menú
-        for i, producto in enumerate(menu[:20]):
-            prompt += f"- {producto['nombre']}: ${producto['precio']:,.0f}\n"
+        for i, producto in enumerate(menu[:25]):
+            prompt += f"- {producto.get('nombre', 'Producto')}: ${producto.get('precio', 0):,.0f}\n"
         
-        if len(menu) > 20:
-            prompt += f"... y {len(menu) - 20} productos más.\n"
+        if len(menu) > 25:
+            prompt += f"... y {len(menu) - 25} productos más.\n"
         
         prompt += """
 REGLAS IMPORTANTES:
@@ -714,20 +731,18 @@ REGLAS IMPORTANTES:
 3. Confirma los datos del cliente cuando los proporcione
 4. Si el cliente no especifica cantidad, asume 1 unidad
 5. No inventes productos que no están en el menú
-6. El link de pago se genera automáticamente al finalizar el pedido
-7. Pregunta por datos de contacto si no los tiene: nombre, cédula, dirección, fecha/hora de entrega
-8. Si el cliente dice "recojo en tienda", no preguntes por dirección de despacho
+6. El link de pago se genera automáticamente al finalizar
+7. Pregunta por datos faltantes: nombre, cédula, dirección, fecha/hora de entrega
+8. Si dice "recojo en tienda", no preguntes dirección de despacho
 """
         return prompt
 
     def _respuesta_fallback(self, texto: str, tenant: dict, menu: list, numero: str) -> str:
         """Respuesta de fallback"""
-        return f"Hola! Soy el asistente de {tenant['nombre']}. ¿Qué te gustaría ordenar? Tenemos {len(menu)} productos disponibles."
-
-    # ==================== EXTRAER DATOS CON IA (NO USA REGEX) ====================
+        return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿Qué te gustaría ordenar? Tenemos {len(menu)} productos disponibles. Escribe 'MENÚ' para verlos."
 
     def _extraer_datos_con_ia(self, texto: str) -> dict:
-        """Usa IA para extraer datos del cliente del mensaje"""
+        """Usa IA para extraer datos del cliente"""
         if not ai_client.client:
             return {}
         
@@ -736,22 +751,20 @@ REGLAS IMPORTANTES:
         
         MENSAJE: "{texto}"
         
-        Devuelve SOLO un JSON con estos campos (si no los encuentras, déjalos vacíos):
+        Devuelve SOLO un JSON:
         {{
             "nombre": "nombre completo",
             "cc": "número de cédula",
             "telefono": "número de teléfono",
             "email": "correo electrónico",
             "direccion": "dirección completa",
-            "fecha_entrega": "fecha de entrega o recogida",
-            "hora_entrega": "hora de entrega o recogida",
-            "recojo_en_tienda": true/false,
-            "pago_contraentrega": true/false
+            "fecha_entrega": "fecha de entrega",
+            "hora_entrega": "hora de entrega",
+            "recojo_en_tienda": false,
+            "pago_contraentrega": false
         }}
         
-        IMPORTANTE: 
-        - Si dice "recojo en tienda" o "recoger en tienda", pon recojo_en_tienda: true
-        - Si dice "pago contraentrega", "efectivo", "contra entrega", pon pago_contraentrega: true
+        Si no encuentras un campo, déjalo vacío o false.
         """
         
         try:
@@ -762,7 +775,6 @@ REGLAS IMPORTANTES:
                 max_tokens=300
             )
             contenido = response.choices[0].message.content
-            # Limpiar markdown
             contenido = contenido.replace('```json', '').replace('```', '').strip()
             return json.loads(contenido)
         except Exception as e:
