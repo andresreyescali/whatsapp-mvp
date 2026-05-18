@@ -49,7 +49,7 @@ class OrderRepository:
                     END $$;
                 """)
                 
-                # Verificar/crear columna items (si no existe o es tipo incorrecto)
+                # Verificar/crear columna items
                 cur.execute(f"""
                     DO $$ 
                     BEGIN 
@@ -251,7 +251,6 @@ class OrderRepository:
     def get_pendientes(self, tenant_id: str, cliente_numero: str):
         """Obtiene pedidos pendientes del cliente (nuevos o pendiente_pago)"""
         try:
-            # Verificar columnas antes de consultar
             with db_manager.get_connection(tenant_id) as conn:
                 self._verificar_columnas_pedidos(tenant_id, conn)
             
@@ -281,26 +280,19 @@ class OrderRepository:
     def marcar_pagado(self, tenant_id: str, cliente_numero: str) -> int:
         """Marca pedidos como pagados y envía email"""
         try:
-            # Verificar columnas antes de actualizar
             with db_manager.get_connection(tenant_id) as conn:
                 self._verificar_columnas_pedidos(tenant_id, conn)
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Obtener el número de pedido antes de actualizar
-                    try:
-                        cur.execute(f"""
-                            SELECT numero_pedido FROM {tenant_id}.pedidos
-                            WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
-                            ORDER BY created_at DESC LIMIT 1
-                        """, (cliente_numero,))
-                        row = cur.fetchone()
-                        numero_pedido = row[0] if row else None
-                    except Exception as e:
-                        logger.warning(f'Error obteniendo numero_pedido: {e}')
-                        numero_pedido = None
+                    cur.execute(f"""
+                        SELECT numero_pedido FROM {tenant_id}.pedidos
+                        WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (cliente_numero,))
+                    row = cur.fetchone()
+                    numero_pedido = row[0] if row else None
                     
-                    # Actualizar pedidos a pagado
                     cur.execute(f"""
                         UPDATE {tenant_id}.pedidos
                         SET estado = 'pagado', pagado_at = NOW(), updated_at = NOW()
@@ -325,13 +317,11 @@ class OrderRepository:
     def actualizar_estado(self, tenant_id: str, pedido_id: str, nuevo_estado: str) -> bool:
         """Actualiza el estado de un pedido específico y envía email"""
         try:
-            # Verificar columnas antes de actualizar
             with db_manager.get_connection(tenant_id) as conn:
                 self._verificar_columnas_pedidos(tenant_id, conn)
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Obtener número de pedido antes de actualizar
                     cur.execute(f"SELECT numero_pedido FROM {tenant_id}.pedidos WHERE id = %s", (pedido_id,))
                     row = cur.fetchone()
                     numero_pedido = row[0] if row else None
@@ -418,5 +408,118 @@ class OrderRepository:
             return None
 
 
-# Instancia global
+# ==================== TENANT REPOSITORY ====================
+
+class TenantRepository:
+    """Repositorio para operaciones con tenants"""
+    
+    def find_by_phone_id(self, phone_id: str) -> dict:
+        """Busca un tenant por phone_id en public.tenants"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, nombre, phone_id, token, usar_ia, activo, created_at
+                        FROM public.tenants
+                        WHERE phone_id = %s AND activo = true
+                    """, (phone_id,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            'id': row[0],
+                            'nombre': row[1],
+                            'phone_id': row[2],
+                            'token': row[3],
+                            'usar_ia': row[4],
+                            'activo': row[5],
+                            'created_at': row[6]
+                        }
+                    return None
+        except Exception as e:
+            logger.error(f"Error buscando tenant por phone_id {phone_id}: {e}")
+            return None
+    
+    def find_by_id(self, tenant_id: str) -> dict:
+        """Busca un tenant por ID"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, nombre, phone_id, token, usar_ia, activo, created_at
+                        FROM public.tenants
+                        WHERE id = %s AND activo = true
+                    """, (tenant_id,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            'id': row[0],
+                            'nombre': row[1],
+                            'phone_id': row[2],
+                            'token': row[3],
+                            'usar_ia': row[4],
+                            'activo': row[5],
+                            'created_at': row[6]
+                        }
+                    return None
+        except Exception as e:
+            logger.error(f"Error buscando tenant por ID {tenant_id}: {e}")
+            return None
+    
+    def create(self, nombre: str, phone_id: str, token: str = None, usar_ia: bool = True) -> dict:
+        """Crea un nuevo tenant"""
+        try:
+            tenant_id = str(uuid.uuid4())
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO public.tenants (id, nombre, phone_id, token, usar_ia, activo, created_at)
+                        VALUES (%s, %s, %s, %s, %s, true, NOW())
+                        RETURNING id
+                    """, (tenant_id, nombre, phone_id, token, usar_ia))
+                    conn.commit()
+                    
+                    # Crear esquema para el tenant
+                    cur.execute(f"CREATE SCHEMA IF NOT EXISTS {tenant_id}")
+                    conn.commit()
+                    
+                    logger.info(f"Tenant creado: {tenant_id} - {nombre}")
+                    return self.find_by_id(tenant_id)
+        except Exception as e:
+            logger.error(f"Error creando tenant: {e}")
+            return None
+    
+    def update(self, tenant_id: str, **kwargs) -> bool:
+        """Actualiza un tenant"""
+        try:
+            allowed_fields = ['nombre', 'phone_id', 'token', 'usar_ia', 'activo']
+            updates = []
+            values = []
+            
+            for field, value in kwargs.items():
+                if field in allowed_fields:
+                    updates.append(f"{field} = %s")
+                    values.append(value)
+            
+            if not updates:
+                return False
+            
+            values.append(tenant_id)
+            
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        UPDATE public.tenants
+                        SET {', '.join(updates)}
+                        WHERE id = %s
+                    """, values)
+                    conn.commit()
+                    return cur.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error actualizando tenant {tenant_id}: {e}")
+            return False
+
+
+# ==================== INSTANCIAS GLOBALES ====================
+
 order_repo = OrderRepository()
+tenant_repo = TenantRepository()
