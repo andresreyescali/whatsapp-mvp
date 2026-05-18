@@ -3,7 +3,6 @@ import hashlib
 import secrets
 import re
 import requests
-# from utils.email_hostgator import email_sender  # en lugar de email_sender
 from datetime import datetime, timedelta
 from core.database import db_manager
 from core.logger import logger
@@ -160,6 +159,7 @@ class AuthManager:
                 return [{'id': r[0], 'nombre': r[1], 'phone_id': r[2], 'rol': r[3], 'verificado': r[4]} for r in rows]
     
     def crear_negocio(self, usuario_id: str, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante') -> dict:
+        """Crea un nuevo negocio (tenant) para el usuario"""
         from tenants.repository import tenant_repo
         from tenants.schema_manager import schema_manager
         from utils.email_brevo import email_sender
@@ -171,23 +171,57 @@ class AuthManager:
                 if cur.fetchone():
                     return {'success': False, 'error': 'Ya existe un negocio con ese nombre'}
         
-        # Crear tenant
-        tenant = tenant_repo.create(nombre, phone_id, token, tipo_negocio)
-        schema_manager.create_tenant_schema(tenant['id'], tipo_negocio)
+        # Verificar phone_id único
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM public.tenants WHERE phone_id = %s", (phone_id,))
+                if cur.fetchone():
+                    return {'success': False, 'error': 'El número de teléfono ya está registrado'}
+        
+        logger.info(f"Creando tenant: nombre={nombre}, phone_id={phone_id}, tipo={tipo_negocio}")
+        
+        # Crear tenant con los parámetros en el orden correcto
+        tenant = tenant_repo.create(
+            nombre=nombre,
+            phone_id=phone_id,
+            token=token,
+            tipo_negocio=tipo_negocio,
+            usar_ia=True
+        )
+        
+        # Validar que el tenant se creó correctamente
+        if not tenant:
+            logger.error("No se pudo crear el tenant - tenant_repo.create() retornó None")
+            return {'success': False, 'error': 'Error interno al crear el negocio'}
+        
+        logger.info(f"Tenant creado exitosamente: {tenant['id']}")
+        
+        # Crear esquema del tenant
+        try:
+            schema_manager.create_tenant_schema(tenant['id'], tipo_negocio)
+            logger.info(f"Esquema creado para tenant {tenant['id']}")
+        except Exception as e:
+            logger.error(f"Error creando esquema para tenant {tenant['id']}: {e}")
+            return {'success': False, 'error': f'Error creando estructura del negocio: {str(e)}'}
         
         # Asociar usuario como owner
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
-                rol_owner_id = cur.fetchone()[0]
+                rol_row = cur.fetchone()
+                if not rol_row:
+                    return {'success': False, 'error': 'Rol owner no encontrado'}
+                rol_owner_id = rol_row[0]
+                
                 cur.execute('''
-                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por, created_at)
+                    VALUES (%s, %s, %s, %s, NOW())
                 ''', (usuario_id, tenant['id'], rol_owner_id, usuario_id))
             conn.commit()
         
+        logger.info(f"Usuario {usuario_id} asociado como owner del tenant {tenant['id']}")
+        
         # Generar código de verificación
-        import secrets
         codigo_verificacion = secrets.token_hex(3).upper()
         
         # Guardar en base de datos
@@ -208,7 +242,6 @@ class AuthManager:
                 if row:
                     email_usuario = row[0]
         
-        # Enviar código por EMAIL (no WhatsApp)
         # Enviar código por EMAIL
         email_enviado = False
         if email_usuario:
@@ -240,19 +273,19 @@ class AuthManager:
         
         mensaje = f"""*🔐 CÓDIGO DE VERIFICACIÓN*
 
-    Hola, gracias por registrar tu negocio en WhatsApp Bot SaaS.
+Hola, gracias por registrar tu negocio en WhatsApp Bot SaaS.
 
-    Tu código de verificación es:
+Tu código de verificación es:
 
-    *{codigo}*
+*{codigo}*
 
-    Ingresa este código en el panel de control para activar tu asistente de ventas.
+Ingresa este código en el panel de control para activar tu asistente de ventas.
 
-    Este código expira en 10 minutos.
+Este código expira en 10 minutos.
 
-    ¿No solicitaste este código? Ignora este mensaje.
+¿No solicitaste este código? Ignora este mensaje.
 
-    © WhatsApp Bot SaaS - Automatiza tus ventas"""
+© WhatsApp Bot SaaS - Automatiza tus ventas"""
         
         # Enviar el mensaje
         return whatsapp_client.send_message(tenant, telefono_cliente, mensaje)
@@ -502,8 +535,8 @@ class AuthManager:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('''
-                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por, invitacion_aceptada)
-                    VALUES (%s, %s, %s, %s, true)
+                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por, invitacion_aceptada, created_at)
+                    VALUES (%s, %s, %s, %s, true, NOW())
                 ''', (usuario_invitado_id, tenant_id, rol_id, usuario_invitador_id))
             conn.commit()
         
@@ -564,6 +597,7 @@ class AuthManager:
             conn.commit()
         
         return {'success': True, 'message': f'Rol cambiado a {nuevo_rol}'}
+
 
 # Instancia global
 auth_manager = AuthManager()

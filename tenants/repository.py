@@ -145,55 +145,48 @@ class OrderRepository:
         except Exception as e:
             logger.warning(f'Error verificando/creando columnas (puede que ya existan): {e}')
     
-    def create(self, tenant_id: str, cliente_numero: str, producto_nombre: str, precio: int, cantidad: int = 1) -> dict:
-        """Crea un nuevo pedido con número compuesto"""
-        pedido_id = str(uuid.uuid4())
-        
-        # Verificar que las columnas existen
-        with db_manager.get_connection(tenant_id) as conn:
-            self._verificar_columnas_pedidos(tenant_id, conn)
-        
-        # Obtener el siguiente secuencial
-        with db_manager.get_connection(tenant_id) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant_id}.pedidos")
-                row = cur.fetchone()
-                secuencial = row[0] if row else 1
-        
-        # Generar número compuesto
-        numero_pedido = db_manager.generar_numero_pedido(tenant_id, secuencial)
-        
-        items = [{"nombre": producto_nombre, "precio": precio, "cantidad": cantidad}]
-        total = precio * cantidad
-        
+    def create(self, nombre: str, phone_id: str, token: str = None, tipo_negocio: str = None, usar_ia: bool = True) -> dict:
+        """Crea un nuevo tenant"""
         try:
-            with db_manager.get_connection(tenant_id) as conn:
+            tenant_id = str(uuid.uuid4())
+            with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"""
-                        INSERT INTO {tenant_id}.pedidos 
-                        (id, cliente_numero, items, total, estado, numero_pedido, secuencial, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                    """, (pedido_id, cliente_numero, json.dumps(items), total, "nuevo", numero_pedido, secuencial))
-                conn.commit()
-            
-            logger.info(f'Pedido {numero_pedido} creado para {cliente_numero} en tenant {tenant_id}')
-            
-            # Enviar email de confirmación
-            self._enviar_email_confirmacion(tenant_id, numero_pedido, items, total, cliente_numero)
-            
-            return {
-                "id": pedido_id,
-                "numero_pedido": numero_pedido,
-                "secuencial": secuencial,
-                "cliente_numero": cliente_numero,
-                "items": items,
-                "total": total,
-                "estado": "nuevo"
-            }
+                    # Verificar estructura de la tabla tenants
+                    cur.execute("""
+                        SELECT column_name, data_type 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'tenants' 
+                        AND table_schema = 'public'
+                        ORDER BY ordinal_position
+                    """)
+                    columns = cur.fetchall()
+                    logger.info(f"Estructura de tabla tenants: {columns}")
+                    
+                    # Insertar con los campos correctos según tu esquema
+                    # Tu tabla public.tenants tiene: id, nombre, tipo_negocio, schema_name, 
+                    # phone_id, token, usar_ia, configuracion, created_at, activo
+                    cur.execute("""
+                        INSERT INTO public.tenants (
+                            id, nombre, tipo_negocio, phone_id, token, 
+                            usar_ia, created_at, activo
+                        ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), true)
+                        RETURNING id
+                    """, (tenant_id, nombre, tipo_negocio, phone_id, token, usar_ia))
+                    result = cur.fetchone()
+                    conn.commit()
+                    
+                    if result:
+                        # Crear esquema para el tenant
+                        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {tenant_id}")
+                        conn.commit()
+                        
+                        logger.info(f"Tenant creado: {tenant_id} - {nombre}")
+                        return self.find_by_id(tenant_id)
+                    return None
         except Exception as e:
-            logger.error(f'Error creando pedido: {e}')
-            raise
-    
+            logger.error(f"Error creando tenant: {e}")
+            raise  # Re-lanzar para ver el error completo
+            
     def _enviar_email_confirmacion(self, tenant_id: str, numero_pedido: str, items: list, total: int, cliente_numero: str):
         """Envía email de confirmación al dueño del negocio"""
         try:
