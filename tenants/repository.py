@@ -1,5 +1,6 @@
 import uuid
 import json
+import re
 from core.database import db_manager
 from core.logger import logger
 
@@ -149,18 +150,15 @@ class OrderRepository:
         """Crea un nuevo pedido con número compuesto"""
         pedido_id = str(uuid.uuid4())
         
-        # Verificar que las columnas existen
         with db_manager.get_connection(tenant_id) as conn:
             self._verificar_columnas_pedidos(tenant_id, conn)
         
-        # Obtener el siguiente secuencial
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant_id}.pedidos")
                 row = cur.fetchone()
                 secuencial = row[0] if row else 1
         
-        # Generar número compuesto
         numero_pedido = db_manager.generar_numero_pedido(tenant_id, secuencial)
         
         items = [{"nombre": producto_nombre, "precio": precio, "cantidad": cantidad}]
@@ -178,7 +176,6 @@ class OrderRepository:
             
             logger.info(f'Pedido {numero_pedido} creado para {cliente_numero} en tenant {tenant_id}')
             
-            # Enviar email de confirmación
             self._enviar_email_confirmacion(tenant_id, numero_pedido, items, total, cliente_numero)
             
             return {
@@ -205,7 +202,6 @@ class OrderRepository:
                 logger.error(f"Tenant no encontrado: {tenant_id}")
                 return
             
-            # Obtener email del dueño del negocio
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -233,7 +229,6 @@ class OrderRepository:
             if not tenant:
                 return
             
-            # Obtener email del dueño del negocio
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -249,7 +244,7 @@ class OrderRepository:
             logger.error(f'Error enviando email de actualización: {e}')
     
     def get_pendientes(self, tenant_id: str, cliente_numero: str):
-        """Obtiene pedidos pendientes del cliente (nuevos o pendiente_pago)"""
+        """Obtiene pedidos pendientes del cliente"""
         try:
             with db_manager.get_connection(tenant_id) as conn:
                 self._verificar_columnas_pedidos(tenant_id, conn)
@@ -278,54 +273,35 @@ class OrderRepository:
             return []
     
     def marcar_pagado(self, tenant_id: str, cliente_numero: str) -> int:
-        """Marca pedidos como pagados y envía email"""
+        """Marca pedidos como pagados"""
         try:
             with db_manager.get_connection(tenant_id) as conn:
                 self._verificar_columnas_pedidos(tenant_id, conn)
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"""
-                        SELECT numero_pedido FROM {tenant_id}.pedidos
-                        WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
-                        ORDER BY created_at DESC LIMIT 1
-                    """, (cliente_numero,))
-                    row = cur.fetchone()
-                    numero_pedido = row[0] if row else None
-                    
                     cur.execute(f"""
                         UPDATE {tenant_id}.pedidos
                         SET estado = 'pagado', pagado_at = NOW(), updated_at = NOW()
                         WHERE cliente_numero = %s AND estado IN ('nuevo', 'pendiente_pago')
                     """, (cliente_numero,))
                     updated = cur.rowcount
-                
                 conn.commit()
             
-            if updated > 0 and numero_pedido:
-                self._enviar_email_actualizacion(tenant_id, numero_pedido, 'pagado')
-                logger.info(f'{updated} pedido(s) marcado(s) como pagado para {cliente_numero}')
-            elif updated > 0:
-                logger.info(f'{updated} pedido(s) marcado(s) como pagado para {cliente_numero} (sin número de pedido)')
-            
+            logger.info(f'{updated} pedido(s) marcado(s) como pagado para {cliente_numero}')
             return updated
-            
         except Exception as e:
             logger.error(f'Error marcando pedido como pagado: {e}')
             raise
     
     def actualizar_estado(self, tenant_id: str, pedido_id: str, nuevo_estado: str) -> bool:
-        """Actualiza el estado de un pedido específico y envía email"""
+        """Actualiza el estado de un pedido"""
         try:
             with db_manager.get_connection(tenant_id) as conn:
                 self._verificar_columnas_pedidos(tenant_id, conn)
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"SELECT numero_pedido FROM {tenant_id}.pedidos WHERE id = %s", (pedido_id,))
-                    row = cur.fetchone()
-                    numero_pedido = row[0] if row else None
-                    
                     fecha_campo = {
                         'pagado': 'pagado_at',
                         'enviado': 'enviado_at',
@@ -347,9 +323,6 @@ class OrderRepository:
                     
                     updated = cur.rowcount
                 conn.commit()
-            
-            if updated > 0 and numero_pedido:
-                self._enviar_email_actualizacion(tenant_id, numero_pedido, nuevo_estado)
             
             return updated > 0
         except Exception as e:
@@ -473,25 +446,27 @@ class TenantRepository:
         """Crea un nuevo tenant"""
         try:
             tenant_id = str(uuid.uuid4())
+            # Crear schema_name válido (reemplazar guiones por guiones bajos)
+            schema_name = f"tenant_{tenant_id.replace('-', '_')}"
+            
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Insertar con todos los campos requeridos
                     cur.execute("""
                         INSERT INTO public.tenants (
                             id, nombre, tipo_negocio, schema_name, phone_id, token, 
                             usar_ia, configuracion, created_at, activo
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
                         RETURNING id
-                    """, (tenant_id, nombre, tipo_negocio, tenant_id, phone_id, token, usar_ia, '{}', True))
+                    """, (tenant_id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, '{}', True))
                     result = cur.fetchone()
                     conn.commit()
                     
                     if result:
-                        # Crear esquema para el tenant
-                        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {tenant_id}")
+                        # Crear esquema para el tenant (escapado con comillas dobles)
+                        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
                         conn.commit()
                         
-                        logger.info(f"Tenant creado: {tenant_id} - {nombre}")
+                        logger.info(f"Tenant creado: {tenant_id} - {nombre} (schema: {schema_name})")
                         return self.find_by_id(tenant_id)
                     return None
         except Exception as e:

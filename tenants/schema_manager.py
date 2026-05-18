@@ -105,22 +105,27 @@ class SchemaManager:
         logger.info(f'Schema creado exitosamente para {tenant_id}')
     
     def ensure_schema(self, tenant_id: str):
-        """Asegura que el esquema del tenant existe y tiene todas las tablas necesarias"""
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Crear esquema si no existe
-                    cur.execute(f'CREATE SCHEMA IF NOT EXISTS {tenant_id}')
-                    
-                    # Verificar y crear tablas si no existen
-                    self._ensure_tables_exist(tenant_id, cur)
-                    
-                    conn.commit()
-                    logger.info(f"Esquema asegurado para tenant {tenant_id}")
-        except Exception as e:
-            logger.error(f"Error asegurando esquema para {tenant_id}: {e}")
-            raise
-    
+            """Asegura que el esquema del tenant existe y tiene todas las tablas necesarias"""
+            try:
+                # Obtener el schema_name del tenant
+                from tenants.repository import tenant_repo
+                tenant = tenant_repo.find_by_id(tenant_id)
+                if not tenant:
+                    raise ValueError(f"Tenant {tenant_id} no encontrado")
+                
+                schema_name = tenant.get('schema_name', tenant_id)
+                
+                with db_manager.get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Crear esquema si no existe (escapado con comillas dobles)
+                        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+                        self._ensure_tables_exist(schema_name, cur)
+                        conn.commit()
+                        logger.info(f"Esquema asegurado para tenant {tenant_id} (schema: {schema_name})")
+            except Exception as e:
+                logger.error(f"Error asegurando esquema para {tenant_id}: {e}")
+                raise
+            
     def _ensure_tables_exist(self, tenant_id: str, cur):
         """Verifica y crea las tablas necesarias si no existen"""
         
