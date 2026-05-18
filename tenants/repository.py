@@ -419,7 +419,7 @@ class TenantRepository:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        SELECT id, nombre, tipo_negocio, phone_id, token, usar_ia, activo, created_at
+                        SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, activo, created_at
                         FROM public.tenants
                         WHERE phone_id = %s AND activo = true
                     """, (phone_id,))
@@ -429,11 +429,12 @@ class TenantRepository:
                             'id': row[0],
                             'nombre': row[1],
                             'tipo_negocio': row[2],
-                            'phone_id': row[3],
-                            'token': row[4],
-                            'usar_ia': row[5],
-                            'activo': row[6],
-                            'created_at': row[7]
+                            'schema_name': row[3],
+                            'phone_id': row[4],
+                            'token': row[5],
+                            'usar_ia': row[6],
+                            'activo': row[7],
+                            'created_at': row[8]
                         }
                     return None
         except Exception as e:
@@ -446,7 +447,7 @@ class TenantRepository:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        SELECT id, nombre, tipo_negocio, phone_id, token, usar_ia, activo, created_at
+                        SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, activo, created_at
                         FROM public.tenants
                         WHERE id = %s AND activo = true
                     """, (tenant_id,))
@@ -456,11 +457,12 @@ class TenantRepository:
                             'id': row[0],
                             'nombre': row[1],
                             'tipo_negocio': row[2],
-                            'phone_id': row[3],
-                            'token': row[4],
-                            'usar_ia': row[5],
-                            'activo': row[6],
-                            'created_at': row[7]
+                            'schema_name': row[3],
+                            'phone_id': row[4],
+                            'token': row[5],
+                            'usar_ia': row[6],
+                            'activo': row[7],
+                            'created_at': row[8]
                         }
                     return None
         except Exception as e:
@@ -473,34 +475,14 @@ class TenantRepository:
             tenant_id = str(uuid.uuid4())
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Verificar si la columna tipo_negocio existe
+                    # Insertar con todos los campos requeridos
                     cur.execute("""
-                        SELECT column_name 
-                        FROM information_schema.columns 
-                        WHERE table_name = 'tenants' 
-                        AND table_schema = 'public'
-                        AND column_name = 'tipo_negocio'
-                    """)
-                    tiene_tipo_negocio = cur.fetchone() is not None
-                    
-                    if tiene_tipo_negocio:
-                        cur.execute("""
-                            INSERT INTO public.tenants (
-                                id, nombre, tipo_negocio, phone_id, token, 
-                                usar_ia, created_at, activo
-                            ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), true)
-                            RETURNING id
-                        """, (tenant_id, nombre, tipo_negocio, phone_id, token, usar_ia))
-                    else:
-                        # Si no tiene la columna tipo_negocio, insertar sin ella
-                        cur.execute("""
-                            INSERT INTO public.tenants (
-                                id, nombre, phone_id, token, 
-                                usar_ia, created_at, activo
-                            ) VALUES (%s, %s, %s, %s, %s, NOW(), true)
-                            RETURNING id
-                        """, (tenant_id, nombre, phone_id, token, usar_ia))
-                    
+                        INSERT INTO public.tenants (
+                            id, nombre, tipo_negocio, schema_name, phone_id, token, 
+                            usar_ia, configuracion, created_at, activo
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+                        RETURNING id
+                    """, (tenant_id, nombre, tipo_negocio, tenant_id, phone_id, token, usar_ia, '{}', True))
                     result = cur.fetchone()
                     conn.commit()
                     
