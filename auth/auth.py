@@ -442,21 +442,29 @@ Este código expira en 10 minutos.
     
     # ==================== MÉTODOS PARA GESTIÓN DE ROLES ====================
     
-    def get_rol_negocio(self, usuario_id: str, tenant_id: str) -> dict:
-        """Obtiene el rol de un usuario en un negocio específico"""
+def get_rol_negocio(self, usuario_id: str, tenant_id: str) -> dict:
+    """Obtiene el rol de un usuario en un negocio específico"""
+    try:
+        # Validar que usuario_id sea un UUID válido
+        if not usuario_id or usuario_id == 'super_admin' or len(usuario_id) < 30:
+            return None
+            
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('''
                     SELECT rn.nombre as rol, rn.id as rol_id
                     FROM public.usuario_negocio un
                     JOIN public.roles_negocio rn ON un.rol_id = rn.id
-                    WHERE un.usuario_id = %s AND un.tenant_id = %s
+                    WHERE un.usuario_id = %s::uuid AND un.tenant_id = %s
                 ''', (usuario_id, tenant_id))
                 row = cur.fetchone()
                 if row:
                     return {'rol': row[0], 'rol_id': row[1]}
                 return None
-    
+    except Exception as e:
+        logger.error(f"Error obteniendo rol: {e}")
+        return None
+        
     def verificar_permiso(self, usuario_id: str, tenant_id: str, permiso_requerido: str) -> bool:
         """Verifica si un usuario tiene cierto permiso en un negocio"""
         roles_permitidos = {
