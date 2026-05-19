@@ -503,7 +503,49 @@ class TenantRepository:
             logger.error(f"Error actualizando tenant {tenant_id}: {e}")
             return False
 
+    # Agrega este método a la clase TenantRepository
+    def guardar_configuracion_ia(self, tenant_id: str, usar_ia: bool) -> dict:
+        """Guarda la configuración de IA del tenant"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE public.tenants 
+                        SET usar_ia = %s
+                        WHERE id = %s
+                    """, (usar_ia, tenant_id))
+                    conn.commit()
+            
+            # Limpiar caché
+            db_manager.clear_tenant_cache(tenant_id)
+            
+            logger.info(f"Configuración IA actualizada: tenant={tenant_id}, usar_ia={usar_ia}")
+            return {'success': True, 'message': f'IA {"habilitada" if usar_ia else "deshabilitada"}'}
+        except Exception as e:
+            logger.error(f"Error guardando configuración IA: {e}")
+            return {'success': False, 'error': str(e)}
 
+    def update_ia_config(self, tenant_id: str, usar_ia: bool) -> bool:
+        """Actualiza solo la configuración de IA del tenant"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE public.tenants 
+                        SET usar_ia = %s
+                        WHERE id = %s
+                    """, (usar_ia, tenant_id))
+                    conn.commit()
+            
+            # Limpiar caché
+            db_manager.clear_tenant_cache(tenant_id)
+            
+            logger.info(f"IA configurada: tenant={tenant_id}, usar_ia={usar_ia}")
+            return True
+        except Exception as e:
+            logger.error(f"Error actualizando IA config: {e}")
+            return False
+        
 # ==================== INSTANCIAS GLOBALES ====================
 
 order_repo = OrderRepository()

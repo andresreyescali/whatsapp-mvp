@@ -347,8 +347,13 @@ Este código expira en 10 minutos.
     def get_rol_negocio(self, usuario_id: str, tenant_id: str) -> dict:
         """Obtiene el rol de un usuario en un negocio específico"""
         try:
-            # Validar que usuario_id sea un UUID válido
-            if not usuario_id or usuario_id == 'super_admin' or len(usuario_id) < 30:
+            # Validar que usuario_id sea un UUID válido (convertir a string primero)
+            if not usuario_id or usuario_id == 'super_admin':
+                return None
+                
+            # Convertir a string para validar (UUID tiene 36 caracteres)
+            usuario_id_str = str(usuario_id)
+            if len(usuario_id_str) < 30:
                 return None
                 
             with db_manager.get_connection() as conn:
@@ -358,7 +363,7 @@ Este código expira en 10 minutos.
                         FROM public.usuario_negocio un
                         JOIN public.roles_negocio rn ON un.rol_id = rn.id
                         WHERE un.usuario_id = %s::uuid AND un.tenant_id = %s
-                    ''', (usuario_id, tenant_id))
+                    ''', (usuario_id_str, tenant_id))
                     row = cur.fetchone()
                     if row:
                         return {'rol': row[0], 'rol_id': row[1]}

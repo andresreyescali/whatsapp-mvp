@@ -104,6 +104,40 @@ def tenant_owner_required_from_args(f):
         return "No tienes acceso a este negocio", 403
     return decorated_function
 
+# Agrega este decorador después de los otros decoradores (alrededor de la línea 75)
+
+def tenant_required(f):
+    """Decorador para verificar que el tenant existe y el usuario tiene acceso"""
+    @wraps(f)
+    def decorated_function(tenant_id, *args, **kwargs):
+        if 'usuario_id' not in session:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'No autenticado'}), 401
+            return redirect('/')
+        
+        # Verificar que el tenant existe
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if not tenant:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Negocio no encontrado'}), 404
+            return "Negocio no encontrado", 404
+        
+        # Si es super_admin, permitir acceso directo
+        if session.get('rol_sistema') == 'super_admin':
+            return f(tenant_id, *args, **kwargs)
+        
+        # Verificar que el usuario tiene acceso a este tenant
+        negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
+        for n in negocios:
+            if n['id'] == tenant_id:
+                return f(tenant_id, *args, **kwargs)
+        
+        if request.path.startswith('/api/'):
+            return jsonify({'error': 'No tienes acceso a este negocio'}), 403
+        return "No tienes acceso a este negocio", 403
+    return decorated_function
+
+
 # ==================== PÁGINAS PÚBLICAS ====================
 
 @app.route('/')
@@ -249,6 +283,19 @@ def api_auth_logout():
     """Logout de usuario"""
     session.clear()
     return jsonify({'success': True})
+
+@app.route('/api/negocio/<tenant_id>/configuracion', methods=['POST'])
+@login_required
+@tenant_required  # ← Cambiar de @tenant_owner_required a @tenant_required
+def guardar_configuracion(tenant_id):
+    """Guarda la configuración del negocio (incluyendo IA)"""
+    data = request.get_json()
+    usar_ia = data.get('usar_ia', False)
+    
+    # Usar tenant_repo.guardar_configuracion_ia
+    result = tenant_repo.guardar_configuracion_ia(tenant_id, usar_ia)
+    
+    return jsonify(result)
 
 # ==================== PERFIL DE USUARIO ====================
 
@@ -1529,9 +1576,6 @@ def migrar_todos_tenants():
                     resultados.append({'tenant': tenant_id, 'status': 'ok'})
         except Exception as e:
             resultados.append({'tenant': tenant_id, 'status': 'error', 'error': str(e)})
-        except Exception as e:
-            resultados.append({'tenant': tenant_id, 'status': 'error', 'error': str(e)})
-    
     return jsonify({'resultados': resultados, 'total': len(tenants)})
 
 if __name__ == '__main__':
