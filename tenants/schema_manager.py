@@ -5,23 +5,23 @@ import uuid
 class SchemaManager:
     """Gestiona esquemas y tablas de tenants"""
     
+    def _get_schema_name(self, tenant_id: str) -> str:
+        """Obtiene el schema_name de un tenant"""
+        from tenants.repository import tenant_repo
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if tenant and tenant.get('schema_name'):
+            return tenant['schema_name']
+        return f"tenant_{tenant_id.replace('-', '_')}"
+    
     def create_tenant_schema(self, tenant_id: str, tipo_negocio: str):
         """Crea schema y tablas para un nuevo tenant"""
         logger.info(f'Creando schema para tenant {tenant_id} (tipo: {tipo_negocio})')
         
-        # Obtener el schema_name del tenant
-        from tenants.repository import tenant_repo
-        tenant = tenant_repo.find_by_id(tenant_id)
-        if not tenant:
-            raise ValueError(f"Tenant {tenant_id} no encontrado")
-        
-        schema_name = tenant.get('schema_name')
-        if not schema_name:
-            schema_name = f"tenant_{tenant_id.replace('-', '_')}"
+        schema_name = self._get_schema_name(tenant_id)
         
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                # 🔧 CORREGIDO: Usar schema_name con comillas dobles
+                # Crear esquema
                 cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
                 
                 # 1. Tabla de clientes
@@ -115,21 +115,11 @@ class SchemaManager:
     def ensure_schema(self, tenant_id: str):
         """Asegura que el esquema del tenant existe y tiene todas las tablas necesarias"""
         try:
-            # Obtener el tenant para conocer su schema_name
-            from tenants.repository import tenant_repo
-            tenant = tenant_repo.find_by_id(tenant_id)
-            if not tenant:
-                raise ValueError(f"Tenant {tenant_id} no encontrado")
-            
-            schema_name = tenant.get('schema_name')
-            if not schema_name:
-                schema_name = f"tenant_{tenant_id.replace('-', '_')}"
+            schema_name = self._get_schema_name(tenant_id)
             
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Crear esquema si no existe (escapado con comillas dobles)
                     cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
-                    # Crear tablas necesarias (pasa schema_name, no tenant_id)
                     self._ensure_tables_exist(schema_name, cur)
                     conn.commit()
                     logger.info(f"Esquema asegurado para tenant {tenant_id} (schema: {schema_name})")
@@ -137,12 +127,12 @@ class SchemaManager:
             logger.error(f"Error asegurando esquema para {tenant_id}: {e}")
             raise
             
-    def _ensure_tables_exist(self, tenant_id: str, cur):
+    def _ensure_tables_exist(self, schema_name: str, cur):
         """Verifica y crea las tablas necesarias si no existen"""
         
         # Tabla de clientes
         cur.execute(f'''
-        CREATE TABLE IF NOT EXISTS {tenant_id}.clientes (
+        CREATE TABLE IF NOT EXISTS "{schema_name}".clientes (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             numero_telefono TEXT UNIQUE NOT NULL,
             nombre TEXT,
@@ -158,7 +148,7 @@ class SchemaManager:
         
         # Tabla de productos
         cur.execute(f'''
-        CREATE TABLE IF NOT EXISTS {tenant_id}.productos (
+        CREATE TABLE IF NOT EXISTS "{schema_name}".productos (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             nombre TEXT NOT NULL,
             descripcion TEXT,
@@ -171,9 +161,9 @@ class SchemaManager:
         
         # Tabla de pedidos
         cur.execute(f'''
-        CREATE TABLE IF NOT EXISTS {tenant_id}.pedidos (
+        CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+            cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
             numero_pedido TEXT UNIQUE,
             items JSONB NOT NULL,
             total INTEGER NOT NULL,
@@ -190,9 +180,9 @@ class SchemaManager:
         
         # Tabla de conversaciones
         cur.execute(f'''
-        CREATE TABLE IF NOT EXISTS {tenant_id}.conversaciones (
+        CREATE TABLE IF NOT EXISTS "{schema_name}".conversaciones (
             id SERIAL PRIMARY KEY,
-            cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+            cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
             cliente_numero TEXT NOT NULL,
             mensaje TEXT NOT NULL,
             respuesta TEXT,
@@ -203,9 +193,9 @@ class SchemaManager:
         
         # Tabla de carritos
         cur.execute(f'''
-        CREATE TABLE IF NOT EXISTS {tenant_id}.carritos (
+        CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
             id SERIAL PRIMARY KEY,
-            cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+            cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
             cliente_numero TEXT NOT NULL,
             items JSONB DEFAULT '[]',
             total INTEGER DEFAULT 0,
@@ -215,27 +205,27 @@ class SchemaManager:
         ''')
         
         # Índices
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON {tenant_id}.pedidos(cliente_id)')
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON {tenant_id}.pedidos(estado)')
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_created ON {tenant_id}.pedidos(created_at DESC)')
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON {tenant_id}.clientes(numero_telefono)')
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON {tenant_id}.conversaciones(cliente_numero)')
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_created ON {tenant_id}.conversaciones(created_at DESC)')
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON {tenant_id}.carritos(cliente_numero)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON "{schema_name}".pedidos(cliente_id)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON "{schema_name}".pedidos(estado)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_created ON "{schema_name}".pedidos(created_at DESC)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON "{schema_name}".clientes(numero_telefono)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON "{schema_name}".conversaciones(cliente_numero)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_created ON "{schema_name}".conversaciones(created_at DESC)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
     
-    def _insert_default_products(self, cursor, tenant_id: str, tipo_negocio: str):
+    def _insert_default_products(self, cursor, schema_name: str, tipo_negocio: str):
         """Inserta productos de ejemplo según el tipo de negocio"""
         
         # Verificar si ya hay productos
-        cursor.execute(f"SELECT COUNT(*) FROM {tenant_id}.productos")
+        cursor.execute(f'SELECT COUNT(*) FROM "{schema_name}".productos')
         count = cursor.fetchone()[0]
         if count > 0:
-            logger.info(f"Ya existen {count} productos en {tenant_id}, omitiendo inserción de productos de ejemplo")
+            logger.info(f"Ya existen {count} productos en {schema_name}, omitiendo inserción de productos de ejemplo")
             return
         
         if tipo_negocio == "restaurante":
             cursor.execute(f'''
-            INSERT INTO {tenant_id}.productos (nombre, descripcion, precio, categoria)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
             VALUES 
                 ('Pizza Margarita', 'Salsa de tomate, mozzarella, albahaca fresca', 25000, 'pizzas'),
                 ('Pizza Pepperoni', 'Pepperoni italiano, queso mozzarella', 32000, 'pizzas'),
@@ -245,7 +235,7 @@ class SchemaManager:
         
         elif tipo_negocio == "panaderia":
             cursor.execute(f'''
-            INSERT INTO {tenant_id}.productos (nombre, descripcion, precio, categoria)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
             VALUES 
                 ('Pan Francés', 'Pan crujiente recién horneado', 800, 'panes'),
                 ('Croissant', 'Hojaldre de mantequilla', 2500, 'pastelería'),
@@ -254,7 +244,7 @@ class SchemaManager:
         
         elif tipo_negocio == "pasteleria":
             cursor.execute(f'''
-            INSERT INTO {tenant_id}.productos (nombre, descripcion, precio, categoria)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
             VALUES 
                 ('Torta de Chocolate', '3 capas de chocolate belga', 45000, 'tortas'),
                 ('Cheesecake', 'Queso crema con frutos rojos', 12000, 'postres'),
@@ -263,7 +253,7 @@ class SchemaManager:
         
         elif tipo_negocio == "inmobiliaria":
             cursor.execute(f'''
-            INSERT INTO {tenant_id}.productos (nombre, descripcion, precio, categoria)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
             VALUES 
                 ('Apartamento 2 hab', 'Apartamento de 65m², 2 habitaciones, 1 baño, sala-comedor', 250000000, 'apartamentos'),
                 ('Apartamento 3 hab', 'Apartamento de 85m², 3 habitaciones, 2 baños, balcón', 320000000, 'apartamentos'),
@@ -274,7 +264,7 @@ class SchemaManager:
         
         elif tipo_negocio == "venta_autos":
             cursor.execute(f'''
-            INSERT INTO {tenant_id}.productos (nombre, descripcion, precio, categoria)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
             VALUES 
                 ('Sedán Económico', 'Auto nuevo, 4 puertas, aire acondicionado, dirección asistida', 45000000, 'sedanes'),
                 ('SUV Familiar', 'SUV 5 puertas, 7 asientos, cámara reversa, sensor de parqueo', 85000000, 'suvs'),
@@ -285,7 +275,7 @@ class SchemaManager:
         
         elif tipo_negocio == "venta_motos":
             cursor.execute(f'''
-            INSERT INTO {tenant_id}.productos (nombre, descripcion, precio, categoria)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
             VALUES 
                 ('Scooter 125cc', 'Moto automática, ideal para ciudad', 6500000, 'scooters'),
                 ('Naked 200cc', 'Moto naked, diseño moderno, frenos ABS', 9500000, 'naked'),
@@ -296,7 +286,7 @@ class SchemaManager:
         
         else:  # otros
             cursor.execute(f'''
-            INSERT INTO {tenant_id}.productos (nombre, descripcion, precio, categoria)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
             VALUES 
                 ('Producto 1', 'Descripción del producto 1', 10000, 'general'),
                 ('Producto 2', 'Descripción del producto 2', 20000, 'general')
@@ -305,9 +295,10 @@ class SchemaManager:
     def get_menu(self, tenant_id: str):
         """Obtiene el menú completo del tenant"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"SELECT id, nombre, descripcion, precio, categoria, disponible FROM {tenant_id}.productos WHERE disponible = true ORDER BY categoria, nombre")
+                    cur.execute(f'SELECT id, nombre, descripcion, precio, categoria, disponible FROM "{schema_name}".productos WHERE disponible = true ORDER BY categoria, nombre')
                     rows = cur.fetchall()
                     productos = []
                     for row in rows:
@@ -327,9 +318,10 @@ class SchemaManager:
     def get_product(self, tenant_id: str, product_id: str):
         """Obtiene un producto específico por ID"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"SELECT * FROM {tenant_id}.productos WHERE id = %s", (product_id,))
+                    cur.execute(f'SELECT * FROM "{schema_name}".productos WHERE id = %s', (product_id,))
                     row = cur.fetchone()
                     if row:
                         return {
@@ -348,11 +340,12 @@ class SchemaManager:
     def add_product(self, tenant_id: str, nombre: str, precio: int, descripcion: str = "", categoria: str = "general"):
         """Agrega un producto al menú"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             product_id = str(uuid.uuid4())
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        INSERT INTO {tenant_id}.productos (id, nombre, descripcion, precio, categoria)
+                        INSERT INTO "{schema_name}".productos (id, nombre, descripcion, precio, categoria)
                         VALUES (%s, %s, %s, %s, %s)
                     """, (product_id, nombre, descripcion, precio, categoria))
                 conn.commit()
@@ -366,6 +359,7 @@ class SchemaManager:
                       precio: int = None, categoria: str = None, disponible: bool = None):
         """Actualiza un producto existente"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             updates = []
             params = []
             
@@ -389,7 +383,7 @@ class SchemaManager:
                 return False
             
             params.append(product_id)
-            query = f"UPDATE {tenant_id}.productos SET {', '.join(updates)} WHERE id = %s"
+            query = f'UPDATE "{schema_name}".productos SET {", ".join(updates)} WHERE id = %s'
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
@@ -406,9 +400,10 @@ class SchemaManager:
     def delete_product(self, tenant_id: str, product_id: str):
         """Elimina un producto del menú"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"DELETE FROM {tenant_id}.productos WHERE id = %s", (product_id,))
+                    cur.execute(f'DELETE FROM "{schema_name}".productos WHERE id = %s', (product_id,))
                     deleted = cur.rowcount
                 conn.commit()
             

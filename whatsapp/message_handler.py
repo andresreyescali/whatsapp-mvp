@@ -18,6 +18,13 @@ class MessageHandler:
         self._datos_cliente = {}  # Almacena datos de clientes por número
         self._carritos_cache = {}  # Caché opcional para carritos
     
+    def _get_schema_name(self, tenant_id: str) -> str:
+        """Obtiene el schema_name de un tenant"""
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if tenant and tenant.get('schema_name'):
+            return tenant['schema_name']
+        return f"tenant_{tenant_id.replace('-', '_')}"
+    
     def process(self, phone_id: str, numero: str, texto: str):
         """Procesa mensaje entrante y envía respuesta"""
         logger.info(f'Procesando mensaje de {numero}: {texto}')
@@ -117,11 +124,12 @@ class MessageHandler:
     def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
         """Guarda el carrito en el esquema del tenant"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     # Asegurar tabla
                     cur.execute(f"""
-                        CREATE TABLE IF NOT EXISTS {tenant_id}.carritos (
+                        CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
                             id SERIAL PRIMARY KEY,
                             cliente_numero TEXT NOT NULL UNIQUE,
                             items JSONB NOT NULL,
@@ -133,7 +141,7 @@ class MessageHandler:
                     
                     # UPSERT
                     cur.execute(f"""
-                        INSERT INTO {tenant_id}.carritos (cliente_numero, items, total, created_at, updated_at)
+                        INSERT INTO "{schema_name}".carritos (cliente_numero, items, total, created_at, updated_at)
                         VALUES (%s, %s, %s, NOW(), NOW())
                         ON CONFLICT (cliente_numero) 
                         DO UPDATE SET items = EXCLUDED.items, total = EXCLUDED.total, updated_at = NOW()
@@ -146,10 +154,11 @@ class MessageHandler:
     def _cargar_carrito(self, tenant_id: str, cliente_numero: str) -> dict:
         """Carga el carrito desde el esquema del tenant"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        SELECT items, total FROM {tenant_id}.carritos 
+                        SELECT items, total FROM "{schema_name}".carritos 
                         WHERE cliente_numero = %s
                     """, (cliente_numero,))
                     row = cur.fetchone()
@@ -201,6 +210,7 @@ class MessageHandler:
     def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
         """Obtiene el historial de conversación desde el esquema del tenant"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     # Verificar si la tabla existe
@@ -209,13 +219,13 @@ class MessageHandler:
                             SELECT FROM information_schema.tables 
                             WHERE table_schema = %s AND table_name = 'conversaciones'
                         )
-                    """, (tenant_id,))
+                    """, (schema_name,))
                     if not cur.fetchone()[0]:
                         return []
                     
                     cur.execute(f"""
                         SELECT mensaje, respuesta, created_at 
-                        FROM {tenant_id}.conversaciones 
+                        FROM "{schema_name}".conversaciones 
                         WHERE cliente_numero = %s 
                         ORDER BY created_at DESC 
                         LIMIT %s
@@ -360,11 +370,12 @@ class MessageHandler:
     def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
         """Obtiene o crea un cliente en el esquema del tenant"""
         try:
+            schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     # Asegurar tabla
                     cur.execute(f"""
-                        CREATE TABLE IF NOT EXISTS {tenant_id}.clientes (
+                        CREATE TABLE IF NOT EXISTS "{schema_name}".clientes (
                             id UUID PRIMARY KEY,
                             numero_telefono TEXT UNIQUE NOT NULL,
                             nombre TEXT,
@@ -378,7 +389,7 @@ class MessageHandler:
                     """)
                     
                     # Buscar cliente
-                    cur.execute(f"SELECT id, nombre, cc, email, direccion FROM {tenant_id}.clientes WHERE numero_telefono = %s", (numero,))
+                    cur.execute(f'SELECT id, nombre, cc, email, direccion FROM "{schema_name}".clientes WHERE numero_telefono = %s', (numero,))
                     row = cur.fetchone()
                     
                     if row:
@@ -400,13 +411,13 @@ class MessageHandler:
                                 params.append(datos_cliente['direccion'])
                             if updates:
                                 params.append(cliente_id)
-                                cur.execute(f"UPDATE {tenant_id}.clientes SET {', '.join(updates)}, updated_at = NOW() WHERE id = %s", params)
+                                cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
                                 conn.commit()
                         return cliente_id
                     else:
                         cliente_id = str(uuid.uuid4())
                         cur.execute(f"""
-                            INSERT INTO {tenant_id}.clientes (id, numero_telefono, nombre, cc, email, direccion)
+                            INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion)
                             VALUES (%s, %s, %s, %s, %s, %s)
                         """, (
                             cliente_id, numero,
@@ -427,6 +438,7 @@ class MessageHandler:
             return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
         
         datos_cliente = self._datos_cliente.get(numero, {})
+        schema_name = self._get_schema_name(tenant['id'])
         
         cliente_id = self._obtener_o_crear_cliente(tenant['id'], numero, datos_cliente)
         if not cliente_id:
@@ -440,7 +452,7 @@ class MessageHandler:
             with conn.cursor() as cur:
                 # Asegurar tabla
                 cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {tenant['id']}.pedidos (
+                    CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                         id UUID PRIMARY KEY,
                         cliente_id UUID,
                         cliente_numero TEXT NOT NULL,
@@ -459,7 +471,7 @@ class MessageHandler:
                     )
                 """)
                 
-                cur.execute(f"SELECT COALESCE(MAX(secuencial), 0) + 1 FROM {tenant['id']}.pedidos")
+                cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
                 secuencial = cur.fetchone()[0] or 1
         
         numero_pedido = self._generar_numero_pedido(secuencial)
@@ -472,7 +484,7 @@ class MessageHandler:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        INSERT INTO {tenant['id']}.pedidos 
+                        INSERT INTO "{schema_name}".pedidos 
                         (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
