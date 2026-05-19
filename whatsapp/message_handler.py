@@ -207,7 +207,7 @@ class MessageHandler:
     
     # ==================== MÉTODOS DEL HISTORIAL ====================
 
-    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 5) -> list:
+    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 100) -> list:
         """Obtiene el historial de conversación desde el esquema del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
@@ -638,7 +638,7 @@ class MessageHandler:
             return self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)
         
         # 6. Respuesta general
-        historial = self._get_historial_conversacion(tenant['id'], numero, 5)
+        historial = self._get_historial_conversacion(tenant['id'], numero, 100)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
         datos_extraidos = self._extraer_datos_con_ia(texto)
