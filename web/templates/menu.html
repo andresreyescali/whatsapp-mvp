@@ -3,122 +3,19 @@
 {% block title %}Gestión de Menú - {{ tenant.nombre }}{% endblock %}
 
 {% block content %}
-<div class="stats">
-    <div class="stat-card">
-        <div class="number" id="totalProductos">0</div>
-        <div class="label">Productos en Menú</div>
+<!-- Loader para indicar carga -->
+<div id="pageLoader" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center;">
+    <div style="background: white; padding: 20px; border-radius: 10px; text-align: center;">
+        <div class="spinner" style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #25D366; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 10px;"></div>
+        <p>Cargando...</p>
     </div>
-    <div class="stat-card">
-        <div class="number" id="iaStatus">❌</div>
-        <div class="label">Inteligencia Artificial</div>
-    </div>
-</div>
-
-<div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2 style="margin: 0;">➕ Agregar Producto</h2>
-        <a href="/admin/train/{{ tenant.id }}" class="btn" style="background: #667eea;">
-            🤖 Entrenar IA
-        </a>
-    </div>
-    <form id="productForm">
-        <div class="form-group">
-            <label>Nombre del producto *</label>
-            <input type="text" id="nombre" required placeholder="Ej: Pizza Margarita">
-        </div>
-        <div class="form-group">
-            <label>Descripción</label>
-            <textarea id="descripcion" rows="2" placeholder="Describe el producto..."></textarea>
-        </div>
-        <div class="form-group">
-            <label>Precio ($) *</label>
-            <input type="number" id="precio" required placeholder="25000">
-        </div>
-        <div class="form-group">
-            <label>Categoría</label>
-            <select id="categoria">
-                <option value="pizzas">🍕 Pizzas</option>
-                <option value="hamburguesas">🍔 Hamburguesas</option>
-                <option value="bebidas">🥤 Bebidas</option>
-                <option value="acompañamientos">🍟 Acompañamientos</option>
-                <option value="postres">🍰 Postres</option>
-            </select>
-        </div>
-        <button type="submit" class="btn">Agregar Producto</button>
-    </form>
-</div>
-
-<div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2 style="margin: 0;">📋 Mi Menú</h2>
-        <a href="/admin/train/{{ tenant.id }}" class="btn" style="background: #667eea;">
-            🤖 Entrenar IA
-        </a>
-    </div>
-    <div id="menuContainer" class="loading">Cargando menú...</div>
-</div>
-
-<!-- Modal de edición de producto -->
-<div id="editModal" class="modal">
-    <div class="modal-content">
-        <span class="close">&times;</span>
-        <h2>✏️ Editar Producto</h2>
-        <input type="hidden" id="editProductId">
-        <div class="form-group">
-            <label>Nombre del producto *</label>
-            <input type="text" id="editNombre" required>
-        </div>
-        <div class="form-group">
-            <label>Descripción</label>
-            <textarea id="editDescripcion" rows="2"></textarea>
-        </div>
-        <div class="form-group">
-            <label>Precio ($) *</label>
-            <input type="number" id="editPrecio" required>
-        </div>
-        <div class="form-group">
-            <label>Categoría</label>
-            <select id="editCategoria">
-                <option value="pizzas">🍕 Pizzas</option>
-                <option value="hamburguesas">🍔 Hamburguesas</option>
-                <option value="bebidas">🥤 Bebidas</option>
-                <option value="acompañamientos">🍟 Acompañamientos</option>
-                <option value="postres">🍰 Postres</option>
-            </select>
-        </div>
-        <div style="margin: 15px 0;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                <input type="checkbox" id="editDisponible">
-                <span>Producto disponible para venta</span>
-            </label>
-        </div>
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-            <button id="saveEditBtn" class="btn btn-success">💾 Guardar Cambios</button>
-            <button id="cancelEditBtn" class="btn btn-secondary">❌ Cancelar</button>
-        </div>
-    </div>
-</div>
-
-<div class="card">
-    <h2>⚙️ Configuración</h2>
-    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-        <input type="checkbox" id="usarIA" {% if tenant.usar_ia %}checked{% endif %}>
-        <span>Activar respuestas con Inteligencia Artificial</span>
-    </label>
-    <p style="font-size: 12px; color: #666; margin-top: 10px;">
-        La IA permite respuestas más naturales y personalizadas para tus clientes.
-    </p>
-    <button id="saveConfigBtn" class="btn" style="margin-top: 15px;">💾 Guardar Configuración</button>
-</div>
-
-<!-- Agregado 27Apr2026- limpiar configuracion -->
-<div class="card">
-    <h2>⚙️ Configuración Avanzada</h2>
-    <button id="clearContextBtn" class="btn btn-danger" onclick="limpiarContexto()">🗑️ Limpiar contexto aprendido</button>
-    <p style="font-size:12px; color:#666; margin-top:10px;">Esto eliminará el contexto de IA y los productos aprendidos.</p>
 </div>
 
 <style>
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
     .btn-small {
         padding: 5px 10px;
         font-size: 12px;
@@ -219,46 +116,193 @@
         margin: 0;
         white-space: nowrap;
     }
+    .alert-success {
+        background-color: #d4edda;
+        color: #155724;
+        padding: 12px;
+        border-radius: 5px;
+        margin-bottom: 15px;
+        border: 1px solid #c3e6cb;
+    }
+    .alert-error {
+        background-color: #f8d7da;
+        color: #721c24;
+        padding: 12px;
+        border-radius: 5px;
+        margin-bottom: 15px;
+        border: 1px solid #f5c6cb;
+    }
 </style>
+
+<div class="stats">
+    <div class="stat-card">
+        <div class="number" id="totalProductos">0</div>
+        <div class="label">Productos en Menú</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="iaStatus">❌</div>
+        <div class="label">Inteligencia Artificial</div>
+    </div>
+</div>
+
+<div id="alertContainer"></div>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="margin: 0;">➕ Agregar Producto</h2>
+        <a href="/admin/train/{{ tenant.id }}" class="btn" style="background: #667eea;" onclick="showLoader()">
+            🤖 Entrenar IA
+        </a>
+    </div>
+    <form id="productForm">
+        <div class="form-group">
+            <label>Nombre del producto *</label>
+            <input type="text" id="nombre" required placeholder="Ej: Pizza Margarita">
+        </div>
+        <div class="form-group">
+            <label>Descripción</label>
+            <textarea id="descripcion" rows="2" placeholder="Describe el producto..."></textarea>
+        </div>
+        <div class="form-group">
+            <label>Precio ($) *</label>
+            <input type="number" id="precio" required placeholder="25000">
+        </div>
+        <div class="form-group">
+            <label>Categoría</label>
+            <select id="categoria">
+                <option value="pizzas">🍕 Pizzas</option>
+                <option value="hamburguesas">🍔 Hamburguesas</option>
+                <option value="bebidas">🥤 Bebidas</option>
+                <option value="acompañamientos">🍟 Acompañamientos</option>
+                <option value="postres">🍰 Postres</option>
+            </select>
+        </div>
+        <button type="submit" class="btn">Agregar Producto</button>
+    </form>
+</div>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="margin: 0;">📋 Mi Menú</h2>
+        <a href="/admin/train/{{ tenant.id }}" class="btn" style="background: #667eea;" onclick="showLoader()">
+            🤖 Entrenar IA
+        </a>
+    </div>
+    <div id="menuContainer" class="loading">Cargando menú...</div>
+</div>
+
+<!-- Modal de edición de producto -->
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>✏️ Editar Producto</h2>
+        <input type="hidden" id="editProductId">
+        <div class="form-group">
+            <label>Nombre del producto *</label>
+            <input type="text" id="editNombre" required>
+        </div>
+        <div class="form-group">
+            <label>Descripción</label>
+            <textarea id="editDescripcion" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Precio ($) *</label>
+            <input type="number" id="editPrecio" required>
+        </div>
+        <div class="form-group">
+            <label>Categoría</label>
+            <select id="editCategoria">
+                <option value="pizzas">🍕 Pizzas</option>
+                <option value="hamburguesas">🍔 Hamburguesas</option>
+                <option value="bebidas">🥤 Bebidas</option>
+                <option value="acompañamientos">🍟 Acompañamientos</option>
+                <option value="postres">🍰 Postres</option>
+            </select>
+        </div>
+        <div style="margin: 15px 0;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="editDisponible">
+                <span>Producto disponible para venta</span>
+            </label>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+            <button id="saveEditBtn" class="btn btn-success">💾 Guardar Cambios</button>
+            <button id="cancelEditBtn" class="btn btn-secondary">❌ Cancelar</button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>⚙️ Configuración</h2>
+    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+        <input type="checkbox" id="usarIA" {% if tenant.usar_ia %}checked{% endif %}>
+        <span>Activar respuestas con Inteligencia Artificial</span>
+    </label>
+    <p style="font-size: 12px; color: #666; margin-top: 10px;">
+        La IA permite respuestas más naturales y personalizadas para tus clientes.
+    </p>
+    <button id="saveConfigBtn" class="btn" style="margin-top: 15px;">💾 Guardar Configuración</button>
+</div>
+
+<!-- Configuración Avanzada -->
+<div class="card">
+    <h2>⚙️ Configuración Avanzada</h2>
+    <button id="clearContextBtn" class="btn btn-danger">🗑️ Limpiar contexto aprendido</button>
+    <p style="font-size:12px; color:#666; margin-top:10px;">Esto eliminará el contexto de IA y los productos aprendidos.</p>
+</div>
 
 <script>
     const tenantId = '{{ tenant.id }}';
     const API_BASE = window.location.origin;
     let currentEditProductId = null;
     
-    async function verificarPermisos() {
-    try {
-        const response = await fetch(`/api/negocio/${tenantId}/permisos`);
-        const data = await response.json();
-        
-        // Ocultar botones según permisos
-        if (!data.permisos.editar_menu) {
-            document.getElementById('productForm').style.display = 'none';
-            document.querySelector('.btn-edit')?.remove();
-            document.querySelector('.btn-danger')?.remove();
-            document.querySelector('.toggle-checkbox')?.remove();
-        }
-        
-        if (!data.permisos.entrenar_ia) {
-            document.querySelector('.btn-train')?.remove();
-        }
-        
-        // Mostrar rol del usuario
-        if (data.mi_rol) {
-            const rolBadge = document.createElement('div');
-            rolBadge.className = 'rol-badge';
-            rolBadge.innerHTML = `👤 Tu rol: ${data.mi_rol.rol.toUpperCase()}`;
-            document.querySelector('.stats').prepend(rolBadge);
-        }
-    } catch (error) {
-        console.error('Error verificando permisos:', error);
+    function showLoader() {
+        const loader = document.getElementById('pageLoader');
+        if (loader) loader.style.display = 'flex';
     }
-}
-
-// Llamar a verificarPermisos junto con loadMenu
-verificarPermisos();
-
+    
+    function hideLoader() {
+        const loader = document.getElementById('pageLoader');
+        if (loader) loader.style.display = 'none';
+    }
+    
+    function showAlert(type, message) {
+        const alertContainer = document.getElementById('alertContainer');
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert-${type}`;
+        alertDiv.innerHTML = message;
+        alertDiv.style.marginBottom = '10px';
+        alertContainer.appendChild(alertDiv);
+        setTimeout(() => {
+            alertDiv.remove();
+        }, 3000);
+    }
+    
+    async function verificarPermisos() {
+        try {
+            const response = await fetch(`/api/negocio/${tenantId}/permisos`);
+            const data = await response.json();
+            
+            if (!data.permisos.editar_menu) {
+                document.getElementById('productForm').style.display = 'none';
+                document.querySelector('.btn-edit')?.remove();
+                document.querySelector('.btn-danger')?.remove();
+                document.querySelector('.toggle-checkbox')?.remove();
+            }
+            
+            if (data.mi_rol) {
+                const rolBadge = document.createElement('div');
+                rolBadge.className = 'stat-card';
+                rolBadge.innerHTML = `👤 Tu rol: ${data.mi_rol.rol.toUpperCase()}`;
+                document.querySelector('.stats').prepend(rolBadge);
+            }
+        } catch (error) {
+            console.error('Error verificando permisos:', error);
+        }
+    }
+    
     async function loadMenu() {
+        showLoader();
         try {
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/menu`);
             if (!response.ok) throw new Error('Error al cargar menú');
@@ -268,6 +312,7 @@ verificarPermisos();
             
             if (menu.length === 0) {
                 document.getElementById('menuContainer').innerHTML = '<div class="loading">📭 No hay productos en el menú.<br>Agrega tu primer producto usando el formulario.</div>';
+                hideLoader();
                 return;
             }
             
@@ -280,10 +325,10 @@ verificarPermisos();
                 
                 html += `
                     <tr id="row-${item.id}" class="${rowClass}">
-                        <td><strong>${escapeHtml(item.nombre)}</strong></strong></td>
+                        <td><strong>${escapeHtml(item.nombre)}</strong></td>
                         <td>${escapeHtml(item.descripcion || '-')}</td>
                         <td>$${item.precio.toLocaleString()}</td>
-                        <td>
+                        <td style="text-align: center;">
                             <span class="status-indicator ${statusColor}"></span>
                             <span class="status-text">${statusText}</span>
                         </td>
@@ -294,11 +339,11 @@ verificarPermisos();
                                        ${isAvailable ? 'checked' : ''}>
                                 <span style="font-size: 12px;">${isAvailable ? 'Activo' : 'Inactivo'}</span>
                             </label>
-                        </td>
+                         </td>
                         <td style="white-space: nowrap;">
                             <button class="btn btn-edit btn-small" onclick='openEditModal(${JSON.stringify(item)})'>✏️ Editar</button>
                             <button class="btn btn-danger btn-small" onclick="deleteProduct('${item.id}')">🗑️ Eliminar</button>
-                        </td>
+                         </td>
                     </tr>
                 `;
             });
@@ -306,6 +351,8 @@ verificarPermisos();
             document.getElementById('menuContainer').innerHTML = html;
         } catch (error) {
             document.getElementById('menuContainer').innerHTML = '<div class="alert alert-error">❌ Error al cargar el menú</div>';
+        } finally {
+            hideLoader();
         }
     }
     
@@ -338,6 +385,7 @@ verificarPermisos();
         const saveBtn = document.getElementById('saveEditBtn');
         saveBtn.disabled = true;
         saveBtn.textContent = 'Guardando...';
+        showLoader();
         
         try {
             const response = await fetch(`${API_BASE}/admin/update_product/${tenantId}/${productId}`, {
@@ -359,10 +407,12 @@ verificarPermisos();
         } finally {
             saveBtn.disabled = false;
             saveBtn.textContent = '💾 Guardar Cambios';
+            hideLoader();
         }
     }
     
-    async function toggleProductStatus(productId, isAvailable) {
+    window.toggleProductStatus = async function(productId, isAvailable) {
+        showLoader();
         try {
             const response = await fetch(`${API_BASE}/admin/toggle_product/${tenantId}/${productId}`, {
                 method: 'PUT',
@@ -373,15 +423,16 @@ verificarPermisos();
             if (response.ok) {
                 const estado = isAvailable ? 'activado' : 'desactivado';
                 showAlert('success', `✅ Producto ${estado} correctamente`);
-                // Recargar el menú para actualizar la interfaz
                 await loadMenu();
             } else {
                 showAlert('error', '❌ Error al cambiar estado del producto');
             }
         } catch (error) {
             showAlert('error', '❌ Error de conexión');
+        } finally {
+            hideLoader();
         }
-    }
+    };
     
     async function loadConfig() {
         try {
@@ -396,24 +447,59 @@ verificarPermisos();
         }
     }
     
-    
-    async function limpiarContexto() {
-    if (!confirm('¿Estás seguro de que quieres eliminar todo el contexto aprendido? Los productos actuales no se eliminarán, pero la IA perderá el entrenamiento personalizado.')) return;
-    
-    try {
-        const response = await fetch(`/api/tenant/${tenantId}/context`, { method: 'DELETE' });
-        const result = await response.json();
-        if (response.ok) {
-            showAlert('success', '✅ Contexto eliminado correctamente');
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
+    window.limpiarContexto = async function() {
+        if (!confirm('¿Estás seguro de que quieres eliminar todo el contexto aprendido? Los productos actuales no se eliminarán, pero la IA perderá el entrenamiento personalizado.')) return;
+        
+        showLoader();
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/context`, { method: 'DELETE' });
+            const result = await response.json();
+            if (response.ok) {
+                showAlert('success', '✅ Contexto eliminado correctamente');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
+            }
+        } catch (error) {
+            showAlert('error', '❌ Error de conexión');
+        } finally {
+            hideLoader();
         }
-    } catch (error) {
-        showAlert('error', '❌ Error de conexión');
+    };
+    
+    window.deleteProduct = async function(productId) {
+        if (!confirm('¿Eliminar este producto del menú? Esta acción no se puede deshacer.')) return;
+        
+        showLoader();
+        try {
+            const response = await fetch(`${API_BASE}/admin/delete_product/${tenantId}/${productId}`, { 
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'}
+            });
+            
+            if (response.ok) {
+                showAlert('success', '✅ Producto eliminado correctamente');
+                await loadMenu();
+            } else {
+                const result = await response.json();
+                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
+            }
+        } catch (error) {
+            console.error('Error al eliminar:', error);
+            showAlert('error', '❌ Error de conexión al eliminar el producto');
+        } finally {
+            hideLoader();
+        }
+    };
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
-}
-
+    
+    // Event listeners
     document.getElementById('productForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         
@@ -428,6 +514,7 @@ verificarPermisos();
         const submitBtn = e.target.querySelector('button');
         submitBtn.disabled = true;
         submitBtn.textContent = 'Agregando...';
+        showLoader();
         
         try {
             const response = await fetch(`${API_BASE}/admin/add_product/${tenantId}`, {
@@ -441,13 +528,15 @@ verificarPermisos();
                 document.getElementById('productForm').reset();
                 loadMenu();
             } else {
-                showAlert('error', '❌ Error al agregar producto');
+                const result = await response.json();
+                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo agregar'));
             }
         } catch (error) {
             showAlert('error', '❌ Error de conexión');
         } finally {
             submitBtn.disabled = false;
             submitBtn.textContent = 'Agregar Producto';
+            hideLoader();
         }
     });
     
@@ -456,6 +545,7 @@ verificarPermisos();
         const btn = document.getElementById('saveConfigBtn');
         btn.disabled = true;
         btn.textContent = 'Guardando...';
+        showLoader();
         
         try {
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/config/ia`, {
@@ -475,36 +565,12 @@ verificarPermisos();
         } finally {
             btn.disabled = false;
             btn.textContent = '💾 Guardar Configuración';
+            hideLoader();
         }
     });
     
-    window.deleteProduct = async (productId) => {
-        if (!confirm('¿Eliminar este producto del menú? Esta acción no se puede deshacer.')) return;
-        
-        try {
-            const response = await fetch(`${API_BASE}/admin/delete_product/${tenantId}/${productId}`, { 
-                method: 'DELETE' 
-            });
-            
-            if (response.ok) {
-                showAlert('success', '✅ Producto eliminado');
-                loadMenu();
-            } else {
-                showAlert('error', '❌ Error al eliminar producto');
-            }
-        } catch (error) {
-            showAlert('error', '❌ Error de conexión');
-        }
-    };
+    document.getElementById('clearContextBtn').addEventListener('click', limpiarContexto);
     
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
-
     // Eventos del modal
     document.querySelector('.close').onclick = closeModal;
     document.getElementById('cancelEditBtn').onclick = closeModal;
@@ -515,6 +581,8 @@ verificarPermisos();
         }
     };
     
+    // Inicializar
+    verificarPermisos();
     loadMenu();
     loadConfig();
 </script>
