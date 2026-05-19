@@ -145,18 +145,22 @@ class AuthManager:
     
     def get_negocios_usuario(self, usuario_id: str) -> list:
         """Obtiene los negocios asociados a un usuario"""
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    SELECT t.id, t.nombre, t.phone_id, rn.nombre as rol, COALESCE(vn.verificado, false) as verificado
-                    FROM public.usuario_negocio un
-                    JOIN public.tenants t ON un.tenant_id = t.id
-                    JOIN public.roles_negocio rn ON un.rol_id = rn.id
-                    LEFT JOIN public.verificacion_negocio vn ON t.id = vn.tenant_id
-                    WHERE un.usuario_id = %s
-                ''', (usuario_id,))
-                rows = cur.fetchall()
-                return [{'id': r[0], 'nombre': r[1], 'phone_id': r[2], 'rol': r[3], 'verificado': r[4]} for r in rows]
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('''
+                        SELECT t.id, t.nombre, t.phone_id, rn.nombre as rol, COALESCE(vn.verificado, false) as verificado
+                        FROM public.usuario_negocio un
+                        JOIN public.tenants t ON un.tenant_id = t.id
+                        JOIN public.roles_negocio rn ON un.rol_id = rn.id
+                        LEFT JOIN public.verificacion_negocio vn ON t.id = vn.tenant_id
+                        WHERE un.usuario_id = %s
+                    ''', (usuario_id,))
+                    rows = cur.fetchall()
+                    return [{'id': r[0], 'nombre': r[1], 'phone_id': r[2], 'rol': r[3], 'verificado': r[4]} for r in rows]
+        except Exception as e:
+            logger.error(f"Error obteniendo negocios del usuario: {e}")
+            return []
     
     def crear_negocio(self, usuario_id: str, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante') -> dict:
         """Crea un nuevo negocio (tenant) para el usuario"""
@@ -338,133 +342,31 @@ Este código expira en 10 minutos.
                     restantes = 5 - nuevos_intentos
                     return {'success': False, 'error': f'Código incorrecto. Te quedan {restantes} intentos.'}
     
-    # ==================== MÉTODOS PARA SUPER ADMIN ====================
-    
-    def get_all_usuarios(self) -> list:
-        """Obtiene todos los usuarios (solo para super_admin)"""
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    SELECT u.id, u.email, u.nombre_completo, u.telefono, u.email_verificado, 
-                           u.created_at, u.ultimo_acceso, u.activo, rs.nombre as rol
-                    FROM public.usuarios u
-                    LEFT JOIN public.roles_sistema rs ON u.rol_sistema_id = rs.id
-                    ORDER BY u.created_at DESC
-                ''')
-                rows = cur.fetchall()
-                columns = ['id', 'email', 'nombre', 'telefono', 'email_verificado', 
-                          'created_at', 'ultimo_acceso', 'activo', 'rol']
-                return [dict(zip(columns, row)) for row in rows]
-    
-    def get_all_negocios(self) -> list:
-        """Obtiene todos los negocios (solo para super_admin)"""
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    SELECT t.id, t.nombre, t.phone_id, t.created_at, t.activo,
-                           u.email as dueno_email, u.nombre_completo as dueno_nombre,
-                           COALESCE(v.verificado, false) as verificado
-                    FROM public.tenants t
-                    LEFT JOIN public.usuario_negocio un ON t.id = un.tenant_id AND un.rol_id = 1
-                    LEFT JOIN public.usuarios u ON un.usuario_id = u.id
-                    LEFT JOIN public.verificacion_negocio v ON t.id = v.tenant_id
-                    ORDER BY t.created_at DESC
-                ''')
-                rows = cur.fetchall()
-                columns = ['id', 'nombre', 'phone_id', 'created_at', 'activo', 
-                          'dueno_email', 'dueno_nombre', 'verificado']
-                return [dict(zip(columns, row)) for row in rows]
-    
-    def actualizar_usuario(self, usuario_id: str, datos: dict) -> dict:
-        """Actualiza datos de un usuario (solo super_admin)"""
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    updates = []
-                    params = []
-                    
-                    if datos.get('nombre'):
-                        updates.append("nombre_completo = %s")
-                        params.append(datos['nombre'])
-                    
-                    if datos.get('email'):
-                        # Verificar que el email no esté en uso por otro usuario
-                        cur.execute("SELECT id FROM public.usuarios WHERE email = %s AND id != %s", 
-                                (datos['email'], usuario_id))
-                        if cur.fetchone():
-                            return {'success': False, 'error': 'El email ya está en uso'}
-                        updates.append("email = %s")
-                        params.append(datos['email'])
-                    
-                    if datos.get('telefono'):
-                        telefono_formateado = self.formatear_telefono(datos['telefono'])
-                        updates.append("telefono = %s")
-                        params.append(telefono_formateado)
-                    
-                    if datos.get('activo') is not None:
-                        updates.append("activo = %s")
-                        params.append(datos['activo'])
-                    
-                    if datos.get('rol_sistema'):
-                        cur.execute("SELECT id FROM public.roles_sistema WHERE nombre = %s", (datos['rol_sistema'],))
-                        rol_row = cur.fetchone()
-                        if rol_row:
-                            updates.append("rol_sistema_id = %s")
-                            params.append(rol_row[0])
-                    
-                    if not updates:
-                        return {'success': False, 'error': 'No hay datos para actualizar'}
-                    
-                    params.append(usuario_id)
-                    query = f"UPDATE public.usuarios SET {', '.join(updates)} WHERE id = %s"
-                    cur.execute(query, params)
-                conn.commit()
-            
-            return {'success': True, 'message': 'Usuario actualizado'}
-        except Exception as e:
-            logger.error(f'Error actualizando usuario: {e}')
-            return {'success': False, 'error': str(e)}
-    
-    def eliminar_usuario(self, usuario_id: str) -> dict:
-        """Elimina un usuario y todos sus datos (solo super_admin)"""
-        try:
-            with db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Eliminar relaciones usuario-negocio
-                    cur.execute("DELETE FROM public.usuario_negocio WHERE usuario_id = %s", (usuario_id,))
-                    # Eliminar el usuario
-                    cur.execute("DELETE FROM public.usuarios WHERE id = %s", (usuario_id,))
-                conn.commit()
-            return {'success': True, 'message': 'Usuario eliminado'}
-        except Exception as e:
-            logger.error(f'Error eliminando usuario: {e}')
-            return {'success': False, 'error': str(e)}
-    
     # ==================== MÉTODOS PARA GESTIÓN DE ROLES ====================
     
-def get_rol_negocio(self, usuario_id: str, tenant_id: str) -> dict:
-    """Obtiene el rol de un usuario en un negocio específico"""
-    try:
-        # Validar que usuario_id sea un UUID válido
-        if not usuario_id or usuario_id == 'super_admin' or len(usuario_id) < 30:
-            return None
-            
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    SELECT rn.nombre as rol, rn.id as rol_id
-                    FROM public.usuario_negocio un
-                    JOIN public.roles_negocio rn ON un.rol_id = rn.id
-                    WHERE un.usuario_id = %s::uuid AND un.tenant_id = %s
-                ''', (usuario_id, tenant_id))
-                row = cur.fetchone()
-                if row:
-                    return {'rol': row[0], 'rol_id': row[1]}
+    def get_rol_negocio(self, usuario_id: str, tenant_id: str) -> dict:
+        """Obtiene el rol de un usuario en un negocio específico"""
+        try:
+            # Validar que usuario_id sea un UUID válido
+            if not usuario_id or usuario_id == 'super_admin' or len(usuario_id) < 30:
                 return None
-    except Exception as e:
-        logger.error(f"Error obteniendo rol: {e}")
-        return None
-        
+                
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('''
+                        SELECT rn.nombre as rol, rn.id as rol_id
+                        FROM public.usuario_negocio un
+                        JOIN public.roles_negocio rn ON un.rol_id = rn.id
+                        WHERE un.usuario_id = %s::uuid AND un.tenant_id = %s
+                    ''', (usuario_id, tenant_id))
+                    row = cur.fetchone()
+                    if row:
+                        return {'rol': row[0], 'rol_id': row[1]}
+                    return None
+        except Exception as e:
+            logger.error(f"Error obteniendo rol: {e}")
+            return None
+    
     def verificar_permiso(self, usuario_id: str, tenant_id: str, permiso_requerido: str) -> bool:
         """Verifica si un usuario tiene cierto permiso en un negocio"""
         roles_permitidos = {
@@ -605,6 +507,108 @@ def get_rol_negocio(self, usuario_id: str, tenant_id: str) -> dict:
             conn.commit()
         
         return {'success': True, 'message': f'Rol cambiado a {nuevo_rol}'}
+    
+    # ==================== MÉTODOS PARA SUPER ADMIN ====================
+    
+    def get_all_usuarios(self) -> list:
+        """Obtiene todos los usuarios (solo para super_admin)"""
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT u.id, u.email, u.nombre_completo, u.telefono, u.email_verificado, 
+                           u.created_at, u.ultimo_acceso, u.activo, rs.nombre as rol
+                    FROM public.usuarios u
+                    LEFT JOIN public.roles_sistema rs ON u.rol_sistema_id = rs.id
+                    ORDER BY u.created_at DESC
+                ''')
+                rows = cur.fetchall()
+                columns = ['id', 'email', 'nombre', 'telefono', 'email_verificado', 
+                          'created_at', 'ultimo_acceso', 'activo', 'rol']
+                return [dict(zip(columns, row)) for row in rows]
+    
+    def get_all_negocios(self) -> list:
+        """Obtiene todos los negocios (solo para super_admin)"""
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT t.id, t.nombre, t.phone_id, t.created_at, t.activo,
+                           u.email as dueno_email, u.nombre_completo as dueno_nombre,
+                           COALESCE(v.verificado, false) as verificado
+                    FROM public.tenants t
+                    LEFT JOIN public.usuario_negocio un ON t.id = un.tenant_id AND un.rol_id = 1
+                    LEFT JOIN public.usuarios u ON un.usuario_id = u.id
+                    LEFT JOIN public.verificacion_negocio v ON t.id = v.tenant_id
+                    ORDER BY t.created_at DESC
+                ''')
+                rows = cur.fetchall()
+                columns = ['id', 'nombre', 'phone_id', 'created_at', 'activo', 
+                          'dueno_email', 'dueno_nombre', 'verificado']
+                return [dict(zip(columns, row)) for row in rows]
+    
+    def actualizar_usuario(self, usuario_id: str, datos: dict) -> dict:
+        """Actualiza datos de un usuario (solo super_admin)"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    updates = []
+                    params = []
+                    
+                    if datos.get('nombre'):
+                        updates.append("nombre_completo = %s")
+                        params.append(datos['nombre'])
+                    
+                    if datos.get('email'):
+                        # Verificar que el email no esté en uso por otro usuario
+                        cur.execute("SELECT id FROM public.usuarios WHERE email = %s AND id != %s", 
+                                (datos['email'], usuario_id))
+                        if cur.fetchone():
+                            return {'success': False, 'error': 'El email ya está en uso'}
+                        updates.append("email = %s")
+                        params.append(datos['email'])
+                    
+                    if datos.get('telefono'):
+                        telefono_formateado = self.formatear_telefono(datos['telefono'])
+                        updates.append("telefono = %s")
+                        params.append(telefono_formateado)
+                    
+                    if datos.get('activo') is not None:
+                        updates.append("activo = %s")
+                        params.append(datos['activo'])
+                    
+                    if datos.get('rol_sistema'):
+                        cur.execute("SELECT id FROM public.roles_sistema WHERE nombre = %s", (datos['rol_sistema'],))
+                        rol_row = cur.fetchone()
+                        if rol_row:
+                            updates.append("rol_sistema_id = %s")
+                            params.append(rol_row[0])
+                    
+                    if not updates:
+                        return {'success': False, 'error': 'No hay datos para actualizar'}
+                    
+                    params.append(usuario_id)
+                    query = f"UPDATE public.usuarios SET {', '.join(updates)} WHERE id = %s"
+                    cur.execute(query, params)
+                conn.commit()
+            
+            return {'success': True, 'message': 'Usuario actualizado'}
+        except Exception as e:
+            logger.error(f'Error actualizando usuario: {e}')
+            return {'success': False, 'error': str(e)}
+    
+    def eliminar_usuario(self, usuario_id: str) -> dict:
+        """Elimina un usuario y todos sus datos (solo super_admin)"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Eliminar relaciones usuario-negocio
+                    cur.execute("DELETE FROM public.usuario_negocio WHERE usuario_id = %s", (usuario_id,))
+                    # Eliminar el usuario
+                    cur.execute("DELETE FROM public.usuarios WHERE id = %s", (usuario_id,))
+                conn.commit()
+            return {'success': True, 'message': 'Usuario eliminado'}
+        except Exception as e:
+            logger.error(f'Error eliminando usuario: {e}')
+            return {'success': False, 'error': str(e)}
 
 
 # Instancia global
