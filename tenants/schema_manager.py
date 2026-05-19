@@ -9,14 +9,24 @@ class SchemaManager:
         """Crea schema y tablas para un nuevo tenant"""
         logger.info(f'Creando schema para tenant {tenant_id} (tipo: {tipo_negocio})')
         
+        # Obtener el schema_name del tenant
+        from tenants.repository import tenant_repo
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if not tenant:
+            raise ValueError(f"Tenant {tenant_id} no encontrado")
+        
+        schema_name = tenant.get('schema_name')
+        if not schema_name:
+            schema_name = f"tenant_{tenant_id.replace('-', '_')}"
+        
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                # Crear schema
-                cur.execute(f'CREATE SCHEMA IF NOT EXISTS {tenant_id}')
+                # 🔧 CORREGIDO: Usar schema_name con comillas dobles
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
                 
                 # 1. Tabla de clientes
                 cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {tenant_id}.clientes (
+                CREATE TABLE IF NOT EXISTS "{schema_name}".clientes (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     numero_telefono TEXT UNIQUE NOT NULL,
                     nombre TEXT,
@@ -30,9 +40,9 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 2. Tabla de productos (adaptable por tipo de negocio)
+                # 2. Tabla de productos
                 cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {tenant_id}.productos (
+                CREATE TABLE IF NOT EXISTS "{schema_name}".productos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     nombre TEXT NOT NULL,
                     descripcion TEXT,
@@ -45,9 +55,9 @@ class SchemaManager:
                 
                 # 3. Tabla de pedidos
                 cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {tenant_id}.pedidos (
+                CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+                    cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
                     numero_pedido TEXT UNIQUE,
                     items JSONB NOT NULL,
                     total INTEGER NOT NULL,
@@ -64,9 +74,9 @@ class SchemaManager:
                 
                 # 4. Tabla de conversaciones
                 cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {tenant_id}.conversaciones (
+                CREATE TABLE IF NOT EXISTS "{schema_name}".conversaciones (
                     id SERIAL PRIMARY KEY,
-                    cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+                    cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
                     cliente_numero TEXT NOT NULL,
                     mensaje TEXT NOT NULL,
                     respuesta TEXT,
@@ -77,9 +87,9 @@ class SchemaManager:
                 
                 # 5. Tabla de carritos
                 cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {tenant_id}.carritos (
+                CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
                     id SERIAL PRIMARY KEY,
-                    cliente_id UUID REFERENCES {tenant_id}.clientes(id) ON DELETE SET NULL,
+                    cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
                     cliente_numero TEXT NOT NULL,
                     items JSONB DEFAULT '[]',
                     total INTEGER DEFAULT 0,
@@ -88,17 +98,15 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 6. Índices
-                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON {tenant_id}.pedidos(cliente_id)')
-                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON {tenant_id}.pedidos(estado)')
-                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_created ON {tenant_id}.pedidos(created_at DESC)')
-                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON {tenant_id}.clientes(numero_telefono)')
-                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON {tenant_id}.conversaciones(cliente_numero)')
-                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_created ON {tenant_id}.conversaciones(created_at DESC)')
-                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON {tenant_id}.carritos(cliente_numero)')
+                # Índices
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON "{schema_name}".pedidos(cliente_id)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON "{schema_name}".pedidos(estado)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON "{schema_name}".clientes(numero_telefono)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON "{schema_name}".conversaciones(cliente_numero)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
                 
-                # 7. Insertar menú/productos de ejemplo según el tipo de negocio
-                self._insert_default_products(cur, tenant_id, tipo_negocio)
+                # Insertar productos de ejemplo
+                self._insert_default_products(cur, schema_name, tipo_negocio)
                 
             conn.commit()
         
