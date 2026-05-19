@@ -357,14 +357,16 @@
     }
     
     function openEditModal(item) {
-        currentEditProductId = item.id;
-        document.getElementById('editProductId').value = item.id;
-        document.getElementById('editNombre').value = item.nombre;
-        document.getElementById('editDescripcion').value = item.descripcion || '';
-        document.getElementById('editPrecio').value = item.precio;
-        document.getElementById('editCategoria').value = item.categoria || 'general';
-        document.getElementById('editDisponible').checked = item.disponible !== false;
-        document.getElementById('editModal').style.display = 'block';
+    console.log('Abriendo modal para producto:', item);
+    currentEditProductId = item.id;
+    document.getElementById('editProductId').value = item.id;
+    document.getElementById('editNombre').value = item.nombre;
+    document.getElementById('editDescripcion').value = item.descripcion || '';
+    document.getElementById('editPrecio').value = item.precio;
+    document.getElementById('editCategoria').value = item.categoria || 'general';
+    document.getElementById('editDisponible').checked = item.disponible !== false;
+    document.getElementById('editModal').style.display = 'block';
+    console.log('Modal abierto, productId:', currentEditProductId);
     }
     
     function closeModal() {
@@ -373,26 +375,35 @@
     }
     
     async function updateProduct() {
-        const productId = currentEditProductId;
-        const producto = {
-            nombre: document.getElementById('editNombre').value,
-            descripcion: document.getElementById('editDescripcion').value,
-            precio: parseInt(document.getElementById('editPrecio').value),
-            categoria: document.getElementById('editCategoria').value,
-            disponible: document.getElementById('editDisponible').checked
-        };
-        
-        const saveBtn = document.getElementById('saveEditBtn');
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Guardando...';
-        showLoader();
-        
-        try {
-            const response = await fetch(`${API_BASE}/admin/update_product/${tenantId}/${productId}`, {
+    const productId = currentEditProductId;
+    console.log('Actualizando producto:', productId, 'tenant:', tenantId);
+    
+    const producto = {
+        nombre: document.getElementById('editNombre').value,
+        descripcion: document.getElementById('editDescripcion').value,
+        precio: parseInt(document.getElementById('editPrecio').value),
+        categoria: document.getElementById('editCategoria').value,
+        disponible: document.getElementById('editDisponible').checked
+    };
+    
+    console.log('Datos a guardar:', producto);
+    
+    const saveBtn = document.getElementById('saveEditBtn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Guardando...';
+    showLoader();
+    
+    try {
+            const url = `/admin/update_product/${tenantId}/${productId}`;
+            console.log('URL:', url);
+            
+            const response = await fetch(url, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(producto)
             });
+            
+            console.log('Response status:', response.status);
             
             if (response.ok) {
                 showAlert('success', '✅ Producto actualizado correctamente');
@@ -400,16 +411,18 @@
                 loadMenu();
             } else {
                 const result = await response.json();
+                console.error('Error response:', result);
                 showAlert('error', '❌ Error: ' + (result.error || 'No se pudo actualizar'));
             }
         } catch (error) {
-            showAlert('error', '❌ Error de conexión');
+            console.error('Error al actualizar:', error);
+            showAlert('error', '❌ Error de conexión: ' + error.message);
         } finally {
             saveBtn.disabled = false;
             saveBtn.textContent = '💾 Guardar Cambios';
             hideLoader();
         }
-    }
+    }   
     
     window.toggleProductStatus = async function(productId, isAvailable) {
         showLoader();
@@ -468,29 +481,38 @@
     };
     
     window.deleteProduct = async function(productId) {
-        if (!confirm('¿Eliminar este producto del menú? Esta acción no se puede deshacer.')) return;
+    console.log('Eliminando producto:', productId, 'tenant:', tenantId);
+    
+    if (!confirm('¿Eliminar este producto del menú? Esta acción no se puede deshacer.')) return;
+    
+    showLoader();
+    try {
+        // Mostrar URL para depurar
+        const url = `/admin/delete_product/${tenantId}/${productId}`;
+        console.log('URL:', url);
         
-        showLoader();
-        try {
-            const response = await fetch(`${API_BASE}/admin/delete_product/${tenantId}/${productId}`, { 
-                method: 'DELETE',
-                headers: {'Content-Type': 'application/json'}
-            });
-            
-            if (response.ok) {
-                showAlert('success', '✅ Producto eliminado correctamente');
-                await loadMenu();
-            } else {
-                const result = await response.json();
-                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
-            }
-        } catch (error) {
-            console.error('Error al eliminar:', error);
-            showAlert('error', '❌ Error de conexión al eliminar el producto');
-        } finally {
-            hideLoader();
+        const response = await fetch(url, { 
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'}
+        });
+        
+        console.log('Response status:', response.status);
+        
+        if (response.ok) {
+            showAlert('success', '✅ Producto eliminado correctamente');
+            await loadMenu();
+        } else {
+            const result = await response.json();
+            console.error('Error response:', result);
+            showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
         }
-    };
+    } catch (error) {
+        console.error('Error al eliminar:', error);
+        showAlert('error', '❌ Error de conexión: ' + error.message);
+    } finally {
+        hideLoader();
+    }
+};
     
     function escapeHtml(text) {
         if (!text) return '';
