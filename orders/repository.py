@@ -150,18 +150,22 @@ class OrderRepository:
             return []
     
     def marcar_pagado(self, tenant_id: str, cliente_numero: str) -> int:
-        """Marca pedidos como pagados y envía email"""
+        """Marca pedidos como pagados"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Asegurar que las columnas existen
-                    try:
-                        cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN IF NOT EXISTS numero_pedido TEXT')
-                        cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN IF NOT EXISTS secuencial INTEGER')
-                        cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN IF NOT EXISTS pagado_at TIMESTAMP')
-                    except Exception as e:
-                        logger.warning(f"Error agregando columnas (puede que ya existan): {e}")
+                    # Primero verificar si la columna existe
+                    cur.execute(f"""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_schema = %s AND table_name = 'pedidos' AND column_name = 'cliente_numero'
+                    """, (schema_name,))
+                    
+                    if not cur.fetchone():
+                        # Agregar la columna si no existe
+                        cur.execute(f'ALTER TABLE "{schema_name}".pedidos ADD COLUMN cliente_numero TEXT')
+                        conn.commit()
                     
                     # Obtener el pedido antes de actualizar
                     cur.execute(f"""
@@ -187,7 +191,7 @@ class OrderRepository:
         except Exception as e:
             logger.error(f'Error marcando pedido como pagado: {e}')
             raise
-                
+                        
     def actualizar_estado(self, tenant_id: str, pedido_id: str, nuevo_estado: str) -> bool:
         """Actualiza el estado de un pedido específico y envía email"""
         try:

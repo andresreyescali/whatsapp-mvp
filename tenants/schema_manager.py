@@ -58,7 +58,9 @@ class SchemaManager:
                 CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
+                    cliente_numero TEXT NOT NULL,
                     numero_pedido TEXT UNIQUE,
+                    secuencial INTEGER,
                     items JSONB NOT NULL,
                     total INTEGER NOT NULL,
                     estado VARCHAR(50) DEFAULT 'nuevo',
@@ -71,7 +73,7 @@ class SchemaManager:
                     cancelado_at TIMESTAMP
                 )
                 ''')
-                
+            
                 # 4. Tabla de conversaciones
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".conversaciones (
