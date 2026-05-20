@@ -190,7 +190,6 @@ class MessageHandler:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Cambiar "telefono" por "numero_telefono"
                     cur.execute(f"""
                         SELECT nombre, cc, email, direccion, numero_telefono
                         FROM "{schema_name}".clientes
@@ -203,61 +202,60 @@ class MessageHandler:
                             'cc': row[1],
                             'email': row[2],
                             'direccion': row[3],
-                            'telefono': row[4]  # Mapear numero_telefono a telefono para consistencia
+                            'telefono': row[4]
                         }
                     return {}
         except Exception as e:
             logger.error(f'Error obteniendo cliente: {e}')
             return {}
     
-    def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
-        """Obtiene o crea un cliente en el esquema del tenant"""
+    def _guardar_datos_cliente_en_bd(self, tenant_id: str, numero: str):
+        """Guarda los datos temporales del cliente en la base de datos"""
+        if numero not in self._datos_cliente:
+            return
+        
+        datos = self._datos_cliente[numero]
+        if not any(datos.values()):
+            return
+        
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f'SELECT id, nombre, cc, email, direccion FROM "{schema_name}".clientes WHERE numero_telefono = %s', (numero,))
+                    cur.execute(f'SELECT id FROM "{schema_name}".clientes WHERE numero_telefono = %s', (numero,))
                     row = cur.fetchone()
                     
                     if row:
-                        cliente_id = row[0]
-                        if datos_cliente:
-                            updates = []
-                            params = []
-                            if datos_cliente.get('nombre') and not row[1]:
-                                updates.append("nombre = %s")
-                                params.append(datos_cliente['nombre'])
-                            if datos_cliente.get('cc') and not row[2]:
-                                updates.append("cc = %s")
-                                params.append(datos_cliente['cc'])
-                            if datos_cliente.get('email') and not row[3]:
-                                updates.append("email = %s")
-                                params.append(datos_cliente['email'])
-                            if datos_cliente.get('direccion') and not row[4]:
-                                updates.append("direccion = %s")
-                                params.append(datos_cliente['direccion'])
-                            if updates:
-                                params.append(cliente_id)
-                                cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
-                                conn.commit()
-                        return cliente_id
+                        updates = []
+                        params = []
+                        if datos.get('nombre'):
+                            updates.append("nombre = %s")
+                            params.append(datos['nombre'])
+                        if datos.get('cc'):
+                            updates.append("cc = %s")
+                            params.append(datos['cc'])
+                        if datos.get('email'):
+                            updates.append("email = %s")
+                            params.append(datos['email'])
+                        if datos.get('direccion'):
+                            updates.append("direccion = %s")
+                            params.append(datos['direccion'])
+                        
+                        if updates:
+                            params.append(row[0])
+                            cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
+                            logger.info(f"Cliente {numero} actualizado en BD")
                     else:
                         cliente_id = str(uuid.uuid4())
                         cur.execute(f"""
                             INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion)
                             VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (
-                            cliente_id, numero,
-                            datos_cliente.get('nombre') if datos_cliente else None,
-                            datos_cliente.get('cc') if datos_cliente else None,
-                            datos_cliente.get('email') if datos_cliente else None,
-                            datos_cliente.get('direccion') if datos_cliente else None
-                        ))
-                        conn.commit()
-                        return cliente_id
+                        """, (cliente_id, numero, datos.get('nombre'), datos.get('cc'), datos.get('email'), datos.get('direccion')))
+                        logger.info(f"Cliente {numero} creado en BD")
+                    
+                    conn.commit()
         except Exception as e:
-            logger.error(f'Error gestionando cliente: {e}')
-            return None
+            logger.error(f'Error guardando cliente en BD: {e}')
     
     def _get_resumen_cliente(self, tenant_id: str, cliente_numero: str) -> str:
         """Obtiene un resumen estructurado del cliente y sus pedidos"""
@@ -405,126 +403,56 @@ class MessageHandler:
             logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
     
-    def _consultar_estado_pedido(self, tenant_id: str, numero_pedido: str, cliente_numero: str) -> str:
-        """Consulta el estado de un pedido"""
+    def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
+        """Obtiene o crea un cliente en el esquema del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"""
-                        SELECT estado, total, created_at, direccion_entrega
-                        FROM "{schema_name}".pedidos
-                        WHERE numero_pedido = %s AND cliente_numero = %s
-                    """, (numero_pedido, cliente_numero))
+                    cur.execute(f'SELECT id, nombre, cc, email, direccion FROM "{schema_name}".clientes WHERE numero_telefono = %s', (numero,))
                     row = cur.fetchone()
                     
                     if row:
-                        estados = {
-                            'nuevo': '🟡 Recibido - Pendiente de pago',
-                            'pagado': '🟢 Pagado - En preparación',
-                            'enviado': '📦 Enviado - En camino',
-                            'entregado': '✅ Entregado',
-                            'cancelado': '❌ Cancelado'
-                        }
-                        estado_texto = estados.get(row[0], row[0])
-                        fecha = row[2].strftime('%d/%m/%Y %H:%M') if row[2] else 'N/A'
-                        
-                        return f"""📦 **Estado de tu pedido #{numero_pedido}**
-
-    📌 **Estado:** {estado_texto}
-    💰 **Total:** ${row[1]:,.0f}
-    📅 **Fecha:** {fecha}
-    📍 **Entrega:** {row[3] or 'No especificada'}"""
+                        cliente_id = row[0]
+                        if datos_cliente:
+                            updates = []
+                            params = []
+                            if datos_cliente.get('nombre') and not row[1]:
+                                updates.append("nombre = %s")
+                                params.append(datos_cliente['nombre'])
+                            if datos_cliente.get('cc') and not row[2]:
+                                updates.append("cc = %s")
+                                params.append(datos_cliente['cc'])
+                            if datos_cliente.get('email') and not row[3]:
+                                updates.append("email = %s")
+                                params.append(datos_cliente['email'])
+                            if datos_cliente.get('direccion') and not row[4]:
+                                updates.append("direccion = %s")
+                                params.append(datos_cliente['direccion'])
+                            if updates:
+                                params.append(cliente_id)
+                                cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
+                                conn.commit()
+                        return cliente_id
                     else:
-                        return f"❌ No encontré el pedido #{numero_pedido}. Verifica el número."
+                        cliente_id = str(uuid.uuid4())
+                        cur.execute(f"""
+                            INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (
+                            cliente_id, numero,
+                            datos_cliente.get('nombre') if datos_cliente else None,
+                            datos_cliente.get('cc') if datos_cliente else None,
+                            datos_cliente.get('email') if datos_cliente else None,
+                            datos_cliente.get('direccion') if datos_cliente else None
+                        ))
+                        conn.commit()
+                        return cliente_id
         except Exception as e:
-            logger.error(f'Error consultando pedido: {e}')
-            return "❌ Hubo un error al consultar tu pedido."
-
-
-    # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
+            logger.error(f'Error gestionando cliente: {e}')
+            return None
     
-
-    def _procesar_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
-        """Procesa el mensaje usando IA para entender lenguaje natural"""
-        
-        if not ai_client.client:
-            return self._respuesta_fallback(tenant, menu)
-        
-        carrito_actual = self._cargar_carrito(tenant['id'], numero)
-        resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
-        
-        # Crear una versión simplificada del menú sin UUID para el prompt
-        menu_simplificado = []
-        for p in menu[:30]:
-            menu_simplificado.append({
-                'nombre': p.get('nombre'),
-                'precio': p.get('precio'),
-                'descripcion': p.get('descripcion', '')[:50]  # Limitar descripción
-            })
-        
-        # Construir el prompt del sistema
-        system_prompt = f"""Eres un asistente de ventas por WhatsApp para {tenant.get('nombre', 'Mi negocio')}.
-
-    🏪 INFORMACIÓN DEL NEGOCIO:
-    - Horario: {contexto.get('horario', 'No especificado')}
-    - Ubicación: {contexto.get('ubicacion', 'No especificada')}
-    - Políticas: {contexto.get('politicas', 'No especificadas')}
-
-    📋 CATÁLOGO DE PRODUCTOS:
-    {json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
-
-    {resumen_cliente}
-
-    {self._get_carrito_info_para_prompt(tenant['id'], numero)}
-
-    ---
-
-    RESPONDE de forma natural, amable y conversacional en español.
-    Si el cliente pide un producto, así no coincida exactamente con el nombre del catálogo, busca el más cercano.
-    Si el cliente da su nombre, cédula, dirección, guárdalos en tu memoria.
-    """
-        
-        user_message = f"Cliente: {texto}\n\nAsistente:"
-        
-        try:
-            response = ai_client.client.chat.completions.create(
-                model=ai_client.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                temperature=0.7,
-                max_tokens=500
-            )
-            
-            respuesta = response.choices[0].message.content
-            
-            # Extraer datos del cliente
-            self._extraer_y_guardar_datos(texto, numero)
-            
-            # Verificar confirmación
-            if self._cliente_confirmo(texto):
-                if carrito_actual.get('items'):
-                    return self._finalizar_pedido(tenant, numero, carrito_actual)
-            
-            # Verificar consulta de carrito
-            if any(palabra in texto.lower() for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
-                return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
-            
-            # Verificar consulta de estado de pedido
-            pedido_match = re.search(r'estado\s+pedido\s+([A-Za-z0-9\-_]+)', texto.lower())
-            if pedido_match:
-                numero_pedido = pedido_match.group(1).upper()
-                estado = self._consultar_estado_pedido(tenant['id'], numero_pedido, numero)
-                if estado:
-                    return estado
-            
-            return respuesta
-            
-        except Exception as e:
-            logger.error(f'Error en IA: {e}')
-            return self._respuesta_fallback(tenant, menu)
+    # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
     def _extraer_y_guardar_datos(self, texto: str, numero: str):
         """Extrae datos del cliente usando IA y los guarda temporalmente"""
@@ -610,16 +538,163 @@ class MessageHandler:
         
         return mensaje
     
+    def _procesar_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
+        """Procesa el mensaje usando IA para entender lenguaje natural"""
+        
+        if not ai_client.client:
+            return self._respuesta_fallback(tenant, menu)
+        
+        carrito_actual = self._cargar_carrito(tenant['id'], numero)
+        resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
+        
+        # Extraer y guardar datos del cliente
+        self._extraer_y_guardar_datos(texto, numero)
+        
+        # Guardar datos en BD si hay información completa
+        if numero in self._datos_cliente and self._datos_cliente[numero].get('nombre'):
+            self._guardar_datos_cliente_en_bd(tenant['id'], numero)
+        
+        # Verificar confirmación
+        if self._cliente_confirmo(texto):
+            if carrito_actual.get('items'):
+                self._guardar_datos_cliente_en_bd(tenant['id'], numero)
+                return self._finalizar_pedido(tenant, numero, carrito_actual)
+            else:
+                return "No hay productos en tu carrito. ¿Qué te gustaría ordenar? (ej: 'quiero una torta red velvet')"
+        
+        # Verificar consulta de carrito
+        if any(palabra in texto.lower() for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
+            return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
+        
+        # Si el carrito está vacío y el mensaje parece un pedido, intentar agregar
+        if not carrito_actual.get('items') and self._parece_pedido(texto):
+            return self._intentar_agregar_producto(texto, tenant, menu, numero, contexto)
+        
+        # Crear menú simplificado para el prompt
+        menu_simplificado = []
+        for p in menu[:30]:
+            menu_simplificado.append({
+                'nombre': p.get('nombre'),
+                'precio': p.get('precio'),
+                'descripcion': p.get('descripcion', '')[:50]
+            })
+        
+        datos_pendientes = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
+        
+        system_prompt = f"""Eres un asistente de ventas por WhatsApp para {tenant.get('nombre', 'Mi negocio')}.
+
+🏪 INFORMACIÓN DEL NEGOCIO:
+- Horario: {contexto.get('horario', 'No especificado')}
+- Ubicación: {contexto.get('ubicacion', 'No especificada')}
+- Políticas: {contexto.get('politicas', 'No especificadas')}
+
+📋 CATÁLOGO DE PRODUCTOS:
+{json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
+
+{resumen_cliente}
+
+{self._get_carrito_info_para_prompt(tenant['id'], numero)}
+
+📝 DATOS PROPORCIONADOS EN ESTA CONVERSACIÓN:
+{datos_pendientes or "Ninguno aún"}
+
+INSTRUCCIONES:
+1. Responde de forma amable y natural en español.
+2. Si el cliente pidió un producto, confírmalo y sugiere agregar algo más.
+3. Si faltan datos (dirección, fecha), pregúntalos amablemente.
+4. Cuando el cliente diga "confirmo" o "si", finaliza el pedido.
+"""
+        
+        user_message = f"Cliente: {texto}\n\nAsistente:"
+        
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f'Error en IA: {e}')
+            return self._respuesta_fallback(tenant, menu)
+    
+    def _parece_pedido(self, texto: str) -> bool:
+        """Detecta si el mensaje parece un pedido de producto"""
+        palabras_pedido = [
+            'quiero', 'deseo', 'necesito', 'me gustaría', 'una', 'un', 
+            'torta', 'pastel', 'galleta', 'cheesecake', 'red velvet',
+            'chocolate', 'vainilla', 'comprar', 'ordenar', 'pedir'
+        ]
+        texto_lower = texto.lower()
+        return any(palabra in texto_lower for palabra in palabras_pedido)
+    
+    def _intentar_agregar_producto(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
+        """Intenta agregar un producto al carrito basado en el mensaje del cliente"""
+        if not menu:
+            return "Lo siento, no hay productos disponibles en este momento. Contacta al administrador."
+        
+        # Usar IA para identificar el producto
+        prompt = f"""
+        El cliente dice: "{texto}"
+        
+        Catálogo disponible:
+        {json.dumps([{'nombre': p['nombre'], 'precio': p['precio']} for p in menu[:20]], indent=2, ensure_ascii=False)}
+        
+        ¿Qué producto quiere el cliente? Devuelve SOLO el nombre exacto del producto del catálogo.
+        Si no está seguro, devuelve "no_seguro".
+        """
+        
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=50
+            )
+            producto_nombre = response.choices[0].message.content.strip().strip('"')
+            
+            if producto_nombre == "no_seguro":
+                sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
+                return f"Lo siento, no entendí qué producto deseas. Nuestros productos más populares:\n{sugerencias}\n¿Cuál te gustaría?"
+            
+            # Buscar el producto en el menú
+            producto = None
+            for p in menu:
+                if p['nombre'].lower() == producto_nombre.lower():
+                    producto = p
+                    break
+            
+            if producto:
+                self._agregar_al_carrito(tenant['id'], numero, [{'nombre': producto['nombre'], 'precio': producto['precio'], 'cantidad': 1}])
+                nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
+                return f"✅ Agregado: {producto['nombre']} - ${producto['precio']:,.0f}\n\n{self._mostrar_resumen_carrito(tenant, numero, nuevo_carrito)}"
+            else:
+                sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
+                return f"No encontré '{producto_nombre}' en el catálogo. Estos son nuestros productos:\n{sugerencias}\n¿Cuál te gustaría?"
+            
+        except Exception as e:
+            logger.error(f'Error identificando producto: {e}')
+            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
+            return f"¿Qué te gustaría ordenar? Estos son algunos productos:\n{sugerencias}"
+    
     def _respuesta_fallback(self, tenant: dict, menu: list) -> str:
         """Respuesta de fallback cuando la IA no está disponible"""
         productos_sugeridos = menu[:5]
-        sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in productos_sugeridos])
-        return f"""Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}.
+        if productos_sugeridos:
+            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in productos_sugeridos])
+            return f"""Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}.
 
 **Productos sugeridos:**
 {sugerencias}
 
 ¿Qué te gustaría ordenar? Puedes escribir "MENÚ" para ver el catálogo completo o decirme directamente lo que deseas."""
+        else:
+            return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte hoy?"
 
 
 # Instancia global
