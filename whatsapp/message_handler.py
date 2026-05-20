@@ -15,7 +15,7 @@ class MessageHandler:
     
     def __init__(self):
         """Inicializa el manejador de mensajes"""
-        self._datos_cliente = {}  # Almacena datos de clientes por número
+        self._datos_cliente = {}  # Almacena datos de clientes por número (temporales)
         self._carritos_cache = {}  # Caché opcional para carritos
     
     def _get_schema_name(self, tenant_id: str) -> str:
@@ -117,8 +117,98 @@ class MessageHandler:
                     """, (cliente_numero, mensaje, respuesta, 'ia'))
                 conn.commit()
         except Exception as e:
-            logger.error(f'Error guardando conversación: {e}')    
-            
+            logger.error(f'Error guardando conversación: {e}')
+    
+    # ==================== MÉTODOS PARA RESÚMEN DEL CLIENTE ====================
+    
+    def _obtener_cliente(self, tenant_id: str, cliente_numero: str) -> dict:
+        """Obtiene los datos del cliente desde la BD"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT nombre, cc, email, direccion, telefono
+                        FROM "{schema_name}".clientes
+                        WHERE numero_telefono = %s
+                    """, (cliente_numero,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            'nombre': row[0],
+                            'cc': row[1],
+                            'email': row[2],
+                            'direccion': row[3],
+                            'telefono': row[4]
+                        }
+                    return {}
+        except Exception as e:
+            logger.error(f'Error obteniendo cliente: {e}')
+            return {}
+    
+    def _get_ultimos_pedidos(self, tenant_id: str, cliente_numero: str, limit: int = 3) -> list:
+        """Obtiene los últimos pedidos del cliente desde la BD"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT numero_pedido, total, estado, created_at
+                        FROM "{schema_name}".pedidos
+                        WHERE cliente_numero = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (cliente_numero, limit))
+                    rows = cur.fetchall()
+                    return [{
+                        'numero_pedido': row[0],
+                        'total': row[1],
+                        'estado': row[2],
+                        'fecha': row[3]
+                    } for row in rows]
+        except Exception as e:
+            logger.error(f'Error obteniendo últimos pedidos: {e}')
+            return []
+    
+    def _get_resumen_cliente(self, tenant_id: str, cliente_numero: str) -> str:
+        """Obtiene un resumen estructurado del cliente y sus pedidos"""
+        resumen = []
+        
+        # 1. Datos del cliente desde la BD
+        cliente = self._obtener_cliente(tenant_id, cliente_numero)
+        if cliente:
+            resumen.append("📋 DATOS DEL CLIENTE:")
+            if cliente.get('nombre'):
+                resumen.append(f"- Nombre: {cliente['nombre']}")
+            if cliente.get('cc'):
+                resumen.append(f"- Cédula: {cliente['cc']}")
+            if cliente.get('telefono'):
+                resumen.append(f"- Teléfono: {cliente['telefono']}")
+            if cliente.get('email'):
+                resumen.append(f"- Email: {cliente['email']}")
+            if cliente.get('direccion'):
+                resumen.append(f"- Dirección: {cliente['direccion']}")
+        else:
+            resumen.append("📋 DATOS DEL CLIENTE: No hay datos previos")
+        
+        # 2. Pedido actual (carrito)
+        carrito = self._cargar_carrito(tenant_id, cliente_numero)
+        if carrito.get('items'):
+            resumen.append("\n🛒 PEDIDO ACTUAL:")
+            for item in carrito['items']:
+                subtotal = item['precio'] * item['cantidad']
+                resumen.append(f"- {item['cantidad']}x {item['nombre']}: ${subtotal:,.0f}")
+            resumen.append(f"💰 Total: ${carrito.get('total', 0):,.0f}")
+        
+        # 3. Últimos pedidos
+        pedidos_recientes = self._get_ultimos_pedidos(tenant_id, cliente_numero, 3)
+        if pedidos_recientes:
+            resumen.append("\n📦 ÚLTIMOS PEDIDOS:")
+            for pedido in pedidos_recientes:
+                resumen.append(f"- Pedido #{pedido.get('numero_pedido')}: {pedido.get('estado')} - ${pedido.get('total', 0):,.0f}")
+        
+        return "\n".join(resumen)
+    
     # ==================== MÉTODOS DEL CARRITO ====================
 
     def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
@@ -127,7 +217,6 @@ class MessageHandler:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Asegurar tabla
                     cur.execute(f"""
                         CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
                             id SERIAL PRIMARY KEY,
@@ -139,7 +228,6 @@ class MessageHandler:
                         )
                     """)
                     
-                    # UPSERT
                     cur.execute(f"""
                         INSERT INTO "{schema_name}".carritos (cliente_numero, items, total, created_at, updated_at)
                         VALUES (%s, %s, %s, NOW(), NOW())
@@ -205,24 +293,14 @@ class MessageHandler:
         
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
     
-    # ==================== MÉTODOS DEL HISTORIAL ====================
+    # ==================== MÉTODOS DEL HISTORIAL (DEPRECADO, pero mantenido por compatibilidad) ====================
 
-    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 100) -> list:
-        """Obtiene el historial de conversación desde el esquema del tenant"""
+    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 20) -> list:
+        """Obtiene el historial de conversación desde el esquema del tenant (deprecado - usar resumen)"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Verificar si la tabla existe
-                    cur.execute(f"""
-                        SELECT EXISTS (
-                            SELECT FROM information_schema.tables 
-                            WHERE table_schema = %s AND table_name = 'conversaciones'
-                        )
-                    """, (schema_name,))
-                    if not cur.fetchone()[0]:
-                        return []
-                    
                     cur.execute(f"""
                         SELECT mensaje, respuesta, created_at 
                         FROM "{schema_name}".conversaciones 
@@ -237,7 +315,7 @@ class MessageHandler:
             return []
         
     def _formatear_historial_para_prompt(self, historial: list) -> str:
-        """Formatea el historial para incluirlo en el prompt de IA"""
+        """Formatea el historial para incluirlo en el prompt de IA (deprecado)"""
         if not historial:
             return ""
         
@@ -259,7 +337,6 @@ class MessageHandler:
             if nombre and nombre in texto_lower:
                 cantidad = 1
                 
-                # Buscar número antes del producto
                 patron = rf'(\d+)\s*{re.escape(nombre)}'
                 match = re.search(patron, texto_lower)
                 if match:
@@ -373,7 +450,6 @@ class MessageHandler:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Asegurar tabla
                     cur.execute(f"""
                         CREATE TABLE IF NOT EXISTS "{schema_name}".clientes (
                             id UUID PRIMARY KEY,
@@ -388,7 +464,6 @@ class MessageHandler:
                         )
                     """)
                     
-                    # Buscar cliente
                     cur.execute(f'SELECT id, nombre, cc, email, direccion FROM "{schema_name}".clientes WHERE numero_telefono = %s', (numero,))
                     row = cur.fetchone()
                     
@@ -450,7 +525,6 @@ class MessageHandler:
         
         with db_manager.get_connection(tenant['id']) as conn:
             with conn.cursor() as cur:
-                # Asegurar tabla
                 cur.execute(f"""
                     CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                         id UUID PRIMARY KEY,
@@ -637,9 +711,8 @@ class MessageHandler:
             
             return self._mostrar_carrito_confirmacion(tenant, numero, nuevo_carrito)
         
-        # 6. Respuesta general
-        historial = self._get_historial_conversacion(tenant['id'], numero, 100)
-        historial_texto = self._formatear_historial_para_prompt(historial)
+        # 6. Respuesta general - Usar resumen en lugar de historial
+        resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
         
         datos_extraidos = self._extraer_datos_con_ia(texto)
         if not datos_extraidos:
@@ -650,10 +723,11 @@ class MessageHandler:
                 self._datos_cliente[numero] = {}
             self._datos_cliente[numero].update(datos_extraidos)
         
+        # Construir prompt con resumen en lugar de historial
         if contexto.get('prompt_personalizado'):
-            system_prompt = contexto['prompt_personalizado'] + historial_texto
+            system_prompt = contexto['prompt_personalizado']
         else:
-            system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto) + historial_texto
+            system_prompt = self._construir_prompt_sistema(tenant, menu, pedidos_pendientes, contexto, resumen_cliente)
         
         carrito_info = self._get_carrito_info_para_prompt(tenant['id'], numero)
         if carrito_info:
@@ -661,16 +735,17 @@ class MessageHandler:
         
         datos_cliente_info = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
         if datos_cliente_info:
-            system_prompt += f"\n\n📋 Datos del cliente registrados:\n{datos_cliente_info}"
+            system_prompt += f"\n\n📝 DATOS NUEVOS DEL CLIENTE (a confirmar):\n{datos_cliente_info}"
         
         system_prompt += """
 
 REGLAS IMPORTANTES:
+- Si el cliente ya tiene datos en la sección "DATOS DEL CLIENTE", NO los pidas de nuevo
+- Solo pide los datos que falten (nombre, dirección, fecha/hora)
 - Confirma los datos que el cliente haya proporcionado
-- Pregunta por datos faltantes (nombre, dirección, fecha/hora)
 - Cuando tenga todos los datos, pregunta si desea finalizar el pedido
-- Sé amable y conversacional
-- Responde en español"""
+- No uses emojis en exceso
+- Responde en español, de forma breve y natural"""
         
         user_message = f"Cliente dice: \"{texto}\"\nGenera una respuesta amable y natural."
         
@@ -700,8 +775,9 @@ REGLAS IMPORTANTES:
             items_texto += f"- {item['cantidad']}x {item['nombre']}: ${item['precio'] * item['cantidad']:,.0f}\n"
         return f"📦 Productos en carrito:\n{items_texto}💰 Total: ${carrito.get('total', 0):,.0f}"
 
-    def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, contexto: dict) -> str:
-        """Construye prompt del sistema"""
+    def _construir_prompt_sistema(self, tenant: dict, menu: list, pedidos_pendientes: list, 
+                                   contexto: dict, resumen_cliente: str = "") -> str:
+        """Construye prompt del sistema con resumen del cliente"""
         nombre_negocio = tenant.get('nombre', 'Mi negocio')
         horario = contexto.get('horario', 'No especificado')
         ubicacion = contexto.get('ubicacion', 'No especificada')
@@ -716,6 +792,8 @@ REGLAS IMPORTANTES:
 - Instrucciones: {instrucciones}
 - Políticas: {politicas}
 
+{resumen_cliente if resumen_cliente else "📋 DATOS DEL CLIENTE: Cliente nuevo, no hay datos previos"}
+
 📋 MENÚ DISPONIBLE:
 """
         for i, producto in enumerate(menu[:25]):
@@ -727,13 +805,13 @@ REGLAS IMPORTANTES:
         prompt += """
 REGLAS IMPORTANTES:
 1. Sé amable, natural y servicial
-2. Ayuda al cliente a armar su pedido
-3. Confirma los datos del cliente cuando los proporcione
-4. Si el cliente no especifica cantidad, asume 1 unidad
-5. No inventes productos que no están en el menú
-6. El link de pago se genera automáticamente al finalizar
-7. Pregunta por datos faltantes: nombre, cédula, dirección, fecha/hora de entrega
-8. Si dice "recojo en tienda", no preguntes dirección de despacho
+2. Si el cliente ya tiene datos en la sección "DATOS DEL CLIENTE", NO los pidas de nuevo. Solo confírmalos
+3. Pregunta SOLO por los datos que falten
+4. Ayuda al cliente a armar su pedido
+5. El link de pago se genera automáticamente al finalizar
+6. No inventes productos que no están en el menú
+7. Si el cliente dice "recojo en tienda", no preguntes dirección de despacho
+8. Usa un tono conversacional pero profesional
 """
         return prompt
 
