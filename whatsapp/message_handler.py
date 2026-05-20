@@ -508,13 +508,24 @@ class MessageHandler:
             return None
 
     def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
-        """Finaliza el pedido en el esquema del tenant"""
+        """Finaliza el pedido, guarda en BD y genera número de seguimiento"""
         if not carrito or not carrito.get('items'):
             return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
         
         datos_cliente = self._datos_cliente.get(numero, {})
         schema_name = self._get_schema_name(tenant['id'])
         
+        # Obtener la dirección del negocio para "recojo en tienda"
+        contexto = self._obtener_contexto_tenant(tenant['id'])
+        ubicacion_negocio = contexto.get('ubicacion', '')
+        nombre_negocio = tenant.get('nombre', 'nuestro local')
+        
+        # Determinar dirección de entrega
+        direccion_entrega = datos_cliente.get('direccion', '')
+        if datos_cliente.get('recojo_en_tienda'):
+            direccion_entrega = f"Recojo en tienda - {nombre_negocio} - {ubicacion_negocio}"
+        
+        # Guardar cliente en BD
         cliente_id = self._obtener_o_crear_cliente(tenant['id'], numero, datos_cliente)
         if not cliente_id:
             return "❌ Hubo un error con tus datos. Por favor intenta de nuevo."
@@ -523,37 +534,18 @@ class MessageHandler:
         items = carrito['items']
         total = carrito['total']
         
+        # Obtener secuencial y generar número de pedido legible
         with db_manager.get_connection(tenant['id']) as conn:
             with conn.cursor() as cur:
-                cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
-                        id UUID PRIMARY KEY,
-                        cliente_id UUID,
-                        cliente_numero TEXT NOT NULL,
-                        numero_pedido TEXT NOT NULL,
-                        secuencial INTEGER NOT NULL,
-                        items JSONB NOT NULL,
-                        total INTEGER NOT NULL,
-                        estado TEXT DEFAULT 'nuevo',
-                        direccion_entrega TEXT,
-                        notas TEXT,
-                        created_at TIMESTAMP DEFAULT NOW(),
-                        updated_at TIMESTAMP DEFAULT NOW(),
-                        pagado_at TIMESTAMP,
-                        enviado_at TIMESTAMP,
-                        cancelado_at TIMESTAMP
-                    )
-                """)
-                
                 cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
                 secuencial = cur.fetchone()[0] or 1
         
-        numero_pedido = self._generar_numero_pedido(secuencial)
+        # Número de pedido legible: NEG-20241225-0001
+        from datetime import datetime
+        fecha_str = datetime.now().strftime('%Y%m%d')
+        numero_pedido = f"{tenant['nombre'][:3].upper()}-{fecha_str}-{secuencial:04d}"
         
-        direccion_entrega = datos_cliente.get('direccion', '')
-        if datos_cliente.get('recojo_en_tienda'):
-            direccion_entrega = "Recojo en tienda"
-        
+        # Guardar pedido
         try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
@@ -568,33 +560,46 @@ class MessageHandler:
                     ))
                 conn.commit()
             
+            # Limpiar carrito y datos temporales
             self._guardar_carrito(tenant['id'], numero, [], 0)
             if numero in self._datos_cliente:
                 del self._datos_cliente[numero]
             
+            # Generar link de pago (si aplica)
             link_pago = generar_link_pago(total, pedido_id)
             
+            # Formatear items
             items_texto = ""
             for item in items:
                 subtotal = item['precio'] * item['cantidad']
                 items_texto += f"• {item['cantidad']}x {item['nombre']}: ${subtotal:,.0f}\n"
             
+            # Datos del cliente formateados
             datos_texto = self._formatear_datos_cliente(datos_cliente)
             
-            return f"""✅ **¡Pedido #{numero_pedido} confirmado!**{datos_texto}
+            # Mensaje de confirmación con número de pedido visible
+            return f"""✅ **¡PEDIDO CONFIRMADO!**
 
-📋 **Productos:**
-{items_texto}
-💰 **Total:** ${total:,.0f}
+    📌 **Número de pedido:** *{numero_pedido}*
+    📝 **Guarda este número para hacer seguimiento**
 
-🔗 **Link de pago:** {link_pago}
+    {datos_texto}
 
-📌 Cuando completes el pago, avísame para empezar a preparar tu pedido."""
-                
+    📋 **Productos:**
+    {items_texto}
+    💰 **Total:** ${total:,.0f}
+
+    📦 **Entrega:** {direccion_entrega}
+
+    🔗 **Link de pago:** {link_pago}
+
+    📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
+    📞 *Para consultar tu pedido, puedes enviarme tu número de pedido.*"""
+                    
         except Exception as e:
             logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
-    
+            
     def _generar_numero_pedido(self, secuencial: int) -> str:
         """Genera número de pedido formateado"""
         return f"PED-{secuencial:06d}"
@@ -684,6 +689,15 @@ class MessageHandler:
         if any(palabra in texto_lower for palabra in ['que pedí', 'que tengo', 'mi pedido', 'ver carrito']):
             return self._mostrar_carrito(tenant, numero, carrito_actual)
         
+        # 1.5. Consultar pedido por número
+        # Detectar si el cliente pregunta por un pedido (ej: "cómo va mi pedido PED-001", "estado del pedido")
+        pedido_match = re.search(r'(?:pedido|numero|número|#)\s*([A-Za-z0-9\-_]+)', texto_lower)
+        if pedido_match:
+            posible_numero = pedido_match.group(1).upper()
+            if len(posible_numero) > 5:  # Números de pedido tienen al menos 6 caracteres
+                respuesta_pedido = self.consultar_pedido(tenant['id'], posible_numero, numero)
+                return respuesta_pedido
+
         # 5. Detectar productos
         productos_detectados = self._detectar_productos_con_ia(texto, menu) or self._detectar_productos_en_texto(texto, menu)
         
@@ -820,36 +834,41 @@ REGLAS IMPORTANTES:
         return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿Qué te gustaría ordenar? Tenemos {len(menu)} productos disponibles. Escribe 'MENÚ' para verlos."
 
     def _extraer_datos_con_ia(self, texto: str) -> dict:
-        """Usa IA para extraer datos del cliente"""
+        """Usa IA para extraer datos del cliente de forma más precisa"""
         if not ai_client.client:
             return {}
         
         prompt = f"""
-        Extrae información del cliente del siguiente mensaje.
+        Extrae información del cliente del siguiente mensaje de WhatsApp.
         
         MENSAJE: "{texto}"
         
-        Devuelve SOLO un JSON:
+        IMPORTANTE: 
+        - Si el cliente dice "recojo en tienda", "recoger en tienda", "retiro en local", "lo recojo", "paso a recoger" → recojo_en_tienda = true
+        - Si el cliente dice "pago contraentrega", "efectivo", "pago en efectivo", "contra entrega" → pago_contraentrega = true
+        - Si el cliente dice "mañana", "hoy", "pasado mañana", o una fecha específica, extraer fecha_entrega
+        - Si el cliente dice una hora (ej: "10am", "10:00", "a las 10"), extraer hora_entrega
+        
+        Devuelve SOLO un JSON válido. Si un campo no aparece en el mensaje, déjalo vacío.
+        
         {{
-            "nombre": "nombre completo",
-            "cc": "número de cédula",
+            "nombre": "nombre completo del cliente",
+            "cc": "número de cédula o identificación",
             "telefono": "número de teléfono",
             "email": "correo electrónico",
-            "direccion": "dirección completa",
-            "fecha_entrega": "fecha de entrega",
-            "hora_entrega": "hora de entrega",
+            "direccion": "dirección completa de entrega",
+            "fecha_entrega": "fecha solicitada (ej: mañana, hoy, 25/12/2024)",
+            "hora_entrega": "hora solicitada (ej: 10am, 3:00pm)",
             "recojo_en_tienda": false,
             "pago_contraentrega": false
         }}
-        
-        Si no encuentras un campo, déjalo vacío o false.
         """
         
         try:
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
+                temperature=0.1,  # Más bajo para respuestas más consistentes
                 max_tokens=300
             )
             contenido = response.choices[0].message.content
@@ -859,6 +878,46 @@ REGLAS IMPORTANTES:
             logger.error(f'Error extrayendo datos con IA: {e}')
             return {}
 
+    def consultar_pedido(self, tenant_id: str, numero_pedido: str, cliente_numero: str) -> str:
+        """Consulta el estado de un pedido por su número"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT numero_pedido, estado, total, created_at, direccion_entrega
+                        FROM "{schema_name}".pedidos
+                        WHERE numero_pedido = %s AND cliente_numero = %s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """, (numero_pedido, cliente_numero))
+                    row = cur.fetchone()
+                    
+                    if row:
+                        estados = {
+                            'nuevo': '🟡 Recibido - Pendiente de pago',
+                            'pagado': '🟢 Pagado - En preparación',
+                            'enviado': '📦 Enviado - En camino',
+                            'entregado': '✅ Entregado',
+                            'cancelado': '❌ Cancelado'
+                        }
+                        estado_texto = estados.get(row[1], row[1])
+                        fecha = row[3].strftime('%d/%m/%Y %H:%M') if row[3] else 'N/A'
+                        
+                        return f"""📦 **Estado de tu pedido #{row[0]}**
+
+    📌 **Estado:** {estado_texto}
+    💰 **Total:** ${row[2]:,.0f}
+    📅 **Fecha:** {fecha}
+    📍 **Entrega:** {row[4] or 'No especificada'}
+
+    ¿Necesitas algo más?"""
+                    else:
+                        return f"❌ No encontré el pedido #{numero_pedido}. Verifica el número o contacta con el negocio directamente."
+        except Exception as e:
+            logger.error(f'Error consultando pedido: {e}')
+            return "❌ Hubo un error al consultar tu pedido. Por favor intenta de nuevo."
+        
 
 # Instancia global
 message_handler = MessageHandler()
