@@ -62,7 +62,7 @@ class MessageHandler:
                     productos = []
                     for row in rows:
                         productos.append({
-                            'id': row[0],
+                            'id': str(row[0]),  # Convertir UUID a string
                             'nombre': row[1],
                             'descripcion': row[2] or '',
                             'precio': row[3],
@@ -190,8 +190,9 @@ class MessageHandler:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
+                    # Cambiar "telefono" por "numero_telefono"
                     cur.execute(f"""
-                        SELECT nombre, cc, email, direccion, telefono
+                        SELECT nombre, cc, email, direccion, numero_telefono
                         FROM "{schema_name}".clientes
                         WHERE numero_telefono = %s
                     """, (cliente_numero,))
@@ -202,7 +203,7 @@ class MessageHandler:
                             'cc': row[1],
                             'email': row[2],
                             'direccion': row[3],
-                            'telefono': row[4]
+                            'telefono': row[4]  # Mapear numero_telefono a telefono para consistencia
                         }
                     return {}
         except Exception as e:
@@ -404,8 +405,46 @@ class MessageHandler:
             logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
     
+    def _consultar_estado_pedido(self, tenant_id: str, numero_pedido: str, cliente_numero: str) -> str:
+        """Consulta el estado de un pedido"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT estado, total, created_at, direccion_entrega
+                        FROM "{schema_name}".pedidos
+                        WHERE numero_pedido = %s AND cliente_numero = %s
+                    """, (numero_pedido, cliente_numero))
+                    row = cur.fetchone()
+                    
+                    if row:
+                        estados = {
+                            'nuevo': '🟡 Recibido - Pendiente de pago',
+                            'pagado': '🟢 Pagado - En preparación',
+                            'enviado': '📦 Enviado - En camino',
+                            'entregado': '✅ Entregado',
+                            'cancelado': '❌ Cancelado'
+                        }
+                        estado_texto = estados.get(row[0], row[0])
+                        fecha = row[2].strftime('%d/%m/%Y %H:%M') if row[2] else 'N/A'
+                        
+                        return f"""📦 **Estado de tu pedido #{numero_pedido}**
+
+    📌 **Estado:** {estado_texto}
+    💰 **Total:** ${row[1]:,.0f}
+    📅 **Fecha:** {fecha}
+    📍 **Entrega:** {row[3] or 'No especificada'}"""
+                    else:
+                        return f"❌ No encontré el pedido #{numero_pedido}. Verifica el número."
+        except Exception as e:
+            logger.error(f'Error consultando pedido: {e}')
+            return "❌ Hubo un error al consultar tu pedido."
+
+
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
+
     def _procesar_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
         """Procesa el mensaje usando IA para entender lenguaje natural"""
         
@@ -415,36 +454,36 @@ class MessageHandler:
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
         resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
         
+        # Crear una versión simplificada del menú sin UUID para el prompt
+        menu_simplificado = []
+        for p in menu[:30]:
+            menu_simplificado.append({
+                'nombre': p.get('nombre'),
+                'precio': p.get('precio'),
+                'descripcion': p.get('descripcion', '')[:50]  # Limitar descripción
+            })
+        
         # Construir el prompt del sistema
         system_prompt = f"""Eres un asistente de ventas por WhatsApp para {tenant.get('nombre', 'Mi negocio')}.
 
-🏪 INFORMACIÓN DEL NEGOCIO:
-- Horario: {contexto.get('horario', 'No especificado')}
-- Ubicación: {contexto.get('ubicacion', 'No especificada')}
-- Políticas: {contexto.get('politicas', 'No especificadas')}
-- Instrucciones especiales: {contexto.get('instrucciones', '')}
+    🏪 INFORMACIÓN DEL NEGOCIO:
+    - Horario: {contexto.get('horario', 'No especificado')}
+    - Ubicación: {contexto.get('ubicacion', 'No especificada')}
+    - Políticas: {contexto.get('politicas', 'No especificadas')}
 
-📋 CATÁLOGO DE PRODUCTOS:
-{json.dumps(menu[:30], indent=2, ensure_ascii=False)}
+    📋 CATÁLOGO DE PRODUCTOS:
+    {json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
 
-{resumen_cliente}
+    {resumen_cliente}
 
-{self._get_carrito_info_para_prompt(tenant['id'], numero)}
+    {self._get_carrito_info_para_prompt(tenant['id'], numero)}
 
-📝 DATOS PROPORCIONADOS EN ESTA CONVERSACIÓN:
-{self._formatear_datos_cliente(self._datos_cliente.get(numero, {})) or "Ninguno aún"}
+    ---
 
----
-
-INSTRUCCIONES IMPORTANTES:
-1. El cliente habla en lenguaje natural. Entiende lo que quiere.
-2. Si el cliente quiere un producto, así no coincida exactamente con el catálogo, busca el más cercano.
-3. Si el cliente da su nombre, cédula, teléfono, email o dirección, guárdalos mentalmente.
-4. Si el cliente dice "recojo en tienda", no preguntes dirección.
-5. Sé amable, cálido y conversacional. Responde en español.
-
-RESPONDE de forma natural al cliente.
-"""
+    RESPONDE de forma natural, amable y conversacional en español.
+    Si el cliente pide un producto, así no coincida exactamente con el nombre del catálogo, busca el más cercano.
+    Si el cliente da su nombre, cédula, dirección, guárdalos en tu memoria.
+    """
         
         user_message = f"Cliente: {texto}\n\nAsistente:"
         
@@ -461,17 +500,25 @@ RESPONDE de forma natural al cliente.
             
             respuesta = response.choices[0].message.content
             
-            # Intentar extraer datos del cliente de la respuesta (para guardarlos)
+            # Extraer datos del cliente
             self._extraer_y_guardar_datos(texto, numero)
             
-            # Verificar si el cliente confirmó el pedido
+            # Verificar confirmación
             if self._cliente_confirmo(texto):
                 if carrito_actual.get('items'):
                     return self._finalizar_pedido(tenant, numero, carrito_actual)
             
-            # Verificar si el cliente quiere ver el carrito
-            if any(palabra in texto.lower() for palabra in ['que pedí', 'mi pedido', 'ver carrito']):
+            # Verificar consulta de carrito
+            if any(palabra in texto.lower() for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
                 return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
+            
+            # Verificar consulta de estado de pedido
+            pedido_match = re.search(r'estado\s+pedido\s+([A-Za-z0-9\-_]+)', texto.lower())
+            if pedido_match:
+                numero_pedido = pedido_match.group(1).upper()
+                estado = self._consultar_estado_pedido(tenant['id'], numero_pedido, numero)
+                if estado:
+                    return estado
             
             return respuesta
             
