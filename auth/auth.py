@@ -39,18 +39,27 @@ class AuthManager:
         if not telefono:
             return None
         
-        # Limpiar el número (quitar espacios, guiones, etc.)
+        # Limpiar el número (quitar espacios, guiones, paréntesis)
         telefono_limpio = re.sub(r'[\s\-\(\)]', '', str(telefono))
         
-        # Si no tiene +, agregarlo
-        if not telefono_limpio.startswith('+'):
-            # Si empieza con 3 (Colombia sin código país)
-            if telefono_limpio.startswith('3') and len(telefono_limpio) == 10:
-                telefono_limpio = '+57' + telefono_limpio
-            else:
-                telefono_limpio = '+' + telefono_limpio
+        # Eliminar cualquier + existente para procesar
+        if telefono_limpio.startswith('+'):
+            telefono_limpio = telefono_limpio[1:]
         
-        return telefono_limpio
+        # Si es número colombiano de 10 dígitos (empieza con 3)
+        if len(telefono_limpio) == 10 and telefono_limpio.startswith('3'):
+            telefono_formateado = '+57' + telefono_limpio
+        # Si ya tiene código de país 57 pero sin +
+        elif len(telefono_limpio) == 12 and telefono_limpio.startswith('57'):
+            telefono_formateado = '+' + telefono_limpio
+        # Si es número internacional (más de 10 dígitos)
+        elif len(telefono_limpio) > 10:
+            telefono_formateado = '+' + telefono_limpio
+        else:
+            # Si no cumple ninguna condición, agregar + al inicio
+            telefono_formateado = '+' + telefono_limpio
+        
+        return telefono_formateado
     
     def registrar_usuario(self, email: str, password: str, nombre_completo: str = None, telefono: str = None) -> dict:
         """Registra un nuevo usuario"""
@@ -162,208 +171,22 @@ class AuthManager:
             logger.error(f"Error obteniendo negocios del usuario: {e}")
             return []
     
-    def crear_negocio(self, usuario_id: str, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante') -> dict:
-        """Crea un nuevo negocio (tenant) para el usuario"""
-        from tenants.repository import tenant_repo
-        from tenants.schema_manager import schema_manager
-        from utils.email_brevo import email_sender
-        
-        # Verificar nombre único
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM public.tenants WHERE nombre = %s", (nombre,))
-                if cur.fetchone():
-                    return {'success': False, 'error': 'Ya existe un negocio con ese nombre'}
-        
-        # Verificar phone_id único
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM public.tenants WHERE phone_id = %s", (phone_id,))
-                if cur.fetchone():
-                    return {'success': False, 'error': 'El número de teléfono ya está registrado'}
-        
-        logger.info(f"Creando tenant: nombre={nombre}, phone_id={phone_id}, tipo={tipo_negocio}")
-        
-        # Crear tenant con los parámetros en el orden correcto
-        tenant = tenant_repo.create(
-            nombre=nombre,
-            phone_id=phone_id,
-            token=token,
-            tipo_negocio=tipo_negocio,
-            usar_ia=True
-        )
-        
-        # Validar que el tenant se creó correctamente
-        if not tenant:
-            logger.error("No se pudo crear el tenant - tenant_repo.create() retornó None")
-            return {'success': False, 'error': 'Error interno al crear el negocio'}
-        
-        logger.info(f"Tenant creado exitosamente: {tenant['id']}")
-        
-        # Crear esquema del tenant
-        try:
-            schema_manager.create_tenant_schema(tenant['id'], tipo_negocio)
-            logger.info(f"Esquema creado para tenant {tenant['id']}")
-        except Exception as e:
-            logger.error(f"Error creando esquema para tenant {tenant['id']}: {e}")
-            return {'success': False, 'error': f'Error creando estructura del negocio: {str(e)}'}
-        
-        # Asociar usuario como owner
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
-                rol_row = cur.fetchone()
-                if not rol_row:
-                    return {'success': False, 'error': 'Rol owner no encontrado'}
-                rol_owner_id = rol_row[0]
-                
-                cur.execute('''
-                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por, created_at)
-                    VALUES (%s, %s, %s, %s, NOW())
-                ''', (usuario_id, tenant['id'], rol_owner_id, usuario_id))
-            conn.commit()
-        
-        logger.info(f"Usuario {usuario_id} asociado como owner del tenant {tenant['id']}")
-        
-        # Generar código de verificación
-        codigo_verificacion = secrets.token_hex(3).upper()
-        
-        # Guardar en base de datos
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    INSERT INTO public.verificacion_negocio (tenant_id, metodo_verificacion, codigo_verificacion, codigo_enviado)
-                    VALUES (%s, %s, %s, NOW())
-                ''', (tenant['id'], 'email', codigo_verificacion))
-            conn.commit()
-        
-        # Obtener email del usuario
-        email_usuario = None
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT email FROM public.usuarios WHERE id = %s", (usuario_id,))
-                row = cur.fetchone()
-                if row:
-                    email_usuario = row[0]
-        
-        # Enviar código por EMAIL
-        email_enviado = False
-        if email_usuario:
-            logger.info(f"📧 Intentando enviar email a {email_usuario}")
-            try:
-                email_enviado = email_sender.enviar_codigo_verificacion(email_usuario, codigo_verificacion, nombre)
-                logger.info(f"Resultado envío email: {email_enviado}")
-            except Exception as e:
-                logger.error(f"Error en envío de email: {e}")
-                
-        return {
-            'success': True,
-            'tenant_id': tenant['id'],
-            'nombre': nombre,
-            'codigo_verificacion': codigo_verificacion,
-            'email_enviado': email_enviado,
-            'mensaje': f'Código enviado a {email_usuario}' if email_enviado else f'Código: {codigo_verificacion}'
-        }
-        
-    def enviar_codigo_whatsapp(self, phone_id: str, token: str, codigo: str, telefono_cliente: str) -> bool:
-        """Envía el código de verificación por WhatsApp"""
-        from whatsapp.client import whatsapp_client
-        
-        # Crear un objeto tenant simulado para el envío
-        tenant = {
-            'phone_id': phone_id,
-            'token': token
-        }
-        
-        mensaje = f"""*🔐 CÓDIGO DE VERIFICACIÓN*
-
-Hola, gracias por registrar tu negocio en WhatsApp Bot SaaS.
-
-Tu código de verificación es:
-
-*{codigo}*
-
-Ingresa este código en el panel de control para activar tu asistente de ventas.
-
-Este código expira en 10 minutos.
-
-¿No solicitaste este código? Ignora este mensaje.
-
-© WhatsApp Bot SaaS - Automatiza tus ventas"""
-        
-        # Enviar el mensaje
-        return whatsapp_client.send_message(tenant, telefono_cliente, mensaje)
-    
-    def verificar_negocio(self, tenant_id: str, codigo: str) -> dict:
-        """Verifica el código ingresado por el usuario (con expiración)"""
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    SELECT id, intentos_fallidos, codigo_verificacion, verificado, codigo_enviado
-                    FROM public.verificacion_negocio WHERE tenant_id = %s
-                ''', (tenant_id,))
-                row = cur.fetchone()
-                
-                if not row:
-                    return {'success': False, 'error': 'Negocio no encontrado'}
-                
-                intentos = row[1] or 0
-                codigo_guardado = row[2]
-                ya_verificado = row[3]
-                fecha_envio = row[4]
-                
-                if ya_verificado:
-                    return {'success': False, 'error': 'El negocio ya está verificado'}
-                
-                # Verificar expiración (10 minutos)
-                if fecha_envio and datetime.now() - fecha_envio > timedelta(minutes=10):
-                    return {'success': False, 'error': 'El código ha expirado. Por favor, solicita uno nuevo.'}
-                
-                if intentos >= 5:
-                    return {'success': False, 'error': 'Demasiados intentos fallidos. Solicita un nuevo código.'}
-                
-                if codigo.upper() == codigo_guardado:
-                    cur.execute('''
-                        UPDATE public.verificacion_negocio 
-                        SET verificado = true, fecha_verificacion = NOW()
-                        WHERE tenant_id = %s
-                    ''', (tenant_id,))
-                    conn.commit()
-                    return {'success': True, 'message': 'Negocio verificado exitosamente'}
-                else:
-                    nuevos_intentos = intentos + 1
-                    cur.execute('''
-                        UPDATE public.verificacion_negocio 
-                        SET intentos_fallidos = %s
-                        WHERE tenant_id = %s
-                    ''', (nuevos_intentos, tenant_id))
-                    conn.commit()
-                    
-                    restantes = 5 - nuevos_intentos
-                    return {'success': False, 'error': f'Código incorrecto. Te quedan {restantes} intentos.'}
-    
-    # ==================== MÉTODOS PARA GESTIÓN DE ROLES ====================
+    # ==================== MÉTODOS ADICIONALES ====================
     
     def get_rol_negocio(self, usuario_id: str, tenant_id: str) -> dict:
         """Obtiene el rol de un usuario en un negocio específico"""
         try:
-            # Validar que usuario_id sea un UUID válido (convertir a string primero)
             if not usuario_id or usuario_id == 'super_admin':
                 return None
-                
-            # Convertir a string para validar (UUID tiene 36 caracteres)
-            usuario_id_str = str(usuario_id)
-            if len(usuario_id_str) < 30:
-                return None
-                
+            
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute('''
                         SELECT rn.nombre as rol, rn.id as rol_id
                         FROM public.usuario_negocio un
                         JOIN public.roles_negocio rn ON un.rol_id = rn.id
-                        WHERE un.usuario_id = %s::uuid AND un.tenant_id = %s
-                    ''', (usuario_id_str, tenant_id))
+                        WHERE un.usuario_id = %s AND un.tenant_id = %s
+                    ''', (usuario_id, tenant_id))
                     row = cur.fetchone()
                     if row:
                         return {'rol': row[0], 'rol_id': row[1]}
@@ -395,128 +218,153 @@ Este código expira en 10 minutos.
         
         return usuario_rol['rol'] in roles_permitidos_list
     
-    def get_usuarios_negocio(self, tenant_id: str) -> list:
-        """Obtiene todos los usuarios de un negocio"""
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    SELECT u.id, u.email, u.nombre_completo, rn.nombre as rol,
-                           un.invitado_por, un.invitado_en
-                    FROM public.usuario_negocio un
-                    JOIN public.usuarios u ON un.usuario_id = u.id
-                    JOIN public.roles_negocio rn ON un.rol_id = rn.id
-                    WHERE un.tenant_id = %s
-                    ORDER BY rn.id, u.nombre_completo
-                ''', (tenant_id,))
-                rows = cur.fetchall()
-                return [{'id': r[0], 'email': r[1], 'nombre': r[2], 'rol': r[3], 
-                        'invitado_por': r[4], 'invitado_en': r[5]} for r in rows]
-    
-    def invitar_usuario(self, usuario_invitador_id: str, tenant_id: str, email_invitado: str, rol_nombre: str) -> dict:
-        """Invita a un usuario existente a un negocio"""
-        # Verificar que el invitador tiene permisos
-        if not self.verificar_permiso(usuario_invitador_id, tenant_id, 'invitar_usuarios'):
-            return {'success': False, 'error': 'No tienes permisos para invitar usuarios'}
+    def crear_negocio(self, usuario_id: str, nombre: str, phone_id: str, token: str, tipo_negocio: str = 'restaurante') -> dict:
+        """Crea un nuevo negocio (tenant) para el usuario"""
+        from tenants.repository import tenant_repo
+        from tenants.schema_manager import schema_manager
+        from utils.email_brevo import email_sender
         
-        # Verificar que el rol existe
+        # Verificar nombre único
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = %s", (rol_nombre,))
-                rol_row = cur.fetchone()
-                if not rol_row:
-                    return {'success': False, 'error': 'Rol no válido'}
-                rol_id = rol_row[0]
-        
-        # Buscar al usuario invitado
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM public.usuarios WHERE email = %s", (email_invitado,))
-                user_row = cur.fetchone()
-                if not user_row:
-                    return {'success': False, 'error': 'El usuario no existe. Debe registrarse primero.'}
-                usuario_invitado_id = user_row[0]
-        
-        # Verificar si ya tiene acceso al negocio
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    SELECT id FROM public.usuario_negocio 
-                    WHERE usuario_id = %s AND tenant_id = %s
-                ''', (usuario_invitado_id, tenant_id))
+                cur.execute("SELECT id FROM public.tenants WHERE nombre = %s", (nombre,))
                 if cur.fetchone():
-                    return {'success': False, 'error': 'El usuario ya tiene acceso a este negocio'}
+                    return {'success': False, 'error': 'Ya existe un negocio con ese nombre'}
         
-        # Crear la relación
+        # Verificar phone_id único
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
-                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por, invitacion_aceptada, created_at)
-                    VALUES (%s, %s, %s, %s, true, NOW())
-                ''', (usuario_invitado_id, tenant_id, rol_id, usuario_invitador_id))
-            conn.commit()
+                cur.execute("SELECT id FROM public.tenants WHERE phone_id = %s", (phone_id,))
+                if cur.fetchone():
+                    return {'success': False, 'error': 'El número de teléfono ya está registrado'}
         
-        logger.info(f'Usuario {email_invitado} invitado al negocio {tenant_id} como {rol_nombre}')
+        logger.info(f"Creando tenant: nombre={nombre}, phone_id={phone_id}, tipo={tipo_negocio}")
         
-        return {'success': True, 'message': f'Usuario invitado exitosamente como {rol_nombre}'}
-    
-    def remover_usuario(self, usuario_removedor_id: str, tenant_id: str, usuario_a_remover_id: str) -> dict:
-        """Remueve un usuario de un negocio"""
-        # Verificar permisos
-        if not self.verificar_permiso(usuario_removedor_id, tenant_id, 'invitar_usuarios'):
-            return {'success': False, 'error': 'No tienes permisos para remover usuarios'}
+        # Crear tenant
+        tenant = tenant_repo.create(
+            nombre=nombre,
+            phone_id=phone_id,
+            token=token,
+            tipo_negocio=tipo_negocio,
+            usar_ia=True
+        )
         
-        # No permitir remover al owner si no es el mismo
-        rol_removedor = self.get_rol_negocio(usuario_removedor_id, tenant_id)
-        rol_a_remover = self.get_rol_negocio(usuario_a_remover_id, tenant_id)
+        if not tenant:
+            logger.error("No se pudo crear el tenant")
+            return {'success': False, 'error': 'Error interno al crear el negocio'}
         
-        if rol_a_remover and rol_a_remover['rol'] == 'owner' and usuario_removedor_id != usuario_a_remover_id:
-            return {'success': False, 'error': 'No puedes remover al propietario del negocio'}
+        logger.info(f"Tenant creado exitosamente: {tenant['id']}")
         
+        # Crear esquema del tenant
+        try:
+            schema_manager.create_tenant_schema(tenant['id'], tipo_negocio)
+            logger.info(f"Esquema creado para tenant {tenant['id']}")
+        except Exception as e:
+            logger.error(f"Error creando esquema: {e}")
+            return {'success': False, 'error': f'Error creando estructura del negocio: {str(e)}'}
+        
+        # Asociar usuario como owner
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
-                    DELETE FROM public.usuario_negocio 
-                    WHERE usuario_id = %s AND tenant_id = %s
-                ''', (usuario_a_remover_id, tenant_id))
-            conn.commit()
-        
-        return {'success': True, 'message': 'Usuario removido exitosamente'}
-    
-    def cambiar_rol_usuario(self, usuario_actual_id: str, tenant_id: str, usuario_id: str, nuevo_rol: str) -> dict:
-        """Cambia el rol de un usuario en un negocio"""
-        # Verificar permisos
-        if not self.verificar_permiso(usuario_actual_id, tenant_id, 'invitar_usuarios'):
-            return {'success': False, 'error': 'No tienes permisos para cambiar roles'}
-        
-        # Verificar que el nuevo rol existe
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = %s", (nuevo_rol,))
+                cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = 'owner'")
                 rol_row = cur.fetchone()
                 if not rol_row:
-                    return {'success': False, 'error': 'Rol no válido'}
-                nuevo_rol_id = rol_row[0]
+                    return {'success': False, 'error': 'Rol owner no encontrado'}
+                rol_owner_id = rol_row[0]
+                
+                cur.execute('''
+                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por, created_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                ''', (usuario_id, tenant['id'], rol_owner_id, usuario_id))
+            conn.commit()
         
-        # No permitir cambiar el rol del owner si no es él mismo
-        rol_usuario = self.get_rol_negocio(usuario_id, tenant_id)
-        if rol_usuario and rol_usuario['rol'] == 'owner' and usuario_actual_id != usuario_id:
-            return {'success': False, 'error': 'No puedes cambiar el rol del propietario'}
+        # Generar código de verificación
+        codigo_verificacion = secrets.token_hex(3).upper()
         
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('''
-                    UPDATE public.usuario_negocio 
-                    SET rol_id = %s
-                    WHERE usuario_id = %s AND tenant_id = %s
-                ''', (nuevo_rol_id, usuario_id, tenant_id))
+                    INSERT INTO public.verificacion_negocio (tenant_id, metodo_verificacion, codigo_verificacion, codigo_enviado)
+                    VALUES (%s, %s, %s, NOW())
+                ''', (tenant['id'], 'email', codigo_verificacion))
             conn.commit()
         
-        return {'success': True, 'message': f'Rol cambiado a {nuevo_rol}'}
+        # Obtener email del usuario
+        email_usuario = None
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT email FROM public.usuarios WHERE id = %s", (usuario_id,))
+                row = cur.fetchone()
+                if row:
+                    email_usuario = row[0]
+        
+        # Enviar código por email
+        email_enviado = False
+        if email_usuario:
+            try:
+                email_enviado = email_sender.enviar_codigo_verificacion(email_usuario, codigo_verificacion, nombre)
+            except Exception as e:
+                logger.error(f"Error en envío de email: {e}")
+                
+        return {
+            'success': True,
+            'tenant_id': tenant['id'],
+            'nombre': nombre,
+            'codigo_verificacion': codigo_verificacion,
+            'email_enviado': email_enviado,
+            'mensaje': f'Código enviado a {email_usuario}' if email_enviado else f'Código: {codigo_verificacion}'
+        }
+    
+    def verificar_negocio(self, tenant_id: str, codigo: str) -> dict:
+        """Verifica el código ingresado por el usuario"""
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT id, intentos_fallidos, codigo_verificacion, verificado, codigo_enviado
+                    FROM public.verificacion_negocio WHERE tenant_id = %s
+                ''', (tenant_id,))
+                row = cur.fetchone()
+                
+                if not row:
+                    return {'success': False, 'error': 'Negocio no encontrado'}
+                
+                intentos = row[1] or 0
+                codigo_guardado = row[2]
+                ya_verificado = row[3]
+                fecha_envio = row[4]
+                
+                if ya_verificado:
+                    return {'success': False, 'error': 'El negocio ya está verificado'}
+                
+                if fecha_envio and datetime.now() - fecha_envio > timedelta(minutes=10):
+                    return {'success': False, 'error': 'El código ha expirado'}
+                
+                if intentos >= 5:
+                    return {'success': False, 'error': 'Demasiados intentos fallidos'}
+                
+                if codigo.upper() == codigo_guardado:
+                    cur.execute('''
+                        UPDATE public.verificacion_negocio 
+                        SET verificado = true, fecha_verificacion = NOW()
+                        WHERE tenant_id = %s
+                    ''', (tenant_id,))
+                    conn.commit()
+                    return {'success': True, 'message': 'Negocio verificado exitosamente'}
+                else:
+                    nuevos_intentos = intentos + 1
+                    cur.execute('''
+                        UPDATE public.verificacion_negocio 
+                        SET intentos_fallidos = %s
+                        WHERE tenant_id = %s
+                    ''', (nuevos_intentos, tenant_id))
+                    conn.commit()
+                    restantes = 5 - nuevos_intentos
+                    return {'success': False, 'error': f'Código incorrecto. Te quedan {restantes} intentos.'}
     
     # ==================== MÉTODOS PARA SUPER ADMIN ====================
     
     def get_all_usuarios(self) -> list:
-        """Obtiene todos los usuarios (solo para super_admin)"""
+        """Obtiene todos los usuarios"""
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('''
@@ -532,7 +380,7 @@ Este código expira en 10 minutos.
                 return [dict(zip(columns, row)) for row in rows]
     
     def get_all_negocios(self) -> list:
-        """Obtiene todos los negocios (solo para super_admin)"""
+        """Obtiene todos los negocios"""
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('''
@@ -551,7 +399,7 @@ Este código expira en 10 minutos.
                 return [dict(zip(columns, row)) for row in rows]
     
     def actualizar_usuario(self, usuario_id: str, datos: dict) -> dict:
-        """Actualiza datos de un usuario (solo super_admin)"""
+        """Actualiza datos de un usuario"""
         try:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
@@ -563,7 +411,6 @@ Este código expira en 10 minutos.
                         params.append(datos['nombre'])
                     
                     if datos.get('email'):
-                        # Verificar que el email no esté en uso por otro usuario
                         cur.execute("SELECT id FROM public.usuarios WHERE email = %s AND id != %s", 
                                 (datos['email'], usuario_id))
                         if cur.fetchone():
@@ -580,13 +427,6 @@ Este código expira en 10 minutos.
                         updates.append("activo = %s")
                         params.append(datos['activo'])
                     
-                    if datos.get('rol_sistema'):
-                        cur.execute("SELECT id FROM public.roles_sistema WHERE nombre = %s", (datos['rol_sistema'],))
-                        rol_row = cur.fetchone()
-                        if rol_row:
-                            updates.append("rol_sistema_id = %s")
-                            params.append(rol_row[0])
-                    
                     if not updates:
                         return {'success': False, 'error': 'No hay datos para actualizar'}
                     
@@ -601,19 +441,136 @@ Este código expira en 10 minutos.
             return {'success': False, 'error': str(e)}
     
     def eliminar_usuario(self, usuario_id: str) -> dict:
-        """Elimina un usuario y todos sus datos (solo super_admin)"""
+        """Elimina un usuario"""
         try:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Eliminar relaciones usuario-negocio
                     cur.execute("DELETE FROM public.usuario_negocio WHERE usuario_id = %s", (usuario_id,))
-                    # Eliminar el usuario
                     cur.execute("DELETE FROM public.usuarios WHERE id = %s", (usuario_id,))
                 conn.commit()
             return {'success': True, 'message': 'Usuario eliminado'}
         except Exception as e:
             logger.error(f'Error eliminando usuario: {e}')
             return {'success': False, 'error': str(e)}
+    
+    def enviar_codigo_whatsapp(self, phone_id: str, token: str, codigo: str, telefono_cliente: str) -> bool:
+        """Envía el código de verificación por WhatsApp"""
+        from whatsapp.client import whatsapp_client
+        
+        tenant = {
+            'phone_id': phone_id,
+            'token': token
+        }
+        
+        mensaje = f"""*🔐 CÓDIGO DE VERIFICACIÓN*
+
+Tu código de verificación es:
+
+*{codigo}*
+
+Ingresa este código en el panel de control para activar tu asistente de ventas.
+
+Este código expira en 10 minutos.
+
+¿No solicitaste este código? Ignora este mensaje."""
+        
+        return whatsapp_client.send_message(tenant, telefono_cliente, mensaje)
+    
+    def get_usuarios_negocio(self, tenant_id: str) -> list:
+        """Obtiene todos los usuarios de un negocio"""
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT u.id, u.email, u.nombre_completo, rn.nombre as rol,
+                           un.invitado_por, un.invitado_en
+                    FROM public.usuario_negocio un
+                    JOIN public.usuarios u ON un.usuario_id = u.id
+                    JOIN public.roles_negocio rn ON un.rol_id = rn.id
+                    WHERE un.tenant_id = %s
+                    ORDER BY rn.id, u.nombre_completo
+                ''', (tenant_id,))
+                rows = cur.fetchall()
+                return [{'id': r[0], 'email': r[1], 'nombre': r[2], 'rol': r[3], 
+                        'invitado_por': r[4], 'invitado_en': r[5]} for r in rows]
+    
+    def invitar_usuario(self, usuario_invitador_id: str, tenant_id: str, email_invitado: str, rol_nombre: str) -> dict:
+        """Invita a un usuario a un negocio"""
+        if not self.verificar_permiso(usuario_invitador_id, tenant_id, 'invitar_usuarios'):
+            return {'success': False, 'error': 'No tienes permisos para invitar usuarios'}
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = %s", (rol_nombre,))
+                rol_row = cur.fetchone()
+                if not rol_row:
+                    return {'success': False, 'error': 'Rol no válido'}
+                rol_id = rol_row[0]
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM public.usuarios WHERE email = %s", (email_invitado,))
+                user_row = cur.fetchone()
+                if not user_row:
+                    return {'success': False, 'error': 'El usuario no existe'}
+                usuario_invitado_id = user_row[0]
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT id FROM public.usuario_negocio 
+                    WHERE usuario_id = %s AND tenant_id = %s
+                ''', (usuario_invitado_id, tenant_id))
+                if cur.fetchone():
+                    return {'success': False, 'error': 'El usuario ya tiene acceso'}
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    INSERT INTO public.usuario_negocio (usuario_id, tenant_id, rol_id, invitado_por, invitacion_aceptada, created_at)
+                    VALUES (%s, %s, %s, %s, true, NOW())
+                ''', (usuario_invitado_id, tenant_id, rol_id, usuario_invitador_id))
+            conn.commit()
+        
+        return {'success': True, 'message': f'Usuario invitado como {rol_nombre}'}
+    
+    def remover_usuario(self, usuario_removedor_id: str, tenant_id: str, usuario_a_remover_id: str) -> dict:
+        """Remueve un usuario de un negocio"""
+        if not self.verificar_permiso(usuario_removedor_id, tenant_id, 'invitar_usuarios'):
+            return {'success': False, 'error': 'No tienes permisos'}
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    DELETE FROM public.usuario_negocio 
+                    WHERE usuario_id = %s AND tenant_id = %s
+                ''', (usuario_a_remover_id, tenant_id))
+            conn.commit()
+        
+        return {'success': True, 'message': 'Usuario removido'}
+    
+    def cambiar_rol_usuario(self, usuario_actual_id: str, tenant_id: str, usuario_id: str, nuevo_rol: str) -> dict:
+        """Cambia el rol de un usuario"""
+        if not self.verificar_permiso(usuario_actual_id, tenant_id, 'invitar_usuarios'):
+            return {'success': False, 'error': 'No tienes permisos'}
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM public.roles_negocio WHERE nombre = %s", (nuevo_rol,))
+                rol_row = cur.fetchone()
+                if not rol_row:
+                    return {'success': False, 'error': 'Rol no válido'}
+                nuevo_rol_id = rol_row[0]
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    UPDATE public.usuario_negocio 
+                    SET rol_id = %s
+                    WHERE usuario_id = %s AND tenant_id = %s
+                ''', (nuevo_rol_id, usuario_id, tenant_id))
+            conn.commit()
+        
+        return {'success': True, 'message': f'Rol cambiado a {nuevo_rol}'}
 
 
 # Instancia global

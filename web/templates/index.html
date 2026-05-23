@@ -81,13 +81,53 @@
     .auth-card.hidden {
         display: none;
     }
+    .form-error {
+        color: #dc2626;
+        font-size: 0.75rem;
+        margin-top: 0.25rem;
+        display: block;
+    }
+    .btn-link {
+        background: none;
+        border: none;
+        color: #075E54;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    .btn-link:hover {
+        text-decoration: underline;
+    }
+    .nav-links {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+    }
+    .nav-link-btn {
+        background: transparent;
+        border: 1px solid rgba(255,255,255,0.3);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .nav-link-btn:hover {
+        background: rgba(255,255,255,0.1);
+        border-color: white;
+    }
 </style>
 {% endblock %}
+
+{% block hide_navbar %}true{% endblock %}
 
 {% block content %}
 <div class="hero">
     <h1>🤖 Automatiza tus ventas por WhatsApp</h1>
     <p>IA que atiende a tus clientes, toma pedidos y los registra automáticamente</p>
+    <div style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center;">
+        <button class="btn btn-primary btn-lg" onclick="scrollToAuth('login')">Iniciar Sesión</button>
+        <button class="btn btn-outline btn-lg" style="background: rgba(255,255,255,0.2); color: white; border: none;" onclick="scrollToAuth('register')">Registrarse Gratis</button>
+    </div>
 </div>
 
 <div class="features-grid">
@@ -113,15 +153,16 @@
     </div>
 </div>
 
-<div class="auth-section">
+<div id="auth-section" class="auth-section">
     <h2 class="text-center mb-4">Comienza a vender hoy mismo</h2>
     <p class="text-center text-muted mb-5">Sin comisiones adicionales, solo el costo de tu plan de WhatsApp Business</p>
 
     <div class="auth-tabs">
         <button class="auth-tab active" onclick="mostrarFormulario('login')">Iniciar Sesión</button>
-        <button class="auth-tab" onclick="mostrarFormulario('register')">Registrarse</button>
+        <button class="auth-tab" onclick="mostrarFormulario('register')">Crear Cuenta</button>
     </div>
 
+    <!-- Login Form -->
     <div id="loginForm" class="auth-card">
         <h3 class="text-center mb-4">Bienvenido de vuelta</h3>
         <form id="formLogin">
@@ -137,24 +178,33 @@
         </form>
     </div>
 
+    <!-- Register Form -->
     <div id="registerForm" class="auth-card hidden">
         <h3 class="text-center mb-4">Crear cuenta nueva</h3>
         <form id="formRegister">
             <div class="form-group">
-                <label class="form-label">Nombre completo</label>
+                <label class="form-label">Nombre completo *</label>
                 <input type="text" id="registerNombre" class="form-control" required>
             </div>
             <div class="form-group">
-                <label class="form-label">Email</label>
+                <label class="form-label">Email *</label>
                 <input type="email" id="registerEmail" class="form-control" required>
+                <span class="form-error" id="emailError"></span>
             </div>
             <div class="form-group">
-                <label class="form-label">Teléfono</label>
-                <input type="tel" id="registerTelefono" class="form-control" required placeholder="3155692656">
+                <label class="form-label">Teléfono *</label>
+                <input type="tel" id="registerTelefono" class="form-control" placeholder="3155692656">
+                <small class="text-muted">Ej: 3155692656 (se agregará +57 automáticamente)</small>
             </div>
             <div class="form-group">
-                <label class="form-label">Contraseña</label>
+                <label class="form-label">Contraseña *</label>
                 <input type="password" id="registerPassword" class="form-control" required minlength="6">
+                <small class="text-muted">Mínimo 6 caracteres</small>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Confirmar contraseña *</label>
+                <input type="password" id="registerConfirmPassword" class="form-control" required>
+                <span class="form-error" id="passwordError"></span>
             </div>
             <button type="submit" class="btn btn-primary w-100">Registrarse</button>
         </form>
@@ -162,6 +212,16 @@
 </div>
 
 <script>
+    function scrollToAuth(tipo) {
+        const authSection = document.getElementById('auth-section');
+        authSection.scrollIntoView({ behavior: 'smooth' });
+        if (tipo === 'login') {
+            mostrarFormulario('login');
+        } else {
+            mostrarFormulario('register');
+        }
+    }
+
     function mostrarFormulario(tipo) {
         const loginForm = document.getElementById('loginForm');
         const registerForm = document.getElementById('registerForm');
@@ -180,6 +240,33 @@
         }
     }
 
+    // Validar email
+    function validarEmail(email) {
+        const regex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        return regex.test(email);
+    }
+
+    // Formatear teléfono (agregar +57 si es necesario)
+    function formatearTelefono(telefono) {
+        if (!telefono) return '';
+        // Limpiar caracteres no numéricos
+        let limpio = telefono.replace(/[^0-9]/g, '');
+        // Si tiene 10 dígitos y empieza con 3, agregar +57
+        if (limpio.length === 10 && limpio.startsWith('3')) {
+            return '+57' + limpio;
+        }
+        // Si ya tiene código de país
+        if (limpio.length === 12 && limpio.startsWith('57')) {
+            return '+' + limpio;
+        }
+        // Si ya tiene + al inicio
+        if (telefono.startsWith('+')) {
+            return telefono;
+        }
+        return '+' + limpio;
+    }
+
+    // Login
     document.getElementById('formLogin').addEventListener('submit', async (e) => {
         e.preventDefault();
         showLoader();
@@ -208,8 +295,39 @@
         }
     });
 
+    // Register
     document.getElementById('formRegister').addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        // Limpiar errores previos
+        document.getElementById('emailError').innerText = '';
+        document.getElementById('passwordError').innerText = '';
+        
+        // Validar email
+        const email = document.getElementById('registerEmail').value;
+        if (!validarEmail(email)) {
+            document.getElementById('emailError').innerText = 'Ingresa un correo electrónico válido (ej: nombre@dominio.com)';
+            return;
+        }
+        
+        // Validar contraseñas
+        const password = document.getElementById('registerPassword').value;
+        const confirmPassword = document.getElementById('registerConfirmPassword').value;
+        
+        if (password !== confirmPassword) {
+            document.getElementById('passwordError').innerText = 'Las contraseñas no coinciden';
+            return;
+        }
+        
+        if (password.length < 6) {
+            document.getElementById('passwordError').innerText = 'La contraseña debe tener al menos 6 caracteres';
+            return;
+        }
+        
+        // Formatear teléfono
+        let telefono = document.getElementById('registerTelefono').value;
+        telefono = formatearTelefono(telefono);
+        
         showLoader();
         
         try {
@@ -217,10 +335,10 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    email: document.getElementById('registerEmail').value,
-                    password: document.getElementById('registerPassword').value,
+                    email: email,
+                    password: password,
                     nombre_completo: document.getElementById('registerNombre').value,
-                    telefono: document.getElementById('registerTelefono').value
+                    telefono: telefono
                 }),
                 credentials: 'include'
             });
@@ -230,6 +348,8 @@
                 showAlert('✅ Cuenta creada exitosamente. Ahora puedes iniciar sesión.', 'success');
                 mostrarFormulario('login');
                 document.getElementById('formRegister').reset();
+                // Pre-llenar email en login
+                document.getElementById('loginEmail').value = email;
             } else {
                 showAlert(result.error || 'Error al registrarse', 'error');
             }
@@ -240,6 +360,7 @@
         }
     });
 
+    window.scrollToAuth = scrollToAuth;
     window.mostrarFormulario = mostrarFormulario;
 </script>
 {% endblock %}

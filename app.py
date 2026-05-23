@@ -62,6 +62,41 @@ def _get_schema_name(tenant_id: str) -> str:
         return tenant['schema_name']
     return f"tenant_{tenant_id.replace('-', '_')}"
 
+
+# ==================== Formatear Telefono ====================
+
+def validar_email(self, email: str) -> bool:
+    """Valida formato de email"""
+    patron = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(patron, email) is not None
+
+def formatear_telefono(self, telefono: str) -> str:
+    """Formatea el número de teléfono para WhatsApp"""
+    if not telefono:
+        return None
+    
+    # Limpiar el número (quitar espacios, guiones, paréntesis)
+    telefono_limpio = re.sub(r'[\s\-\(\)]', '', str(telefono))
+    
+    # Eliminar cualquier + existente para procesar
+    if telefono_limpio.startswith('+'):
+        telefono_limpio = telefono_limpio[1:]
+    
+    # Si es número colombiano de 10 dígitos (empieza con 3)
+    if len(telefono_limpio) == 10 and telefono_limpio.startswith('3'):
+        telefono_formateado = '+57' + telefono_limpio
+    # Si ya tiene código de país 57 pero sin +
+    elif len(telefono_limpio) == 12 and telefono_limpio.startswith('57'):
+        telefono_formateado = '+' + telefono_limpio
+    # Si es número internacional (más de 10 dígitos)
+    elif len(telefono_limpio) > 10:
+        telefono_formateado = '+' + telefono_limpio
+    else:
+        # Si no cumple ninguna condición, agregar + al inicio
+        telefono_formateado = '+' + telefono_limpio
+    
+    return telefono_formateado
+
 # ==================== DECORADORES DE AUTENTICACIÓN ====================
 
 def login_required(f):

@@ -4,17 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}WhatsApp Bot SaaS{% endblock %}</title>
-    <!-- CSS Principal -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <!-- Loader -->
     <div id="loaderOverlay" class="loader-overlay">
         <div class="loader"></div>
     </div>
 
-    <!-- Navbar (opcional, se puede ocultar) -->
     {% if not hide_navbar %}
     <nav class="navbar">
         <div class="navbar-container">
@@ -24,12 +21,17 @@
                 <span class="badge">Beta</span>
             </div>
             <div class="navbar-menu">
-                <a href="/">Inicio</a>
                 {% if session.usuario_id %}
                 <a href="/dashboard">Dashboard</a>
                 <div id="userInfo" class="user-info">
                     <span id="userName">{{ session.nombre or session.email }}</span>
                     <button class="btn btn-sm btn-outline" onclick="cerrarSesion()">Salir</button>
+                </div>
+                {% else %}
+                <div class="nav-links">
+                    <button class="btn btn-outline" onclick="window.location.href='/'">Inicio</button>
+                    <button class="btn btn-primary" onclick="window.location.href='/'">Iniciar Sesión</button>
+                    <button class="btn btn-success" onclick="window.location.href='/'">Registrarse</button>
                 </div>
                 {% endif %}
             </div>
@@ -37,15 +39,12 @@
     </nav>
     {% endif %}
 
-    <!-- Alertas -->
     <div id="alertContainer" class="container mt-3"></div>
 
-    <!-- Contenido principal -->
     <main>
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Footer -->
     <footer class="footer">
         <div class="container">
             <p>¿Tienes preguntas? <a href="mailto:soporte@whatsappbotsaas.com">soporte@whatsappbotsaas.com</a></p>
@@ -53,7 +52,6 @@
         </div>
     </footer>
 
-    <!-- Scripts Globales -->
     <script>
         function showLoader() {
             const loader = document.getElementById('loaderOverlay');
@@ -89,7 +87,6 @@
             }
         }
         
-        // Funciones globales
         window.showLoader = showLoader;
         window.hideLoader = hideLoader;
         window.showAlert = showAlert;
