@@ -59,6 +59,29 @@
             </div>
         </div>
 
+        <!-- Filtros -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="card-title">🔍 Filtros</h3>
+            </div>
+            <div class="card-body">
+                <div class="d-flex gap-3">
+                    <label class="d-flex align-center gap-2">
+                        <input type="radio" name="filtro" value="todos" checked onchange="cargarProductos()">
+                        <span>Todos los productos</span>
+                    </label>
+                    <label class="d-flex align-center gap-2">
+                        <input type="radio" name="filtro" value="disponibles" onchange="cargarProductos()">
+                        <span>Solo disponibles</span>
+                    </label>
+                    <label class="d-flex align-center gap-2">
+                        <input type="radio" name="filtro" value="no_disponibles" onchange="cargarProductos()">
+                        <span>Solo no disponibles</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
         <!-- Productos -->
         <div class="card">
             <div class="card-header">
@@ -117,28 +140,28 @@
 </div>
 
 <script>
-    const tenantId = '{{ tenant.id }}';
-    let productos = [];
-    let currentEditId = null;
+    var tenantId = '{{ tenant.id }}';
+    var productos = [];
+    var currentEditId = null;
 
-    // Verificar que las funciones globales existen
-    if (typeof showLoader === 'undefined') {
-        console.error('Funciones globales no cargadas');
-        window.showLoader = function() { console.log('showLoader fallback'); };
-        window.hideLoader = function() { console.log('hideLoader fallback'); };
-        window.showAlert = function(msg, type) { alert(msg); };
+    function getFiltro() {
+        var radios = document.getElementsByName('filtro');
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) {
+                return radios[i].value;
+            }
+        }
+        return 'todos';
     }
 
     async function cargarProductos() {
         if (typeof showLoader === 'function') showLoader();
         try {
             console.log('Cargando productos para tenant:', tenantId);
-            const response = await fetch(`/api/tenant/${tenantId}/menu`, { 
+            var response = await fetch('/api/tenant/' + tenantId + '/menu', { 
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
             });
-            
-            console.log('Response status:', response.status);
             
             if (response.status === 401) {
                 window.location.href = '/';
@@ -146,78 +169,101 @@
             }
             
             if (!response.ok) {
-                throw new Error(`Error ${response.status}`);
+                throw new Error('Error ' + response.status);
             }
             
-            productos = await response.json();
+            var todosProductos = await response.json();
+            var filtro = getFiltro();
+            
+            // Aplicar filtro
+            if (filtro === 'disponibles') {
+                productos = todosProductos.filter(function(p) { return p.disponible === true; });
+            } else if (filtro === 'no_disponibles') {
+                productos = todosProductos.filter(function(p) { return p.disponible === false; });
+            } else {
+                productos = todosProductos;
+            }
+            
             console.log('Productos cargados:', productos.length);
             renderProductos();
         } catch (error) {
             console.error('Error:', error);
-            document.getElementById('productosContainer').innerHTML = `
-                <div class="alert alert-error">
-                    ❌ Error al cargar los productos: ${error.message}
-                    <br><br>
-                    <button class="btn btn-sm btn-primary" onclick="cargarProductos()">Reintentar</button>
-                </div>
-            `;
+            document.getElementById('productosContainer').innerHTML = 
+                '<div class="alert alert-error">❌ Error al cargar los productos</div>';
         } finally {
             if (typeof hideLoader === 'function') hideLoader();
         }
     }
 
     function renderProductos() {
-        const container = document.getElementById('productosContainer');
+        var container = document.getElementById('productosContainer');
         
         if (!productos || productos.length === 0) {
-            container.innerHTML = `
-                <div class="text-center p-5">
-                    <p>📭 No hay productos en el menú</p>
-                    <button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>
-                    <button class="btn btn-outline" onclick="cargarProductos()" style="margin-left: 10px;">🔄 Recargar</button>
-                </div>
-            `;
+            container.innerHTML = 
+                '<div class="text-center p-5">' +
+                    '<p>📭 No hay productos en el menú</p>' +
+                    '<button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>' +
+                '</div>';
             return;
         }
         
-        container.innerHTML = `
-            <div class="table-container">
-                <table class="productos-table">
-                    <thead>
-                        <tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Activo</th><th>Acciones</th></tr>
-                    </thead>
-                    <tbody>
-                        ${productos.map(p => `
-                            <tr id="row-${p.id}">
-                                <td><strong>${escapeHtml(p.nombre)}</strong></strong></td>
-                                <td>${escapeHtml(p.descripcion || '-')}</td>
-                                <td>$${(p.precio || 0).toLocaleString()}</td>
-                                <td>
-                                    <span class="badge ${p.disponible ? 'badge-success' : 'badge-warning'}">
-                                        ${p.disponible ? 'Disponible' : 'No disponible'}
-                                    </span>
-                                </td>
-                                <td>
-                                    <div class="toggle-switch ${p.disponible ? 'active' : ''}" 
-                                         onclick="toggleProducto('${p.id}', ${!p.disponible})"></div>
-                                </td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline" onclick="editarProducto('${p.id}')">✏️</button>
-                                    <button class="btn btn-sm btn-danger" onclick="eliminarProducto('${p.id}')">🗑️</button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
+        var html = '<div class="table-container">' +
+            '<table class="productos-table">' +
+                '<thead>' +
+                    '<tr>' +
+                        '<th>Producto</th>' +
+                        '<th>Descripción</th>' +
+                        '<th>Precio</th>' +
+                        '<th>Estado</th>' +
+                        '<th>Disponible</th>' +
+                        '<th>Acciones</th>' +
+                    '</tr>' +
+                '</thead>' +
+                '<tbody>';
+        
+        for (var i = 0; i < productos.length; i++) {
+            var p = productos[i];
+            var isAvailable = p.disponible === true;
+            var rowClass = isAvailable ? '' : 'producto-no-disponible';
+            
+            html += '<tr id="row-' + p.id + '" class="' + rowClass + '">' +
+                '<td><strong>' + escapeHtml(p.nombre) + '</strong></td>' +
+                '<td>' + escapeHtml(p.descripcion || '-') + '</td>' +
+                '<td>$' + (p.precio || 0).toLocaleString() + '</td>' +
+                '<td>' +
+                    '<span class="badge ' + (isAvailable ? 'badge-success' : 'badge-warning') + '">' +
+                        (isAvailable ? 'Disponible' : 'No disponible') +
+                    '</span>' +
+                '</td>' +
+                '<td>' +
+                    '<div class="toggle-switch ' + (isAvailable ? 'active' : '') + '" ' +
+                         'onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ')"></div>' +
+                '</td>' +
+                '<td>' +
+                    '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')">✏️</button>' +
+                    '<button class="btn btn-sm btn-danger" onclick="eliminarProducto(\'' + p.id + '\')">🗑️</button>' +
+                '</td>' +
+            '</tr>';
+        }
+        
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+        
+        // Aplicar estilos a productos no disponibles
+        var style = document.getElementById('producto-style');
+        if (!style) {
+            style = document.createElement('style');
+            style.id = 'producto-style';
+            style.textContent = '.producto-no-disponible { opacity: 0.6; background-color: #f9f9f9; } .producto-no-disponible:hover { opacity: 0.8; }';
+            document.head.appendChild(style);
+        }
     }
 
     async function cargarConfig() {
         try {
-            const response = await fetch(`/api/tenant/${tenantId}/config`, { credentials: 'include' });
+            var response = await fetch('/api/tenant/' + tenantId + '/config', { credentials: 'include' });
             if (response.ok) {
-                const config = await response.json();
+                var config = await response.json();
                 document.getElementById('usarIA').checked = config.usar_ia || false;
             }
         } catch (error) {
@@ -226,13 +272,13 @@
     }
 
     async function guardarConfig() {
-        const usarIA = document.getElementById('usarIA').checked;
-        const btn = event.target;
+        var usarIA = document.getElementById('usarIA').checked;
+        var btn = event.target;
         btn.disabled = true;
         if (typeof showLoader === 'function') showLoader();
         
         try {
-            const response = await fetch(`/api/tenant/${tenantId}/config/ia`, {
+            var response = await fetch('/api/tenant/' + tenantId + '/config/ia', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ usar_ia: usarIA }),
@@ -245,7 +291,6 @@
                 if (typeof showAlert === 'function') showAlert('Error al guardar configuración', 'error');
             }
         } catch (error) {
-            console.error('Error:', error);
             if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
         } finally {
             btn.disabled = false;
@@ -253,10 +298,10 @@
         }
     }
 
-    function abrirModalProducto(producto = null) {
-        currentEditId = producto?.id || null;
-        const modal = document.getElementById('productoModal');
-        const title = document.getElementById('modalTitle');
+    function abrirModalProducto(producto) {
+        currentEditId = producto ? producto.id : null;
+        var modal = document.getElementById('productoModal');
+        var title = document.getElementById('modalTitle');
         
         if (producto) {
             title.textContent = '✏️ Editar Producto';
@@ -265,7 +310,7 @@
             document.getElementById('productoDescripcion').value = producto.descripcion || '';
             document.getElementById('productoPrecio').value = producto.precio;
             document.getElementById('productoCategoria').value = producto.categoria || 'general';
-            document.getElementById('productoDisponible').checked = producto.disponible !== false;
+            document.getElementById('productoDisponible').checked = producto.disponible === true;
         } else {
             title.textContent = '➕ Agregar Producto';
             document.getElementById('formProducto').reset();
@@ -281,8 +326,12 @@
     }
 
     function editarProducto(productId) {
-        const producto = productos.find(p => p.id === productId);
-        if (producto) abrirModalProducto(producto);
+        for (var i = 0; i < productos.length; i++) {
+            if (productos[i].id === productId) {
+                abrirModalProducto(productos[i]);
+                break;
+            }
+        }
     }
 
     async function eliminarProducto(productId) {
@@ -290,7 +339,7 @@
         
         if (typeof showLoader === 'function') showLoader();
         try {
-            const response = await fetch(`/admin/delete_product/${tenantId}/${productId}`, { 
+            var response = await fetch('/admin/delete_product/' + tenantId + '/' + productId, { 
                 method: 'DELETE',
                 credentials: 'include'
             });
@@ -311,7 +360,7 @@
     async function toggleProducto(productId, nuevoEstado) {
         if (typeof showLoader === 'function') showLoader();
         try {
-            const response = await fetch(`/admin/toggle_product/${tenantId}/${productId}`, {
+            var response = await fetch('/admin/toggle_product/' + tenantId + '/' + productId, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ disponible: nuevoEstado }),
@@ -332,15 +381,15 @@
 
     function escapeHtml(text) {
         if (!text) return '';
-        const div = document.createElement('div');
+        var div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
 
-    document.getElementById('formProducto').addEventListener('submit', async (e) => {
+    document.getElementById('formProducto').addEventListener('submit', async function(e) {
         e.preventDefault();
         
-        const producto = {
+        var producto = {
             nombre: document.getElementById('productoNombre').value,
             descripcion: document.getElementById('productoDescripcion').value,
             precio: parseInt(document.getElementById('productoPrecio').value),
@@ -348,23 +397,24 @@
             disponible: document.getElementById('productoDisponible').checked
         };
         
-        const submitBtn = e.target.querySelector('button[type="submit"]');
+        var submitBtn = e.target.querySelector('button[type="submit"]');
         submitBtn.disabled = true;
         if (typeof showLoader === 'function') showLoader();
         
         try {
-            let url, options;
+            var url, options;
             if (currentEditId) {
-                url = `/admin/update_product/${tenantId}/${currentEditId}`;
+                url = '/admin/update_product/' + tenantId + '/' + currentEditId;
                 options = { method: 'PUT', body: JSON.stringify(producto) };
             } else {
-                url = `/admin/add_product/${tenantId}`;
+                url = '/admin/add_product/' + tenantId;
                 options = { method: 'POST', body: JSON.stringify(producto) };
             }
             
-            const response = await fetch(url, {
-                ...options,
+            var response = await fetch(url, {
+                method: options.method,
                 headers: { 'Content-Type': 'application/json' },
+                body: options.body,
                 credentials: 'include'
             });
             
@@ -396,4 +446,54 @@
     cargarProductos();
     cargarConfig();
 </script>
+
+<style>
+    .producto-no-disponible {
+        opacity: 0.6;
+        background-color: #f9f9f9;
+    }
+    .producto-no-disponible:hover {
+        opacity: 0.8;
+    }
+    .toggle-switch {
+        width: 44px;
+        height: 24px;
+        background: #ccc;
+        border-radius: 24px;
+        position: relative;
+        cursor: pointer;
+        transition: background 0.3s;
+    }
+    .toggle-switch.active {
+        background: #25D366;
+    }
+    .toggle-switch::after {
+        content: '';
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        background: white;
+        border-radius: 50%;
+        top: 2px;
+        left: 2px;
+        transition: left 0.3s;
+    }
+    .toggle-switch.active::after {
+        left: 22px;
+    }
+    .badge-success {
+        background: #d1fae5;
+        color: #065f46;
+        padding: 4px 8px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+    }
+    .badge-warning {
+        background: #fed7aa;
+        color: #92400e;
+        padding: 4px 8px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+    }
+</style>
 {% endblock %}
