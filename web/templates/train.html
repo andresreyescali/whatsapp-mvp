@@ -1,322 +1,290 @@
-{% extends "base.html" %}
-
-{% block title %}Entrenar IA - {{ tenant_id }}{% endblock %}
-
-{% block content %}
-<div class="card">
-    <h2>🤖 Entrenar Asistente IA</h2>
-    <p>Sube una imagen de tu menú o escribe la información de tu negocio para que la IA aprenda a atender pedidos correctamente.</p>
-</div>
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-    <!-- Opción 1: Subir imagen -->
-    <div class="card">
-        <h2>📷 Opción 1: Subir imagen del menú</h2>
-        <p>Toma una foto clara de tu menú físico y la IA extraerá automáticamente los productos, precios y descripciones.</p>
-        
-        <div class="form-group">
-            <label>Selecciona una imagen</label>
-            <input type="file" id="imageInput" accept="image/*" capture="environment">
-        </div>
-        
-        <div id="imagePreview" style="margin-top: 10px; display: none;">
-            <img id="previewImg" style="max-width: 100%; border-radius: 10px;">
-        </div>
-        
-        <button id="trainImageBtn" class="btn" style="margin-top: 15px;" disabled>Entrenar con imagen</button>
-        <div id="imageResult" class="hidden" style="margin-top: 15px;"></div>
-    </div>
-    
-    <!-- Opción 2: Escribir texto -->
-    <div class="card">
-        <h2>✍️ Opción 2: Escribir información</h2>
-        <p>Describe tu negocio, productos, horarios, políticas y cómo quieres que atiendas a los clientes.</p>
-        
-        <div class="form-group">
-            <label>Descripción del negocio</label>
-            <textarea id="textoEntrenamiento" rows="10" placeholder="Ejemplo:
-            
-Nombre: Pizzería Avars
-Horario: Lunes a Domingo 12pm a 10pm
-Ubicación: Calle 123, Cali
-
-Productos:
-- Pizza Margarita: $25,000 (salsa de tomate, mozzarella, albahaca)
-- Pizza Pepperoni: $32,000 (pepperoni italiano, queso mozzarella)
-- Gaseosa: $5,000
-
-Políticas:
-- Tiempo de entrega: 30-45 minutos
-- Mínimo para envío: $15,000
-
-Instrucciones para atender:
-- Sé amable y ofrece combos
-- Pregunta si quieren agregar bebida
-- Confirma el pedido antes de generar pago"></textarea>
-        </div>
-        
-        <button id="trainTextBtn" class="btn">Entrenar con texto</button>
-        <div id="textResult" class="hidden" style="margin-top: 15px;"></div>
-    </div>
-</div>
-
-<!-- Contexto actual -->
-<div id="contextoCard" class="card" style="display: none;">
-    <h2>📋 Contexto aprendido actualmente</h2>
-    <div id="contextoContent"></div>
-    <button id="clearContextBtn" class="btn btn-danger" style="margin-top: 15px;">🗑️ Limpiar contexto aprendido</button>
-    <p style="font-size:12px; color:#666; margin-top:10px;">Esto eliminará el contexto de IA, pero NO eliminará los productos del menú.</p>
-</div>
-
-<style>
-    .alert-info { background: #e3f2fd; color: #0c5460; border: 1px solid #bee5eb; padding: 12px; border-radius: 8px; margin-bottom: 15px; }
-    .btn-danger { background: #dc3545; color: white; }
-    .btn-danger:hover { background: #c82333; }
-    .producto-item { padding: 5px; margin: 3px 0; background: #f5f5f5; border-radius: 5px; }
-</style>
-
-<script>
-    const tenantId = '{{ tenant_id }}';
-    const API_BASE = window.location.origin;
-    
-    // Mostrar alerta
-    function showAlert(type, message) {
-        const alertDiv = document.getElementById('alert');
-        if (alertDiv) {
-            alertDiv.className = `alert alert-${type}`;
-            alertDiv.innerHTML = message;
-            alertDiv.style.display = 'block';
-            setTimeout(() => {
-                alertDiv.style.display = 'none';
-            }, 4000);
-        } else {
-            alert(message);
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrenar IA - WhatsApp Bot SaaS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        .train-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
         }
-    }
-    
-    // ==================== CARGAR CONTEXTO EXISTENTE ====================
-    async function cargarContexto() {
-        try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/context`);
-            const contexto = await response.json();
-            
-            if (contexto && contexto.menu_estructurado && contexto.menu_estructurado.length > 0) {
-                const card = document.getElementById('contextoCard');
-                const content = document.getElementById('contextoContent');
+        .train-card {
+            background: white;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .train-card h3 {
+            margin-bottom: 1rem;
+            color: #075E54;
+        }
+        .result-container {
+            background: #f8f9fa;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-top: 2rem;
+        }
+        .productos-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        .producto-tag {
+            background: #e9ecef;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.875rem;
+        }
+        .progress-bar {
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 1rem;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #25D366;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #25D366;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">
+            🤖 WhatsApp Bot SaaS
+        </div>
+        <div class="navbar-menu">
+            <a href="/dashboard">Dashboard</a>
+            <div id="userInfo" class="user-info"></div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div id="alertContainer"></div>
+
+        <div class="d-flex justify-between align-center mb-4">
+            <h2>🤖 Entrenar Inteligencia Artificial</h2>
+            <a href="javascript:history.back()" class="btn btn-outline">← Volver al Menú</a>
+        </div>
+
+        <p class="mb-4">La IA aprenderá sobre tus productos, horarios, ubicación y políticas para atender a tus clientes automáticamente.</p>
+
+        <div class="train-options">
+            <!-- Texto -->
+            <div class="train-card">
+                <h3>📝 Entrenar con Texto</h3>
+                <p class="text-muted">Describe tu negocio, productos y políticas en texto libre.</p>
+                <div class="form-group">
+                    <label class="form-label">Descripción del negocio</label>
+                    <textarea id="trainTexto" class="form-control" rows="8" 
+                        placeholder="Ej: Somos una pastelería especializada en tortas personalizadas. Nuestros productos:&#10;- Torta Red Velvet (1/2 libra): $78,000 para 15-20 personas&#10;- Cheesecake: $12,000&#10;- Galletas Artesanales: $8,000&#10;&#10;Horario: Lunes a sábado 10am-7pm&#10;Ubicación: Calle 14N #8N-40, Popayán&#10;Políticas: Los pedidos se confirman con nombre y cédula"></textarea>
+                </div>
+                <button id="btnTrainTexto" class="btn btn-primary w-100">🚀 Entrenar con Texto</button>
+            </div>
+
+            <!-- Imagen -->
+            <div class="train-card">
+                <h3>🖼️ Entrenar con Imagen</h3>
+                <p class="text-muted">Sube una foto de tu menú físico.</p>
+                <div class="form-group">
+                    <label class="form-label">Imagen del menú</label>
+                    <input type="file" id="trainImagen" class="form-control" accept="image/*">
+                </div>
+                <div id="imagePreview" style="margin-top: 1rem; display: none;">
+                    <img id="previewImg" style="max-width: 100%; border-radius: 0.5rem;">
+                </div>
+                <button id="btnTrainImagen" class="btn btn-primary w-100 mt-3" disabled>📸 Entrenar con Imagen</button>
+            </div>
+        </div>
+
+        <!-- Resultados -->
+        <div id="resultContainer" class="result-container" style="display: none;">
+            <h3>📊 Resultados del Entrenamiento</h3>
+            <div id="resultContent"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { entrenarIA, getNegociosUsuario } from './static/js/api.js';
+        import { showAlert, showLoader, hideLoader, formatPrice, escapeHtml, checkAuth, getTenantIdFromUrl } from './static/js/utils.js';
+
+        let tenantId = null;
+
+        async function init() {
+            showLoader();
+            try {
+                const user = await checkAuth();
+                if (!user) return;
                 
-                let html = '<p><strong>Productos aprendidos:</strong></p><ul>';
-                contexto.menu_estructurado.slice(0, 20).forEach(p => {
-                    html += `<li>${p.nombre} - $${p.precio}${p.descripcion ? ` (${p.descripcion.substring(0, 50)})` : ''}</li>`;
-                });
-                if (contexto.menu_estructurado.length > 20) {
-                    html += `<li>... y ${contexto.menu_estructurado.length - 20} más</li>`;
+                tenantId = getTenantIdFromUrl();
+                if (!tenantId) {
+                    showAlert('No se especificó el negocio', 'error');
+                    window.location.href = '/dashboard';
+                    return;
                 }
-                html += '</ul>';
                 
-                if (contexto.horario) html += `<p><strong>Horario:</strong> ${contexto.horario}</p>`;
-                if (contexto.ubicacion) html += `<p><strong>Ubicación:</strong> ${contexto.ubicacion}</p>`;
-                if (contexto.politicas) html += `<p><strong>Políticas:</strong> ${contexto.politicas.substring(0, 100)}...</p>`;
-                
-                content.innerHTML = html;
-                card.style.display = 'block';
-            } else {
-                document.getElementById('contextoCard').style.display = 'none';
+                actualizarUI(user);
+            } catch (error) {
+                console.error('Error al iniciar:', error);
+            } finally {
+                hideLoader();
             }
-        } catch (error) {
-            console.error('Error cargando contexto:', error);
         }
-    }
-    
-    // ==================== PREVISUALIZAR IMAGEN ====================
-    document.getElementById('imageInput').addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        const preview = document.getElementById('imagePreview');
+
+        function actualizarUI(user) {
+            const userInfo = document.getElementById('userInfo');
+            if (userInfo) {
+                userInfo.innerHTML = `
+                    <span>👤 ${escapeHtml(user.nombre || user.email)}</span>
+                    <button class="btn btn-sm btn-outline" onclick="cerrarSesion()">Salir</button>
+                `;
+            }
+        }
+
+        function mostrarResultados(resultado) {
+            const container = document.getElementById('resultContainer');
+            const content = document.getElementById('resultContent');
+            
+            const productos = resultado.contexto?.productos || [];
+            const horario = resultado.contexto?.horario || '';
+            const ubicacion = resultado.contexto?.ubicacion || '';
+            const politicas = resultado.contexto?.politicas || '';
+            
+            content.innerHTML = `
+                <div class="mb-3">
+                    <strong>✅ Productos detectados:</strong> ${resultado.productos_guardados || productos.length}
+                </div>
+                ${productos.length > 0 ? `
+                    <div class="mb-3">
+                        <strong>📦 Productos extraídos:</strong>
+                        <div class="productos-preview">
+                            ${productos.map(p => `<span class="producto-tag">${escapeHtml(p.nombre)} - ${formatPrice(p.precio || 0)}</span>`).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                ${horario ? `<div class="mb-3"><strong>🕐 Horario:</strong> ${escapeHtml(horario)}</div>` : ''}
+                ${ubicacion ? `<div class="mb-3"><strong>📍 Ubicación:</strong> ${escapeHtml(ubicacion)}</div>` : ''}
+                ${politicas ? `<div class="mb-3"><strong>📋 Políticas:</strong> ${escapeHtml(politicas)}</div>` : ''}
+                <div class="alert alert-success mt-3">
+                    ${resultado.message || 'Entrenamiento completado exitosamente'}
+                </div>
+            `;
+            container.style.display = 'block';
+            
+            // Scroll al resultado
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Entrenar con texto
+        document.getElementById('btnTrainTexto').addEventListener('click', async () => {
+            const texto = document.getElementById('trainTexto').value;
+            if (!texto.trim()) {
+                showAlert('Por favor ingresa una descripción del negocio', 'warning');
+                return;
+            }
+            
+            const btn = document.getElementById('btnTrainTexto');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-spinner"></span> Procesando...';
+            showLoader();
+            
+            try {
+                const result = await entrenarIA(tenantId, 'texto', texto);
+                if (result.status === 'ok') {
+                    showAlert('✅ Entrenamiento completado exitosamente', 'success');
+                    mostrarResultados(result);
+                } else {
+                    showAlert(result.error || 'Error al procesar', 'error');
+                }
+            } catch (error) {
+                showAlert('Error de conexión', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🚀 Entrenar con Texto';
+                hideLoader();
+            }
+        });
+
+        // Entrenar con imagen
+        const imagenInput = document.getElementById('trainImagen');
+        const btnImagen = document.getElementById('btnTrainImagen');
+        const imagePreview = document.getElementById('imagePreview');
         const previewImg = document.getElementById('previewImg');
-        const trainBtn = document.getElementById('trainImageBtn');
-        
-        if (file) {
+        let imagenBase64 = null;
+
+        imagenInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            if (!file.type.startsWith('image/')) {
+                showAlert('Por favor selecciona una imagen válida', 'warning');
+                return;
+            }
+            
+            // Mostrar preview
             const reader = new FileReader();
             reader.onload = function(event) {
                 previewImg.src = event.target.result;
-                preview.style.display = 'block';
-                trainBtn.disabled = false;
-                trainBtn.textContent = '📸 Entrenar con imagen';
+                imagePreview.style.display = 'block';
+                imagenBase64 = event.target.result.split(',')[1];
+                btnImagen.disabled = false;
             };
             reader.readAsDataURL(file);
-        } else {
-            preview.style.display = 'none';
-            trainBtn.disabled = true;
-        }
-    });
-    
-    // ==================== ENTRENAR CON TEXTO ====================
-    window.entrenarTexto = async function() {
-        const texto = document.getElementById('textoEntrenamiento').value;
-        if (!texto.trim()) {
-            showAlert('error', 'Por favor ingresa la descripción de tu negocio');
-            return;
-        }
-        
-        const btn = document.getElementById('trainTextBtn');
-        const resultDiv = document.getElementById('textResult');
-        
-        btn.disabled = true;
-        btn.textContent = 'Procesando...';
-        resultDiv.style.display = 'block';
-        resultDiv.className = 'alert alert-info';
-        resultDiv.innerHTML = '🔄 Procesando con IA... Esto puede tomar unos segundos.';
-        
-        try {
-            const response = await fetch(`${API_BASE}/admin/train/${tenantId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tipo: 'texto', texto: texto })
-            });
-            
-            const result = await response.json();
-            
-            if (result.status === 'ok' || response.ok) {
-                const productos = result.contexto?.productos || result.productos || [];
-                const guardados = result.productos_guardados || productos.length;
-                
-                resultDiv.className = 'alert alert-success';
-                resultDiv.innerHTML = `
-                    ✅ <strong>¡Entrenamiento completado!</strong><br>
-                    📦 Productos procesados: ${productos.length}<br>
-                    💾 Productos guardados: ${guardados}<br>
-                    <a href="/admin/menu?tenant_id=${tenantId}" class="btn btn-small" style="margin-top:10px; background:#25D366; color:white;">📋 Ir al menú</a>
-                `;
-                
-                // Mostrar resumen de productos
-                if (productos.length > 0) {
-                    let resumen = '<div style="margin-top:15px; padding:10px; background:#e8f5e9; border-radius:8px;"><strong>📋 Productos aprendidos:</strong><ul>';
-                    productos.slice(0, 15).forEach(p => {
-                        resumen += `<li><strong>${p.nombre}</strong> - $${p.precio}</li>`;
-                    });
-                    if (productos.length > 15) {
-                        resumen += `<li>... y ${productos.length - 15} más</li>`;
-                    }
-                    resumen += '</ul></div>';
-                    resultDiv.innerHTML += resumen;
-                }
-                
-                document.getElementById('textoEntrenamiento').value = '';
-                cargarContexto(); // Recargar contexto
-            } else {
-                throw new Error(result.error || 'Error desconocido');
+        });
+
+        btnImagen.addEventListener('click', async () => {
+            if (!imagenBase64) {
+                showAlert('Por favor selecciona una imagen', 'warning');
+                return;
             }
-        } catch (error) {
-            console.error('Error:', error);
-            resultDiv.className = 'alert alert-error';
-            resultDiv.innerHTML = '❌ Error: ' + error.message;
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Entrenar con texto';
-        }
-    };
-    
-    // ==================== ENTRENAR CON IMAGEN ====================
-    window.entrenarImagen = async function() {
-        const imageInput = document.getElementById('imageInput');
-        const resultDiv = document.getElementById('imageResult');
-        const btn = document.getElementById('trainImageBtn');
-        
-        if (!imageInput.files || imageInput.files.length === 0) {
-            showAlert('error', 'Por favor selecciona una imagen');
-            return;
-        }
-        
-        const file = imageInput.files[0];
-        const reader = new FileReader();
-        
-        reader.onloadend = async function() {
-            const base64String = reader.result.split(',')[1];
             
-            btn.disabled = true;
-            btn.textContent = 'Procesando imagen...';
-            resultDiv.style.display = 'block';
-            resultDiv.className = 'alert alert-info';
-            resultDiv.innerHTML = '🔄 Leyendo texto de la imagen con OCR... (puede tomar 10-20 segundos)';
+            btnImagen.disabled = true;
+            btnImagen.innerHTML = '<span class="loading-spinner"></span> Procesando imagen...';
+            showLoader();
             
             try {
-                const response = await fetch(`${API_BASE}/admin/train/${tenantId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tipo: 'imagen', imagen: base64String })
-                });
-                
-                const result = await response.json();
-                
-                if (result.status === 'ok' || response.ok) {
-                    const productos = result.contexto?.productos || result.productos || [];
-                    const guardados = result.productos_guardados || productos.length;
-                    
-                    resultDiv.className = 'alert alert-success';
-                    resultDiv.innerHTML = `
-                        ✅ <strong>¡Entrenamiento completado!</strong><br>
-                        📦 Productos procesados: ${productos.length}<br>
-                        💾 Productos guardados: ${guardados}<br>
-                        <a href="/admin/menu?tenant_id=${tenantId}" class="btn btn-small" style="margin-top:10px; background:#25D366; color:white;">📋 Ir al menú</a>
-                    `;
-                    
-                    // Mostrar resumen de productos
-                    if (productos.length > 0) {
-                        let resumen = '<div style="margin-top:15px; padding:10px; background:#e8f5e9; border-radius:8px;"><strong>📋 Productos aprendidos:</strong><ul>';
-                        productos.slice(0, 15).forEach(p => {
-                            resumen += `<li><strong>${p.nombre}</strong> - $${p.precio}</li>`;
-                        });
-                        if (productos.length > 15) {
-                            resumen += `<li>... y ${productos.length - 15} más</li>`;
-                        }
-                        resumen += '</ul></div>';
-                        resultDiv.innerHTML += resumen;
-                    }
-                    
-                    imageInput.value = '';
-                    document.getElementById('imagePreview').style.display = 'none';
-                    cargarContexto(); // Recargar contexto
+                const result = await entrenarIA(tenantId, 'imagen', null, imagenBase64);
+                if (result.status === 'ok') {
+                    showAlert('✅ Entrenamiento con imagen completado', 'success');
+                    mostrarResultados(result);
                 } else {
-                    throw new Error(result.error || 'Error desconocido');
+                    showAlert(result.error || 'Error al procesar la imagen', 'error');
                 }
             } catch (error) {
-                console.error('Error:', error);
-                resultDiv.className = 'alert alert-error';
-                resultDiv.innerHTML = '❌ Error: ' + error.message;
+                showAlert('Error de conexión', 'error');
             } finally {
-                btn.disabled = false;
-                btn.textContent = 'Entrenar con imagen';
+                btnImagen.disabled = false;
+                btnImagen.innerHTML = '📸 Entrenar con Imagen';
+                hideLoader();
             }
+        });
+
+        window.cerrarSesion = async function() {
+            await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+            window.location.href = '/';
         };
-        
-        reader.readAsDataURL(file);
-    };
-    
-    // ==================== LIMPIAR CONTEXTO ====================
-    window.limpiarContexto = async function() {
-        if (!confirm('⚠️ ¿Estás seguro de que quieres eliminar todo el contexto aprendido?\n\nLos productos del menú NO se eliminarán, solo la IA perderá el entrenamiento personalizado.')) return;
-        
-        try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/context`, { method: 'DELETE' });
-            const result = await response.json();
-            if (response.ok) {
-                showAlert('success', '✅ Contexto eliminado correctamente');
-                cargarContexto();
-            } else {
-                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
-            }
-        } catch (error) {
-            showAlert('error', '❌ Error de conexión');
-        }
-    };
-    
-    // Asignar eventos a los botones
-    document.getElementById('trainTextBtn').onclick = entrenarTexto;
-    document.getElementById('trainImageBtn').onclick = entrenarImagen;
-    document.getElementById('clearContextBtn').onclick = limpiarContexto;
-    
-    // Cargar contexto al iniciar
-    cargarContexto();
-    
-    console.log('Script cargado correctamente. tenantId:', tenantId);
-</script>
-{% endblock %}
+
+        init();
+    </script>
+</body>
+</html>

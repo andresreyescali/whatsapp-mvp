@@ -1,112 +1,117 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>Dashboard - {{ tenant.nombre }}</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Dashboard - WhatsApp Bot SaaS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f5f5f5;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .header {
-            background: #25D366;
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }
-        .card {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        .stats {
+        .negocios-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1.5rem;
         }
-        .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
+        .badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
         }
-        .stat-card .number { font-size: 32px; font-weight: bold; }
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
     </style>
 </head>
 <body>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="navbar-brand">
+            🤖 WhatsApp Bot SaaS
+            <span>Beta</span>
+        </div>
+        <div class="navbar-menu">
+            <a href="/dashboard">Dashboard</a>
+            <div id="userInfo" class="user-info"></div>
+        </div>
+    </nav>
+
     <div class="container">
-        <div class="header">
-            <h1>🎉 {{ tenant.nombre }}</h1>
-            <p>¡Tu asistente de WhatsApp está activo!</p>
-            <p><strong>Número:</strong> {{ tenant.phone_id }}</p>
-        </div>
-        
-        <div class="stats">
+        <div id="alertContainer"></div>
+
+        <!-- Stats -->
+        <div class="stats-grid">
             <div class="stat-card">
-                <div class="number" id="totalProductos">-</div>
-                <div>Productos en menú</div>
+                <div class="number" id="totalNegocios">0</div>
+                <div class="label">Negocios</div>
             </div>
             <div class="stat-card">
-                <div class="number" id="iaStatus">❌</div>
-                <div>IA Activada</div>
+                <div class="number" id="verificados">0</div>
+                <div class="label">Verificados</div>
             </div>
         </div>
-        
-        <div class="card">
-            <h2>📋 Acceso rápido</h2>
-            <p><a href="/admin/menu?tenant_id={{ tenant.id }}">🎛️ Ir al panel de gestión de menú</a></p>
-            <p><a href="https://wa.me/{{ tenant.phone_id }}">📱 Probar mi WhatsApp Business</a></p>
+
+        <!-- Header -->
+        <div class="d-flex justify-between align-center mb-4">
+            <h2>Mis Negocios</h2>
+            <button class="btn btn-primary" onclick="abrirModalCrear()">
+                ➕ Nuevo Negocio
+            </button>
         </div>
-        
-        <div class="card">
-            <h2>📦 Pedidos recientes</h2>
-            <div id="pedidos">Cargando...</div>
+
+        <!-- Negocios Container -->
+        <div id="negociosContainer"></div>
+    </div>
+
+    <!-- Modal Crear Negocio -->
+    <div id="modalCrear" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Registrar Nuevo Negocio</h3>
+                <button class="modal-close" onclick="cerrarModalCrear()">&times;</button>
+            </div>
+            <form id="formCrearNegocio">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">Nombre del negocio *</label>
+                        <input type="text" id="nombreNegocio" class="form-control" required placeholder="Ej: Mi Pastelería">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Teléfono de WhatsApp (phone_id) *</label>
+                        <input type="text" id="phoneId" class="form-control" required placeholder="Ej: 123456789012345">
+                        <small class="text-muted">El número de teléfono asociado a tu cuenta de WhatsApp Business</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Token de WhatsApp *</label>
+                        <input type="text" id="token" class="form-control" required placeholder="Token de Meta">
+                        <small class="text-muted">El token de acceso permanente de tu aplicación de Meta</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Tipo de negocio</label>
+                        <select id="tipoNegocio" class="form-control">
+                            <option value="restaurante">🍽️ Restaurante</option>
+                            <option value="pasteleria">🍰 Pastelería</option>
+                            <option value="panaderia">🥖 Panadería</option>
+                            <option value="inmobiliaria">🏠 Inmobiliaria</option>
+                            <option value="venta_autos">🚗 Venta de Autos</option>
+                            <option value="venta_motos">🏍️ Venta de Motos</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="cerrarModalCrear()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Registrar</button>
+                </div>
+            </form>
         </div>
     </div>
-    
-    <script>
-        const tenantId = '{{ tenant.id }}';
-        
-        async function loadStats() {
-            const response = await fetch(`/api/tenant/${tenantId}/menu`);
-            const menu = await response.json();
-            document.getElementById('totalProductos').innerText = menu.length;
-            
-            const configResp = await fetch(`/api/tenant/${tenantId}/config`);
-            const config = await configResp.json();
-            document.getElementById('iaStatus').innerHTML = config.usar_ia ? '✅' : '❌';
-        }
-        
-        async function loadPedidos() {
-            const response = await fetch(`/api/tenant/${tenantId}/pedidos`);
-            const pedidos = await response.json();
-            if (pedidos.length === 0) {
-                document.getElementById('pedidos').innerHTML = '<p>No hay pedidos aún</p>';
-            } else {
-                let html = '<table style="width:100%; border-collapse:collapse;">';
-                html += '<tr><th>ID</th><th>Cliente</th><th>Total</th><th>Estado</th></tr>';
-                pedidos.slice(0, 10).forEach(p => {
-                    html += `<tr><td>${p.id.substring(0,8)}</td><td>${p.cliente_numero}</td><td>$${p.total}</td><td>${p.estado}</td></tr>`;
-                });
-                html += '</table>';
-                document.getElementById('pedidos').innerHTML = html;
-            }
-        }
-        
-        loadStats();
-        loadPedidos();
-        setInterval(loadPedidos, 30000);
+
+    <script type="module">
+        import './static/js/dashboard.js';
     </script>
 </body>
 </html>

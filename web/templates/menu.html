@@ -1,611 +1,412 @@
-{% extends "base.html" %}
-
-{% block title %}Gestión de Menú - {{ tenant.nombre }}{% endblock %}
-
-{% block content %}
-<!-- Loader para indicar carga -->
-<div id="pageLoader" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center;">
-    <div style="background: white; padding: 20px; border-radius: 10px; text-align: center;">
-        <div class="spinner" style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #25D366; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 10px;"></div>
-        <p>Cargando...</p>
-    </div>
-</div>
-
-<style>
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    .btn-small {
-        padding: 5px 10px;
-        font-size: 12px;
-        margin: 2px;
-    }
-    .btn-edit {
-        background: #ffc107;
-        color: #333;
-    }
-    .btn-edit:hover {
-        background: #e0a800;
-    }
-    .btn-success {
-        background: #28a745;
-        color: white;
-    }
-    .btn-success:hover {
-        background: #218838;
-    }
-    .btn-secondary {
-        background: #6c757d;
-        color: white;
-    }
-    .btn-secondary:hover {
-        background: #5a6268;
-    }
-    .modal {
-        display: none;
-        position: fixed;
-        z-index: 1000;
-        left: 0;
-        top: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0,0,0,0.5);
-    }
-    .modal-content {
-        background-color: white;
-        margin: 10% auto;
-        padding: 25px;
-        border-radius: 10px;
-        width: 90%;
-        max-width: 500px;
-        position: relative;
-    }
-    .close {
-        position: absolute;
-        right: 20px;
-        top: 15px;
-        font-size: 28px;
-        font-weight: bold;
-        cursor: pointer;
-        color: #aaa;
-    }
-    .close:hover {
-        color: #333;
-    }
-    .btn-danger {
-        background: #dc3545;
-        color: white;
-    }
-    .btn-danger:hover {
-        background: #c82333;
-    }
-    .status-indicator {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        margin-right: 8px;
-    }
-    .status-available {
-        background-color: #28a745;
-        box-shadow: 0 0 5px #28a745;
-    }
-    .status-unavailable {
-        background-color: #6c757d;
-    }
-    .status-text {
-        font-size: 12px;
-        font-weight: normal;
-    }
-    .product-disabled {
-        opacity: 0.7;
-        background-color: #f8f9fa;
-    }
-    .toggle-checkbox {
-        width: 18px;
-        height: 18px;
-        cursor: pointer;
-        margin: 0;
-    }
-    .toggle-label {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        cursor: pointer;
-        margin: 0;
-        white-space: nowrap;
-    }
-    .alert-success {
-        background-color: #d4edda;
-        color: #155724;
-        padding: 12px;
-        border-radius: 5px;
-        margin-bottom: 15px;
-        border: 1px solid #c3e6cb;
-    }
-    .alert-error {
-        background-color: #f8d7da;
-        color: #721c24;
-        padding: 12px;
-        border-radius: 5px;
-        margin-bottom: 15px;
-        border: 1px solid #f5c6cb;
-    }
-</style>
-
-<div class="stats">
-    <div class="stat-card">
-        <div class="number" id="totalProductos">0</div>
-        <div class="label">Productos en Menú</div>
-    </div>
-    <div class="stat-card">
-        <div class="number" id="iaStatus">❌</div>
-        <div class="label">Inteligencia Artificial</div>
-    </div>
-</div>
-
-<div id="alertContainer"></div>
-
-<div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2 style="margin: 0;">➕ Agregar Producto</h2>
-        <a href="/admin/train/{{ tenant.id }}" class="btn" style="background: #667eea;" onclick="showLoader()">
-            🤖 Entrenar IA
-        </a>
-    </div>
-    <form id="productForm">
-        <div class="form-group">
-            <label>Nombre del producto *</label>
-            <input type="text" id="nombre" required placeholder="Ej: Pizza Margarita">
-        </div>
-        <div class="form-group">
-            <label>Descripción</label>
-            <textarea id="descripcion" rows="2" placeholder="Describe el producto..."></textarea>
-        </div>
-        <div class="form-group">
-            <label>Precio ($) *</label>
-            <input type="number" id="precio" required placeholder="25000">
-        </div>
-        <div class="form-group">
-            <label>Categoría</label>
-            <select id="categoria">
-                <option value="pizzas">🍕 Pizzas</option>
-                <option value="hamburguesas">🍔 Hamburguesas</option>
-                <option value="bebidas">🥤 Bebidas</option>
-                <option value="acompañamientos">🍟 Acompañamientos</option>
-                <option value="postres">🍰 Postres</option>
-            </select>
-        </div>
-        <button type="submit" class="btn">Agregar Producto</button>
-    </form>
-</div>
-
-<div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2 style="margin: 0;">📋 Mi Menú</h2>
-        <a href="/admin/train/{{ tenant.id }}" class="btn" style="background: #667eea;" onclick="showLoader()">
-            🤖 Entrenar IA
-        </a>
-    </div>
-    <div id="menuContainer" class="loading">Cargando menú...</div>
-</div>
-
-<!-- Modal de edición de producto -->
-<div id="editModal" class="modal">
-    <div class="modal-content">
-        <span class="close">&times;</span>
-        <h2>✏️ Editar Producto</h2>
-        <input type="hidden" id="editProductId">
-        <div class="form-group">
-            <label>Nombre del producto *</label>
-            <input type="text" id="editNombre" required>
-        </div>
-        <div class="form-group">
-            <label>Descripción</label>
-            <textarea id="editDescripcion" rows="2"></textarea>
-        </div>
-        <div class="form-group">
-            <label>Precio ($) *</label>
-            <input type="number" id="editPrecio" required>
-        </div>
-        <div class="form-group">
-            <label>Categoría</label>
-            <select id="editCategoria">
-                <option value="pizzas">🍕 Pizzas</option>
-                <option value="hamburguesas">🍔 Hamburguesas</option>
-                <option value="bebidas">🥤 Bebidas</option>
-                <option value="acompañamientos">🍟 Acompañamientos</option>
-                <option value="postres">🍰 Postres</option>
-            </select>
-        </div>
-        <div style="margin: 15px 0;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                <input type="checkbox" id="editDisponible">
-                <span>Producto disponible para venta</span>
-            </label>
-        </div>
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-            <button id="saveEditBtn" class="btn btn-success">💾 Guardar Cambios</button>
-            <button id="cancelEditBtn" class="btn btn-secondary">❌ Cancelar</button>
-        </div>
-    </div>
-</div>
-
-<div class="card">
-    <h2>⚙️ Configuración</h2>
-    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-        <input type="checkbox" id="usarIA" {% if tenant.usar_ia %}checked{% endif %}>
-        <span>Activar respuestas con Inteligencia Artificial</span>
-    </label>
-    <p style="font-size: 12px; color: #666; margin-top: 10px;">
-        La IA permite respuestas más naturales y personalizadas para tus clientes.
-    </p>
-    <button id="saveConfigBtn" class="btn" style="margin-top: 15px;">💾 Guardar Configuración</button>
-</div>
-
-<!-- Configuración Avanzada -->
-<div class="card">
-    <h2>⚙️ Configuración Avanzada</h2>
-    <button id="clearContextBtn" class="btn btn-danger">🗑️ Limpiar contexto aprendido</button>
-    <p style="font-size:12px; color:#666; margin-top:10px;">Esto eliminará el contexto de IA y los productos aprendidos.</p>
-</div>
-
-<script>
-    const tenantId = '{{ tenant.id }}';
-    const API_BASE = window.location.origin;
-    let currentEditProductId = null;
-    
-    function showLoader() {
-        const loader = document.getElementById('pageLoader');
-        if (loader) loader.style.display = 'flex';
-    }
-    
-    function hideLoader() {
-        const loader = document.getElementById('pageLoader');
-        if (loader) loader.style.display = 'none';
-    }
-    
-    function showAlert(type, message) {
-        const alertContainer = document.getElementById('alertContainer');
-        const alertDiv = document.createElement('div');
-        alertDiv.className = `alert-${type}`;
-        alertDiv.innerHTML = message;
-        alertDiv.style.marginBottom = '10px';
-        alertContainer.appendChild(alertDiv);
-        setTimeout(() => {
-            alertDiv.remove();
-        }, 3000);
-    }
-    
-    async function verificarPermisos() {
-        try {
-            const response = await fetch(`/api/negocio/${tenantId}/permisos`);
-            const data = await response.json();
-            
-            if (!data.permisos.editar_menu) {
-                document.getElementById('productForm').style.display = 'none';
-                document.querySelector('.btn-edit')?.remove();
-                document.querySelector('.btn-danger')?.remove();
-                document.querySelector('.toggle-checkbox')?.remove();
-            }
-            
-            if (data.mi_rol) {
-                const rolBadge = document.createElement('div');
-                rolBadge.className = 'stat-card';
-                rolBadge.innerHTML = `👤 Tu rol: ${data.mi_rol.rol.toUpperCase()}`;
-                document.querySelector('.stats').prepend(rolBadge);
-            }
-        } catch (error) {
-            console.error('Error verificando permisos:', error);
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión de Menú - WhatsApp Bot SaaS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        .productos-table {
+            width: 100%;
+            border-collapse: collapse;
         }
-    }
-    
-    async function loadMenu() {
-        showLoader();
-        try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/menu`);
-            if (!response.ok) throw new Error('Error al cargar menú');
-            const menu = await response.json();
-            
-            document.getElementById('totalProductos').innerText = menu.length;
-            
-            if (menu.length === 0) {
-                document.getElementById('menuContainer').innerHTML = '<div class="loading">📭 No hay productos en el menú.<br>Agrega tu primer producto usando el formulario.</div>';
+        .productos-table th,
+        .productos-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .productos-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        .productos-table tr:hover {
+            background: #f8f9fa;
+        }
+        .badge-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+        }
+        .badge-active {
+            background: #d4edda;
+            color: #155724;
+        }
+        .badge-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .toggle-switch {
+            width: 40px;
+            height: 20px;
+            background: #ccc;
+            border-radius: 20px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .toggle-switch.active {
+            background: #25D366;
+        }
+        .toggle-switch::after {
+            content: '';
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: left 0.3s;
+        }
+        .toggle-switch.active::after {
+            left: 22px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #6c757d;
+        }
+        .btn-icon {
+            padding: 6px 12px;
+            margin: 0 2px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">
+            🤖 WhatsApp Bot SaaS
+        </div>
+        <div class="navbar-menu">
+            <a href="/dashboard">Dashboard</a>
+            <div id="userInfo" class="user-info"></div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div id="alertContainer"></div>
+
+        <div class="d-flex justify-between align-center mb-4">
+            <h2>📋 Gestión de Menú</h2>
+            <div>
+                <a href="/admin/train?tenant_id=" id="trainLink" class="btn btn-outline">🤖 Entrenar IA</a>
+                <button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar Producto</button>
+            </div>
+        </div>
+
+        <!-- Configuración IA -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="card-title">⚙️ Configuración de IA</h3>
+            </div>
+            <div class="card-body">
+                <label class="d-flex align-center gap-2">
+                    <input type="checkbox" id="usarIA">
+                    <span>Activar respuestas con Inteligencia Artificial</span>
+                </label>
+                <p class="text-muted mt-2">La IA permite respuestas más naturales y personalizadas para tus clientes.</p>
+                <button class="btn btn-primary mt-3" onclick="guardarConfig()">💾 Guardar Configuración</button>
+            </div>
+        </div>
+
+        <!-- Productos -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">📦 Productos</h3>
+            </div>
+            <div id="productosContainer" class="loading">Cargando productos...</div>
+        </div>
+    </div>
+
+    <!-- Modal Producto -->
+    <div id="productoModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">➕ Agregar Producto</h3>
+                <button class="modal-close" onclick="cerrarModalProducto()">&times;</button>
+            </div>
+            <form id="formProducto">
+                <input type="hidden" id="productoId">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">Nombre del producto *</label>
+                        <input type="text" id="productoNombre" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Descripción</label>
+                        <textarea id="productoDescripcion" class="form-control" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Precio ($) *</label>
+                        <input type="number" id="productoPrecio" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Categoría</label>
+                        <select id="productoCategoria" class="form-control">
+                            <option value="general">General</option>
+                            <option value="tortas">🍰 Tortas</option>
+                            <option value="postres">🍨 Postres</option>
+                            <option value="panes">🥖 Panes</option>
+                            <option value="bebidas">🥤 Bebidas</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="d-flex align-center gap-2">
+                            <input type="checkbox" id="productoDisponible" checked>
+                            <span>Producto disponible para venta</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="cerrarModalProducto()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module">
+        import { 
+            getNegociosUsuario, getMenu, addProducto, updateProducto, 
+            deleteProducto, toggleProducto, getConfig, updateConfigIA, getPermisos 
+        } from './static/js/api.js';
+        import { showAlert, showLoader, hideLoader, formatPrice, escapeHtml, checkAuth, getTenantIdFromUrl } from './static/js/utils.js';
+
+        let tenantId = null;
+        let productos = [];
+        let currentEditId = null;
+
+        async function init() {
+            showLoader();
+            try {
+                const user = await checkAuth();
+                if (!user) return;
+                
+                tenantId = getTenantIdFromUrl();
+                if (!tenantId) {
+                    showAlert('No se especificó el negocio', 'error');
+                    window.location.href = '/dashboard';
+                    return;
+                }
+                
+                // Actualizar enlaces
+                const trainLink = document.getElementById('trainLink');
+                if (trainLink) trainLink.href = `/admin/train?tenant_id=${tenantId}`;
+                
+                await Promise.all([cargarProductos(), cargarConfig(), verificarPermisos()]);
+                actualizarUI(user);
+            } catch (error) {
+                console.error('Error al iniciar:', error);
+            } finally {
                 hideLoader();
+            }
+        }
+
+        async function cargarProductos() {
+            try {
+                productos = await getMenu(tenantId);
+                renderProductos();
+            } catch (error) {
+                console.error('Error cargando productos:', error);
+                document.getElementById('productosContainer').innerHTML = '<div class="empty-state">❌ Error al cargar los productos</div>';
+            }
+        }
+
+        function renderProductos() {
+            const container = document.getElementById('productosContainer');
+            
+            if (!productos || productos.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <p>📭 No hay productos en el menú</p>
+                        <button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>
+                    </div>
+                `;
                 return;
             }
             
-            let html = '<table><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
-            menu.forEach(item => {
-                const isAvailable = item.disponible !== false;
-                const rowClass = !isAvailable ? 'product-disabled' : '';
-                const statusColor = isAvailable ? 'status-available' : 'status-unavailable';
-                const statusText = isAvailable ? 'Disponible' : 'No disponible';
-                
-                html += `
-                    <tr id="row-${item.id}" class="${rowClass}">
-                        <td><strong>${escapeHtml(item.nombre)}</strong></td>
-                        <td>${escapeHtml(item.descripcion || '-')}</td>
-                        <td>$${item.precio.toLocaleString()}</td>
-                        <td style="text-align: center;">
-                            <span class="status-indicator ${statusColor}"></span>
-                            <span class="status-text">${statusText}</span>
-                        </td>
-                        <td style="text-align: center;">
-                            <label class="toggle-label">
-                                <input type="checkbox" class="toggle-checkbox" 
-                                       onchange="toggleProductStatus('${item.id}', this.checked)"
-                                       ${isAvailable ? 'checked' : ''}>
-                                <span style="font-size: 12px;">${isAvailable ? 'Activo' : 'Inactivo'}</span>
-                            </label>
-                         </td>
-                        <td style="white-space: nowrap;">
-                            <button class="btn btn-edit btn-small" onclick='openEditModal(${JSON.stringify(item)})'>✏️ Editar</button>
-                            <button class="btn btn-danger btn-small" onclick="deleteProduct('${item.id}')">🗑️ Eliminar</button>
-                         </td>
-                    </tr>
-                `;
-            });
-            html += '</tbody></table>';
-            document.getElementById('menuContainer').innerHTML = html;
-        } catch (error) {
-            document.getElementById('menuContainer').innerHTML = '<div class="alert alert-error">❌ Error al cargar el menú</div>';
-        } finally {
-            hideLoader();
+            container.innerHTML = `
+                <table class="productos-table">
+                    <thead>
+                        <tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Activo</th><th>Acciones</th></tr>
+                    </thead>
+                    <tbody>
+                        ${productos.map(p => `
+                            <tr id="row-${p.id}">
+                                <td><strong>${escapeHtml(p.nombre)}</strong></td>
+                                <td>${escapeHtml(p.descripcion || '-')}</td>
+                                <td>${formatPrice(p.precio)}</td>
+                                <td>
+                                    <span class="badge-status ${p.disponible ? 'badge-active' : 'badge-inactive'}">
+                                        ${p.disponible ? 'Disponible' : 'No disponible'}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="toggle-switch ${p.disponible ? 'active' : ''}" 
+                                         onclick="toggleProducto('${p.id}', ${!p.disponible})"></div>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline" onclick="editarProducto('${p.id}')">✏️</button>
+                                    <button class="btn btn-sm btn-danger" onclick="eliminarProducto('${p.id}')">🗑️</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
         }
-    }
-    
-    function openEditModal(item) {
-    console.log('Abriendo modal para producto:', item);
-    currentEditProductId = item.id;
-    document.getElementById('editProductId').value = item.id;
-    document.getElementById('editNombre').value = item.nombre;
-    document.getElementById('editDescripcion').value = item.descripcion || '';
-    document.getElementById('editPrecio').value = item.precio;
-    document.getElementById('editCategoria').value = item.categoria || 'general';
-    document.getElementById('editDisponible').checked = item.disponible !== false;
-    document.getElementById('editModal').style.display = 'block';
-    console.log('Modal abierto, productId:', currentEditProductId);
-    }
-    
-    function closeModal() {
-        document.getElementById('editModal').style.display = 'none';
-        currentEditProductId = null;
-    }
-    
-    async function updateProduct() {
-    const productId = currentEditProductId;
-    console.log('Actualizando producto:', productId, 'tenant:', tenantId);
-    
-    const producto = {
-        nombre: document.getElementById('editNombre').value,
-        descripcion: document.getElementById('editDescripcion').value,
-        precio: parseInt(document.getElementById('editPrecio').value),
-        categoria: document.getElementById('editCategoria').value,
-        disponible: document.getElementById('editDisponible').checked
-    };
-    
-    console.log('Datos a guardar:', producto);
-    
-    const saveBtn = document.getElementById('saveEditBtn');
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Guardando...';
-    showLoader();
-    
-    try {
-            const url = `/admin/update_product/${tenantId}/${productId}`;
-            console.log('URL:', url);
-            
-            const response = await fetch(url, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(producto)
-            });
-            
-            console.log('Response status:', response.status);
-            
-            if (response.ok) {
-                showAlert('success', '✅ Producto actualizado correctamente');
-                closeModal();
-                loadMenu();
-            } else {
-                const result = await response.json();
-                console.error('Error response:', result);
-                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo actualizar'));
-            }
-        } catch (error) {
-            console.error('Error al actualizar:', error);
-            showAlert('error', '❌ Error de conexión: ' + error.message);
-        } finally {
-            saveBtn.disabled = false;
-            saveBtn.textContent = '💾 Guardar Cambios';
-            hideLoader();
-        }
-    }   
-    
-    window.toggleProductStatus = async function(productId, isAvailable) {
-        showLoader();
-        try {
-            const response = await fetch(`${API_BASE}/admin/toggle_product/${tenantId}/${productId}`, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ disponible: isAvailable })
-            });
-            
-            if (response.ok) {
-                const estado = isAvailable ? 'activado' : 'desactivado';
-                showAlert('success', `✅ Producto ${estado} correctamente`);
-                await loadMenu();
-            } else {
-                showAlert('error', '❌ Error al cambiar estado del producto');
-            }
-        } catch (error) {
-            showAlert('error', '❌ Error de conexión');
-        } finally {
-            hideLoader();
-        }
-    };
-    
-    async function loadConfig() {
-        try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/config`);
-            if (response.ok) {
-                const config = await response.json();
+
+        async function cargarConfig() {
+            try {
+                const config = await getConfig(tenantId);
                 document.getElementById('usarIA').checked = config.usar_ia || false;
-                document.getElementById('iaStatus').innerHTML = config.usar_ia ? '✅' : '❌';
+            } catch (error) {
+                console.error('Error cargando config:', error);
             }
-        } catch (error) {
-            console.error('Error loading config:', error);
         }
-    }
-    
-    window.limpiarContexto = async function() {
-        if (!confirm('¿Estás seguro de que quieres eliminar todo el contexto aprendido? Los productos actuales no se eliminarán, pero la IA perderá el entrenamiento personalizado.')) return;
-        
-        showLoader();
-        try {
-            const response = await fetch(`/api/tenant/${tenantId}/context`, { method: 'DELETE' });
-            const result = await response.json();
-            if (response.ok) {
-                showAlert('success', '✅ Contexto eliminado correctamente');
-                setTimeout(() => location.reload(), 1500);
+
+        async function verificarPermisos() {
+            try {
+                const permisos = await getPermisos(tenantId);
+                const puedeEditar = permisos.permisos?.editar_menu;
+                if (!puedeEditar) {
+                    document.querySelector('.btn-primary')?.remove();
+                    document.querySelectorAll('.btn-danger').forEach(b => b.remove());
+                }
+            } catch (error) {
+                console.error('Error verificando permisos:', error);
+            }
+        }
+
+        function actualizarUI(user) {
+            const userInfo = document.getElementById('userInfo');
+            if (userInfo) {
+                userInfo.innerHTML = `
+                    <span>👤 ${escapeHtml(user.nombre || user.email)}</span>
+                    <button class="btn btn-sm btn-outline" onclick="cerrarSesion()">Salir</button>
+                `;
+            }
+        }
+
+        // Funciones globales
+        window.abrirModalProducto = function(producto = null) {
+            currentEditId = producto?.id || null;
+            const modal = document.getElementById('productoModal');
+            const title = document.getElementById('modalTitle');
+            
+            if (producto) {
+                title.textContent = '✏️ Editar Producto';
+                document.getElementById('productoId').value = producto.id;
+                document.getElementById('productoNombre').value = producto.nombre;
+                document.getElementById('productoDescripcion').value = producto.descripcion || '';
+                document.getElementById('productoPrecio').value = producto.precio;
+                document.getElementById('productoCategoria').value = producto.categoria || 'general';
+                document.getElementById('productoDisponible').checked = producto.disponible !== false;
             } else {
-                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
+                title.textContent = '➕ Agregar Producto';
+                document.getElementById('formProducto').reset();
+                document.getElementById('productoId').value = '';
+                document.getElementById('productoDisponible').checked = true;
             }
-        } catch (error) {
-            showAlert('error', '❌ Error de conexión');
-        } finally {
-            hideLoader();
-        }
-    };
-    
-    window.deleteProduct = async function(productId) {
-    console.log('Eliminando producto:', productId, 'tenant:', tenantId);
-    
-    if (!confirm('¿Eliminar este producto del menú? Esta acción no se puede deshacer.')) return;
-    
-    showLoader();
-    try {
-        // Mostrar URL para depurar
-        const url = `/admin/delete_product/${tenantId}/${productId}`;
-        console.log('URL:', url);
-        
-        const response = await fetch(url, { 
-            method: 'DELETE',
-            headers: {'Content-Type': 'application/json'}
-        });
-        
-        console.log('Response status:', response.status);
-        
-        if (response.ok) {
-            showAlert('success', '✅ Producto eliminado correctamente');
-            await loadMenu();
-        } else {
-            const result = await response.json();
-            console.error('Error response:', result);
-            showAlert('error', '❌ Error: ' + (result.error || 'No se pudo eliminar'));
-        }
-    } catch (error) {
-        console.error('Error al eliminar:', error);
-        showAlert('error', '❌ Error de conexión: ' + error.message);
-    } finally {
-        hideLoader();
-    }
-};
-    
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
-    // Event listeners
-    document.getElementById('productForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const producto = {
-            nombre: document.getElementById('nombre').value,
-            descripcion: document.getElementById('descripcion').value,
-            precio: parseInt(document.getElementById('precio').value),
-            categoria: document.getElementById('categoria').value,
-            disponible: true
+            modal.classList.add('active');
         };
-        
-        const submitBtn = e.target.querySelector('button');
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Agregando...';
-        showLoader();
-        
-        try {
-            const response = await fetch(`${API_BASE}/admin/add_product/${tenantId}`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(producto)
-            });
+
+        window.cerrarModalProducto = function() {
+            document.getElementById('productoModal').classList.remove('active');
+            currentEditId = null;
+        };
+
+        window.editarProducto = function(productId) {
+            const producto = productos.find(p => p.id === productId);
+            if (producto) abrirModalProducto(producto);
+        };
+
+        window.eliminarProducto = async function(productId) {
+            if (!confirm('¿Estás seguro de eliminar este producto?')) return;
             
-            if (response.ok) {
-                showAlert('success', '✅ Producto agregado correctamente');
-                document.getElementById('productForm').reset();
-                loadMenu();
-            } else {
-                const result = await response.json();
-                showAlert('error', '❌ Error: ' + (result.error || 'No se pudo agregar'));
+            showLoader();
+            try {
+                await deleteProducto(tenantId, productId);
+                showAlert('✅ Producto eliminado', 'success');
+                await cargarProductos();
+            } catch (error) {
+                showAlert('Error al eliminar el producto', 'error');
+            } finally {
+                hideLoader();
             }
-        } catch (error) {
-            showAlert('error', '❌ Error de conexión');
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Agregar Producto';
-            hideLoader();
-        }
-    });
-    
-    document.getElementById('saveConfigBtn').addEventListener('click', async () => {
-        const usarIA = document.getElementById('usarIA').checked;
-        const btn = document.getElementById('saveConfigBtn');
-        btn.disabled = true;
-        btn.textContent = 'Guardando...';
-        showLoader();
-        
-        try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/config/ia`, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ usar_ia: usarIA })
-            });
+        };
+
+        window.toggleProducto = async function(productId, nuevoEstado) {
+            showLoader();
+            try {
+                await toggleProducto(tenantId, productId, nuevoEstado);
+                await cargarProductos();
+            } catch (error) {
+                showAlert('Error al cambiar estado', 'error');
+            } finally {
+                hideLoader();
+            }
+        };
+
+        window.guardarConfig = async function() {
+            const usarIA = document.getElementById('usarIA').checked;
+            const btn = event.target;
+            btn.disabled = true;
+            showLoader();
             
-            if (response.ok) {
-                showAlert('success', '✅ Configuración guardada');
-                document.getElementById('iaStatus').innerHTML = usarIA ? '✅' : '❌';
-            } else {
-                showAlert('error', '❌ Error al guardar configuración');
+            try {
+                await updateConfigIA(tenantId, usarIA);
+                showAlert('✅ Configuración guardada', 'success');
+            } catch (error) {
+                showAlert('Error al guardar configuración', 'error');
+            } finally {
+                btn.disabled = false;
+                hideLoader();
             }
-        } catch (error) {
-            showAlert('error', '❌ Error de conexión');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '💾 Guardar Configuración';
-            hideLoader();
-        }
-    });
-    
-    document.getElementById('clearContextBtn').addEventListener('click', limpiarContexto);
-    
-    // Eventos del modal
-    document.querySelector('.close').onclick = closeModal;
-    document.getElementById('cancelEditBtn').onclick = closeModal;
-    document.getElementById('saveEditBtn').onclick = updateProduct;
-    window.onclick = function(event) {
-        if (event.target == document.getElementById('editModal')) {
-            closeModal();
-        }
-    };
-    
-    // Inicializar
-    verificarPermisos();
-    loadMenu();
-    loadConfig();
-</script>
-{% endblock %}
+        };
+
+        window.cerrarSesion = async function() {
+            await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+            window.location.href = '/';
+        };
+
+        // Formulario producto
+        document.getElementById('formProducto').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const producto = {
+                nombre: document.getElementById('productoNombre').value,
+                descripcion: document.getElementById('productoDescripcion').value,
+                precio: parseInt(document.getElementById('productoPrecio').value),
+                categoria: document.getElementById('productoCategoria').value,
+                disponible: document.getElementById('productoDisponible').checked
+            };
+            
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            showLoader();
+            
+            try {
+                if (currentEditId) {
+                    await updateProducto(tenantId, currentEditId, producto);
+                    showAlert('✅ Producto actualizado', 'success');
+                } else {
+                    await addProducto(tenantId, producto);
+                    showAlert('✅ Producto agregado', 'success');
+                }
+                cerrarModalProducto();
+                await cargarProductos();
+            } catch (error) {
+                showAlert('Error al guardar el producto', 'error');
+            } finally {
+                submitBtn.disabled = false;
+                hideLoader();
+            }
+        });
+
+        init();
+    </script>
+</body>
+</html>

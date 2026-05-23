@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>WhatsApp Bot SaaS - Automatiza tus ventas</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        .hero {
+            background: linear-gradient(135deg, #075E54, #128C7E);
+            color: white;
+            padding: 4rem 2rem;
+            text-align: center;
+            border-radius: 0 0 2rem 2rem;
+        }
+        .hero h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        .hero p {
+            font-size: 1.25rem;
+            max-width: 600px;
+            margin: 0 auto;
+            opacity: 0.9;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            padding: 4rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .feature-card {
+            text-align: center;
+            padding: 2rem;
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        .feature-card h3 {
+            margin-bottom: 0.5rem;
+            color: #075E54;
+        }
+        .cta {
+            text-align: center;
+            padding: 3rem;
+            background: #f0f2f5;
+        }
+        .btn-large {
+            padding: 1rem 2rem;
+            font-size: 1.2rem;
+        }
+        .auth-tabs {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-bottom: 2rem;
+        }
+        .auth-tab {
+            padding: 0.75rem 2rem;
+            background: white;
+            border: none;
+            border-radius: 2rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .auth-tab.active {
+            background: #075E54;
+            color: white;
+        }
+        .auth-form {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .auth-form.hidden {
+            display: none;
+        }
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            background: #075E54;
+            color: white;
+            margin-top: 2rem;
+        }
+        .footer a {
+            color: white;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">
+            🤖 WhatsApp Bot SaaS
+            <span>Beta</span>
+        </div>
+        <div class="navbar-menu">
+            <a href="#features">Características</a>
+            <a href="#precios">Precios</a>
+            <a href="#contacto">Contacto</a>
+        </div>
+    </nav>
+
+    <div class="hero">
+        <h1>🤖 Automatiza tus ventas por WhatsApp</h1>
+        <p>IA que atiende a tus clientes, toma pedidos y los registra automáticamente</p>
+    </div>
+
+    <div id="features" class="features">
+        <div class="feature-card">
+            <div class="feature-icon">🧠</div>
+            <h3>IA Inteligente</h3>
+            <p>Asistente virtual que entiende lenguaje natural y aprende de tus productos</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">📦</div>
+            <h3>Gestión de Pedidos</h3>
+            <p>Toma pedidos automáticamente y los registra en tu sistema</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">📊</div>
+            <h3>Dashboard Completo</h3>
+            <p>Controla todo desde un panel intuitivo y fácil de usar</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">🔗</div>
+            <h3>Pagos Integrados</h3>
+            <p>Genera links de pago y acepta transferencias bancarias</p>
+        </div>
+    </div>
+
+    <div class="cta" id="precios">
+        <h2>Comienza a vender hoy mismo</h2>
+        <p style="margin: 1rem 0;">Sin comisiones adicionales, solo el costo de tu plan de WhatsApp Business</p>
+        
+        <div class="auth-tabs">
+            <button class="auth-tab active" onclick="mostrarFormulario('login')">Iniciar Sesión</button>
+            <button class="auth-tab" onclick="mostrarFormulario('register')">Registrarse</button>
+        </div>
+
+        <div id="loginForm" class="auth-form">
+            <h3>Bienvenido de vuelta</h3>
+            <form id="formLogin">
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" id="loginEmail" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Contraseña</label>
+                    <input type="password" id="loginPassword" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Iniciar Sesión</button>
+            </form>
+        </div>
+
+        <div id="registerForm" class="auth-form hidden">
+            <h3>Crear cuenta nueva</h3>
+            <form id="formRegister">
+                <div class="form-group">
+                    <label class="form-label">Nombre completo</label>
+                    <input type="text" id="registerNombre" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" id="registerEmail" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Teléfono</label>
+                    <input type="tel" id="registerTelefono" class="form-control" required placeholder="3155692656">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Contraseña</label>
+                    <input type="password" id="registerPassword" class="form-control" required minlength="6">
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Registrarse</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="footer" id="contacto">
+        <p>¿Tienes preguntas? Contáctanos en <a href="mailto:soporte@whatsappbotsaas.com">soporte@whatsappbotsaas.com</a></p>
+        <p style="margin-top: 1rem;">© 2024 WhatsApp Bot SaaS - Todos los derechos reservados</p>
+    </div>
+
+    <script type="module">
+        import { login, register } from './static/js/api.js';
+        import { showAlert, showLoader, hideLoader } from './static/js/utils.js';
+
+        window.mostrarFormulario = function(tipo) {
+            const loginForm = document.getElementById('loginForm');
+            const registerForm = document.getElementById('registerForm');
+            const tabs = document.querySelectorAll('.auth-tab');
+            
+            if (tipo === 'login') {
+                loginForm.classList.remove('hidden');
+                registerForm.classList.add('hidden');
+                tabs[0].classList.add('active');
+                tabs[1].classList.remove('active');
+            } else {
+                loginForm.classList.add('hidden');
+                registerForm.classList.remove('hidden');
+                tabs[0].classList.remove('active');
+                tabs[1].classList.add('active');
+            }
+        };
+
+        // Login
+        document.getElementById('formLogin').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoader();
+            
+            try {
+                const result = await login(
+                    document.getElementById('loginEmail').value,
+                    document.getElementById('loginPassword').value
+                );
+                
+                if (result.success) {
+                    window.location.href = '/dashboard';
+                } else {
+                    showAlert(result.error || 'Error al iniciar sesión', 'error');
+                }
+            } catch (error) {
+                showAlert('Error de conexión', 'error');
+            } finally {
+                hideLoader();
+            }
+        });
+
+        // Register
+        document.getElementById('formRegister').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoader();
+            
+            try {
+                const result = await register(
+                    document.getElementById('registerEmail').value,
+                    document.getElementById('registerPassword').value,
+                    document.getElementById('registerNombre').value,
+                    document.getElementById('registerTelefono').value
+                );
+                
+                if (result.success) {
+                    showAlert('✅ Cuenta creada exitosamente. Ahora puedes iniciar sesión.', 'success');
+                    mostrarFormulario('login');
+                    document.getElementById('formRegister').reset();
+                } else {
+                    showAlert(result.error || 'Error al registrarse', 'error');
+                }
+            } catch (error) {
+                showAlert('Error de conexión', 'error');
+            } finally {
+                hideLoader();
+            }
+        });
+    </script>
+</body>
+</html>
