@@ -23,15 +23,15 @@
             <div class="navbar-menu">
                 {% if session.usuario_id %}
                 <a href="/dashboard">Dashboard</a>
-                <div id="userInfo" class="user-info">
-                    <span id="userName">{{ session.nombre or session.email }}</span>
+                <div class="user-info">
+                    <span>{{ session.nombre or session.email }}</span>
                     <button class="btn btn-sm btn-outline" onclick="cerrarSesion()">Salir</button>
                 </div>
                 {% else %}
-                <div class="nav-links">
-                    <button class="btn btn-outline" onclick="window.location.href='/'">Inicio</button>
-                    <button class="btn btn-primary" onclick="window.location.href='/'">Iniciar Sesión</button>
-                    <button class="btn btn-success" onclick="window.location.href='/'">Registrarse</button>
+                <div class="nav-buttons">
+                    <button class="nav-btn" onclick="window.location.href='/'">Inicio</button>
+                    <button class="nav-btn" onclick="scrollToAuth('login')">Iniciar Sesión</button>
+                    <button class="nav-btn" onclick="scrollToAuth('register')">Registrarse</button>
                 </div>
                 {% endif %}
             </div>
@@ -87,10 +87,21 @@
             }
         }
         
+        function scrollToAuth(tipo) {
+            // Esta función se define en index.html cuando existe
+            if (typeof window.scrollToAuthGlobal === 'function') {
+                window.scrollToAuthGlobal(tipo);
+            } else {
+                // Si no está en landing page, ir a home
+                window.location.href = '/';
+            }
+        }
+        
         window.showLoader = showLoader;
         window.hideLoader = hideLoader;
         window.showAlert = showAlert;
         window.cerrarSesion = cerrarSesion;
+        window.scrollToAuth = scrollToAuth;
     </script>
     {% block extra_js %}{% endblock %}
 </body>

@@ -14,6 +14,13 @@
     }
     .hero h1 { font-size: 3rem; margin-bottom: 1rem; color: white; }
     .hero p { font-size: 1.25rem; max-width: 600px; margin: 0 auto; opacity: 0.9; }
+    .hero-buttons {
+        display: flex;
+        gap: 1rem;
+        justify-content: center;
+        margin-top: 2rem;
+        flex-wrap: wrap;
+    }
     .features-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -64,6 +71,7 @@
         cursor: pointer;
         font-weight: 500;
         transition: all 0.2s;
+        color: #374151;
     }
     .auth-tab.active {
         background: linear-gradient(135deg, #075E54, #128C7E);
@@ -87,22 +95,12 @@
         margin-top: 0.25rem;
         display: block;
     }
-    .btn-link {
-        background: none;
-        border: none;
-        color: #075E54;
-        cursor: pointer;
-        font-weight: 500;
-    }
-    .btn-link:hover {
-        text-decoration: underline;
-    }
-    .nav-links {
+    .nav-buttons {
         display: flex;
         gap: 1rem;
         align-items: center;
     }
-    .nav-link-btn {
+    .nav-btn {
         background: transparent;
         border: 1px solid rgba(255,255,255,0.3);
         color: white;
@@ -111,9 +109,39 @@
         cursor: pointer;
         transition: all 0.2s;
     }
-    .nav-link-btn:hover {
+    .nav-btn:hover {
         background: rgba(255,255,255,0.1);
         border-color: white;
+    }
+    .btn-hero-primary {
+        background: white;
+        color: #075E54;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        font-weight: 600;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .btn-hero-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    .btn-hero-secondary {
+        background: transparent;
+        border: 2px solid white;
+        color: white;
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        font-weight: 600;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .btn-hero-secondary:hover {
+        background: rgba(255,255,255,0.1);
+        transform: translateY(-2px);
     }
 </style>
 {% endblock %}
@@ -124,9 +152,9 @@
 <div class="hero">
     <h1>🤖 Automatiza tus ventas por WhatsApp</h1>
     <p>IA que atiende a tus clientes, toma pedidos y los registra automáticamente</p>
-    <div style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center;">
-        <button class="btn btn-primary btn-lg" onclick="scrollToAuth('login')">Iniciar Sesión</button>
-        <button class="btn btn-outline btn-lg" style="background: rgba(255,255,255,0.2); color: white; border: none;" onclick="scrollToAuth('register')">Registrarse Gratis</button>
+    <div class="hero-buttons">
+        <button class="btn-hero-primary" onclick="scrollToAuth('login')">Iniciar Sesión</button>
+        <button class="btn-hero-secondary" onclick="scrollToAuth('register')">Registrarse Gratis</button>
     </div>
 </div>
 
@@ -214,12 +242,25 @@
 <script>
     function scrollToAuth(tipo) {
         const authSection = document.getElementById('auth-section');
-        authSection.scrollIntoView({ behavior: 'smooth' });
-        if (tipo === 'login') {
-            mostrarFormulario('login');
-        } else {
-            mostrarFormulario('register');
-        }
+        authSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        
+        // Pequeño delay para asegurar que el scroll termine antes de cambiar el formulario
+        setTimeout(function() {
+            if (tipo === 'login') {
+                mostrarFormulario('login');
+            } else {
+                mostrarFormulario('register');
+            }
+            // Resaltar el formulario
+            const form = document.getElementById(tipo === 'login' ? 'loginForm' : 'registerForm');
+            if (form) {
+                form.style.transition = 'all 0.3s';
+                form.style.boxShadow = '0 0 0 3px #075E54, 0 10px 25px -5px rgba(0,0,0,0.1)';
+                setTimeout(function() {
+                    form.style.boxShadow = '';
+                }, 1000);
+            }
+        }, 500);
     }
 
     function mostrarFormulario(tipo) {
@@ -255,7 +296,7 @@
         if (limpio.length === 10 && limpio.startsWith('3')) {
             return '+57' + limpio;
         }
-        // Si ya tiene código de país
+        // Si ya tiene código de país 57 pero sin +
         if (limpio.length === 12 && limpio.startsWith('57')) {
             return '+' + limpio;
         }
@@ -348,8 +389,9 @@
                 showAlert('✅ Cuenta creada exitosamente. Ahora puedes iniciar sesión.', 'success');
                 mostrarFormulario('login');
                 document.getElementById('formRegister').reset();
-                // Pre-llenar email en login
                 document.getElementById('loginEmail').value = email;
+                // Scroll al formulario de login
+                document.getElementById('auth-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
             } else {
                 showAlert(result.error || 'Error al registrarse', 'error');
             }
