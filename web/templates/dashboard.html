@@ -4,7 +4,6 @@
 
 {% block content %}
 <div class="app-layout">
-    <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-menu">
             <div class="sidebar-item">
@@ -13,28 +12,29 @@
                     <span>Dashboard</span>
                 </a>
             </div>
+            {% if negocios and negocios|length > 0 %}
             <div class="sidebar-item">
-                <a href="#" class="sidebar-link" id="firstBusinessLink" style="display: none;">
-                    <span class="icon">🏪</span>
-                    <span>Mi Negocio</span>
-                </a>
-            </div>
-            <div class="sidebar-item">
-                <a href="#" class="sidebar-link" id="menuLink" style="display: none;">
+                <a href="/admin/menu?tenant_id={{ negocios[0].id }}" class="sidebar-link" id="menuLink">
                     <span class="icon">📋</span>
                     <span>Gestión de Menú</span>
                 </a>
             </div>
             <div class="sidebar-item">
-                <a href="#" class="sidebar-link" id="trainLink" style="display: none;">
+                <a href="/admin/train?tenant_id={{ negocios[0].id }}" class="sidebar-link" id="trainLink">
                     <span class="icon">🤖</span>
                     <span>Entrenar IA</span>
                 </a>
             </div>
+            <div class="sidebar-item">
+                <a href="/panel/{{ negocios[0].id }}" class="sidebar-link" id="panelLink">
+                    <span class="icon">🏪</span>
+                    <span>Mi Negocio</span>
+                </a>
+            </div>
+            {% endif %}
         </div>
     </aside>
 
-    <!-- Contenido Principal -->
     <main class="main-content">
         <div class="stats-grid">
             <div class="stat-card">
@@ -108,7 +108,25 @@
 <script>
     let negocios = [];
 
+    // Verificar autenticación al cargar
+    async function verificarAuth() {
+        try {
+            const response = await fetch('/api/usuario/perfil', { credentials: 'include' });
+            if (!response.ok) {
+                window.location.href = '/';
+                return false;
+            }
+            return true;
+        } catch (error) {
+            window.location.href = '/';
+            return false;
+        }
+    }
+
     async function cargarNegocios() {
+        const authOk = await verificarAuth();
+        if (!authOk) return;
+        
         showLoader();
         try {
             const response = await fetch('/api/negocios/usuario', { credentials: 'include' });
@@ -116,7 +134,6 @@
                 negocios = await response.json();
                 renderNegocios();
                 actualizarStats();
-                actualizarSidebar();
             } else if (response.status === 401) {
                 window.location.href = '/';
             }
@@ -168,28 +185,6 @@
     function actualizarStats() {
         document.getElementById('totalNegocios').innerText = negocios.length;
         document.getElementById('verificados').innerText = negocios.filter(n => n.verificado).length;
-    }
-
-    function actualizarSidebar() {
-        if (negocios.length > 0) {
-            const primerNegocio = negocios[0];
-            const businessLink = document.getElementById('firstBusinessLink');
-            const menuLink = document.getElementById('menuLink');
-            const trainLink = document.getElementById('trainLink');
-            
-            if (businessLink) {
-                businessLink.href = `/panel/${primerNegocio.id}`;
-                businessLink.style.display = 'flex';
-            }
-            if (menuLink) {
-                menuLink.href = `/admin/menu?tenant_id=${primerNegocio.id}`;
-                menuLink.style.display = 'flex';
-            }
-            if (trainLink) {
-                trainLink.href = `/admin/train?tenant_id=${primerNegocio.id}`;
-                trainLink.style.display = 'flex';
-            }
-        }
     }
 
     function abrirModalCrear() {
@@ -274,12 +269,10 @@
         }
     });
 
-    // Exponer funciones globalmente
     window.abrirModalCrear = abrirModalCrear;
     window.cerrarModalCrear = cerrarModalCrear;
     window.verificarNegocio = verificarNegocio;
 
-    // Inicializar
     cargarNegocios();
 </script>
 {% endblock %}

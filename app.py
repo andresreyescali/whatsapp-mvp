@@ -4,6 +4,7 @@ import secrets
 import time
 import uuid
 import requests
+import re
 from flask import Flask, jsonify, request, render_template, session, redirect
 from core.config import config
 from core.database import db_manager
@@ -102,10 +103,14 @@ def formatear_telefono(self, telefono: str) -> str:
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'usuario_id' not in session:
-            if request.path.startswith('/api/'):
-                return jsonify({'error': 'No autenticado', 'redirect': '/'}), 401
-            return redirect('/')
+        # Para peticiones API, devolver 401
+        if request.path.startswith('/api/'):
+            if 'usuario_id' not in session and session.get('rol_sistema') != 'super_admin':
+                return jsonify({'error': 'No autenticado'}), 401
+        else:
+            # Para páginas HTML, redirigir al login
+            if 'usuario_id' not in session and session.get('rol_sistema') != 'super_admin':
+                return redirect('/')
         return f(*args, **kwargs)
     return decorated_function
 
@@ -300,10 +305,12 @@ def api_auth_login():
     data = request.json
     result = auth_manager.login(data.get('email'), data.get('password'))
     if result.get('success'):
+        session.clear()  # Limpiar sesión anterior
         session['usuario_id'] = result['usuario_id']
         session['email'] = result['email']
         session['nombre'] = result.get('nombre')
         session['rol_sistema'] = result.get('rol_sistema', 'admin_cliente')
+        session.permanent = True  # Hacer la sesión permanente
     return jsonify(result)
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -323,9 +330,11 @@ def guardar_configuracion(tenant_id):
 @app.route('/api/negocios/usuario', methods=['GET'])
 @login_required
 def api_negocios_usuario():
-    if session['usuario_id'] == 'super_admin':
+    """Obtiene los negocios del usuario actual"""
+    if session.get('rol_sistema') == 'super_admin':
         negocios = tenant_repo.get_all()
         return jsonify([{'id': n['id'], 'nombre': n['nombre'], 'phone_id': n['phone_id'], 'verificado': True} for n in negocios])
+    
     negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
     return jsonify(negocios)
 
