@@ -29,9 +29,9 @@
                 </div>
                 {% else %}
                 <div class="nav-buttons">
-                    <button class="nav-btn" onclick="window.location.href='/'">Inicio</button>
-                    <button class="nav-btn" onclick="irAFormulario('login')">Iniciar Sesión</button>
-                    <button class="nav-btn" onclick="irAFormulario('register')">Registrarse</button>
+                    <a href="/" class="nav-link">Inicio</a>
+                    <button class="nav-link-btn" onclick="irAFormulario('login')">Iniciar Sesión</button>
+                    <button class="nav-link-btn-primary" onclick="irAFormulario('register')">Registrarse</button>
                 </div>
                 {% endif %}
             </div>
@@ -51,6 +51,60 @@
             <p style="margin-top: 1rem;">© 2024 WhatsApp Bot SaaS - Todos los derechos reservados</p>
         </div>
     </footer>
+
+    <style>
+        /* Estilos específicos para navbar */
+        .nav-buttons {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .nav-link {
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .nav-link-btn {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        
+        .nav-link-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: white;
+        }
+        
+        .nav-link-btn-primary {
+            background: white;
+            border: none;
+            color: #075E54;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+        }
+        
+        .nav-link-btn-primary:hover {
+            background: #f0f0f0;
+            transform: translateY(-1px);
+        }
+    </style>
 
     <script>
         function showLoader() {
@@ -88,21 +142,17 @@
         }
         
         function irAFormulario(tipo) {
-            // Si estamos en landing page, hacer scroll al formulario
             if (window.location.pathname === '/') {
                 if (typeof window.scrollToAuthForm === 'function') {
                     window.scrollToAuthForm(tipo);
                 } else {
-                    // Si la función no está disponible, recargar y luego ir
                     window.location.href = '/#' + tipo;
                 }
             } else {
-                // Si no estamos en landing page, ir a ella
                 window.location.href = '/#' + tipo;
             }
         }
         
-        // Al cargar la página, si hay un hash, scrollear al formulario
         if (window.location.hash === '#login') {
             setTimeout(function() {
                 if (typeof window.scrollToAuthForm === 'function') {
