@@ -103,14 +103,15 @@ def formatear_telefono(self, telefono: str) -> str:
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Para peticiones API, devolver 401
-        if request.path.startswith('/api/'):
-            if 'usuario_id' not in session and session.get('rol_sistema') != 'super_admin':
-                return jsonify({'error': 'No autenticado'}), 401
-        else:
-            # Para páginas HTML, redirigir al login
+        # Para páginas HTML (no API), verificar sesión
+        if not request.path.startswith('/api/'):
             if 'usuario_id' not in session and session.get('rol_sistema') != 'super_admin':
                 return redirect('/')
+            return f(*args, **kwargs)
+        
+        # Para API, devolver 401 si no autenticado
+        if 'usuario_id' not in session and session.get('rol_sistema') != 'super_admin':
+            return jsonify({'error': 'No autenticado'}), 401
         return f(*args, **kwargs)
     return decorated_function
 

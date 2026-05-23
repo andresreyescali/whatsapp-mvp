@@ -25,7 +25,6 @@
             <div class="navbar-menu">
                 {% if session.usuario_id %}
                 <a href="/dashboard">Dashboard</a>
-                <a href="/dashboard" class="mobile-only">Dashboard</a>
                 <div class="user-info">
                     <span>{{ session.nombre or session.email }}</span>
                     <button class="btn btn-sm btn-outline" onclick="cerrarSesion()">Salir</button>
@@ -59,7 +58,6 @@
     </footer>
 
     <style>
-        /* Estilos específicos para navbar */
         .nav-buttons {
             display: flex;
             gap: 0.5rem;
@@ -110,56 +108,37 @@
             background: #f0f0f0;
             transform: translateY(-1px);
         }
-        
-        .mobile-only {
-            display: none;
-        }
-        
-        @media (max-width: 768px) {
-            .mobile-only {
-                display: inline-block;
-            }
-            .navbar-menu a:not(.mobile-only) {
-                display: none;
-            }
-        }
     </style>
 
     <script>
         // Función para mostrar loader
         function showLoader() {
-            const loader = document.getElementById('loaderOverlay');
+            var loader = document.getElementById('loaderOverlay');
             if (loader) {
                 loader.classList.add('active');
-            } else {
-                console.warn('Loader element not found');
             }
         }
         
         // Función para ocultar loader
         function hideLoader() {
-            const loader = document.getElementById('loaderOverlay');
+            var loader = document.getElementById('loaderOverlay');
             if (loader) {
                 loader.classList.remove('active');
             }
         }
         
         // Función para mostrar alertas
-        function showAlert(message, type = 'info') {
-            const container = document.getElementById('alertContainer');
-            if (!container) {
-                console.warn('Alert container not found');
-                return;
-            }
+        function showAlert(message, type) {
+            if (typeof type === 'undefined') type = 'info';
+            var container = document.getElementById('alertContainer');
+            if (!container) return;
             
-            const alertDiv = document.createElement('div');
-            alertDiv.className = `alert alert-${type}`;
-            alertDiv.innerHTML = `
-                <span>${message}</span>
-                <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.25rem;" onclick="this.parentElement.remove()">×</button>
-            `;
+            var alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-' + type;
+            alertDiv.innerHTML = '<span>' + message + '</span>' +
+                '<button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.25rem;" onclick="this.parentElement.remove()">×</button>';
             container.appendChild(alertDiv);
-            setTimeout(() => alertDiv.remove(), 5000);
+            setTimeout(function() { alertDiv.remove(); }, 5000);
         }
         
         // Función para cerrar sesión
@@ -169,7 +148,6 @@
                 await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
                 window.location.href = '/';
             } catch (error) {
-                console.error('Logout error:', error);
                 window.location.href = '/';
             }
         }
@@ -177,8 +155,20 @@
         // Función para ir al formulario de auth
         function irAFormulario(tipo) {
             if (window.location.pathname === '/') {
-                if (typeof window.scrollToAuthForm === 'function') {
-                    window.scrollToAuthForm(tipo);
+                var authSection = document.getElementById('auth-section');
+                if (authSection) {
+                    authSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    setTimeout(function() {
+                        if (tipo === 'login') {
+                            var loginBtn = document.querySelector('.auth-tab');
+                            if (loginBtn && loginBtn.innerText !== 'Iniciar Sesión') {
+                                if (loginBtn) loginBtn.click();
+                            }
+                        } else {
+                            var registerBtn = document.querySelectorAll('.auth-tab')[1];
+                            if (registerBtn) registerBtn.click();
+                        }
+                    }, 500);
                 } else {
                     window.location.href = '/#' + tipo;
                 }
@@ -187,39 +177,23 @@
             }
         }
         
-        // Verificar autenticación al cargar (para páginas protegidas)
-        async function verificarAutenticacion() {
-            // No verificar en landing page
-            if (window.location.pathname === '/' || window.location.pathname === '/registro') {
-                return true;
-            }
-            
-            try {
-                const response = await fetch('/api/usuario/perfil', { credentials: 'include' });
-                if (!response.ok) {
-                    console.warn('No autenticado, redirigiendo a login');
-                    window.location.href = '/';
-                    return false;
-                }
-                return true;
-            } catch (error) {
-                console.error('Error verificando autenticación:', error);
-                window.location.href = '/';
-                return false;
-            }
-        }
-        
         // Manejo de hash para scroll a formulario
         if (window.location.hash === '#login') {
             setTimeout(function() {
-                if (typeof window.scrollToAuthForm === 'function') {
-                    window.scrollToAuthForm('login');
+                var authSection = document.getElementById('auth-section');
+                if (authSection) {
+                    authSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    var loginBtn = document.querySelector('.auth-tab');
+                    if (loginBtn) loginBtn.click();
                 }
             }, 500);
         } else if (window.location.hash === '#register') {
             setTimeout(function() {
-                if (typeof window.scrollToAuthForm === 'function') {
-                    window.scrollToAuthForm('register');
+                var authSection = document.getElementById('auth-section');
+                if (authSection) {
+                    authSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    var registerBtn = document.querySelectorAll('.auth-tab')[1];
+                    if (registerBtn) registerBtn.click();
                 }
             }, 500);
         }
@@ -230,19 +204,6 @@
         window.showAlert = showAlert;
         window.cerrarSesion = cerrarSesion;
         window.irAFormulario = irAFormulario;
-        window.verificarAutenticacion = verificarAutenticacion;
-        
-        // Ejecutar verificación al cargar (solo en páginas protegidas)
-        if (window.location.pathname !== '/' && window.location.pathname !== '/registro') {
-            verificarAutenticacion();
-        }
-        
-        console.log('Base.html cargado - Funciones globales disponibles:', {
-            showLoader: typeof showLoader,
-            hideLoader: typeof hideLoader,
-            showAlert: typeof showAlert,
-            cerrarSesion: typeof cerrarSesion
-        });
     </script>
     
     {% block extra_js %}{% endblock %}
