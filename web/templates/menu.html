@@ -59,29 +59,6 @@
             </div>
         </div>
 
-        <!-- Filtros -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h3 class="card-title">🔍 Filtros</h3>
-            </div>
-            <div class="card-body">
-                <div class="d-flex gap-3">
-                    <label class="d-flex align-center gap-2">
-                        <input type="radio" name="filtro" value="todos" checked onchange="cargarProductos()">
-                        <span>Todos los productos</span>
-                    </label>
-                    <label class="d-flex align-center gap-2">
-                        <input type="radio" name="filtro" value="disponibles" onchange="cargarProductos()">
-                        <span>Solo disponibles</span>
-                    </label>
-                    <label class="d-flex align-center gap-2">
-                        <input type="radio" name="filtro" value="no_disponibles" onchange="cargarProductos()">
-                        <span>Solo no disponibles</span>
-                    </label>
-                </div>
-            </div>
-        </div>
-
         <!-- Productos -->
         <div class="card">
             <div class="card-header">
@@ -144,27 +121,37 @@
     var productos = [];
     var currentEditId = null;
 
-    function getFiltro() {
-        var radios = document.getElementsByName('filtro');
-        for (var i = 0; i < radios.length; i++) {
-            if (radios[i].checked) {
-                return radios[i].value;
+    // Función para verificar autenticación sin redirigir automáticamente
+    async function verificarSesion() {
+        try {
+            var response = await fetch('/api/usuario/perfil', { credentials: 'include' });
+            if (!response.ok) {
+                console.error('Sesión no válida, status:', response.status);
+                return false;
             }
+            return true;
+        } catch (error) {
+            console.error('Error verificando sesión:', error);
+            return false;
         }
-        return 'todos';
     }
 
     async function cargarProductos() {
-        if (typeof showLoader === 'function') showLoader();
+        console.log('Cargando productos...');
+        var container = document.getElementById('productosContainer');
+        container.innerHTML = '<div class="loading">Cargando productos...</div>';
+        
         try {
-            console.log('Cargando productos para tenant:', tenantId);
             var response = await fetch('/api/tenant/' + tenantId + '/menu', { 
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
             });
             
-            if (response.status === 401) {
-                window.location.href = '/';
+            console.log('Response status:', response.status);
+            
+            if (response.status === 401 || response.status === 403) {
+                console.error('Error de autenticación:', response.status);
+                container.innerHTML = '<div class="alert alert-error">❌ Sesión expirada. <a href="/">Inicia sesión nuevamente</a></div>';
                 return;
             }
             
@@ -172,26 +159,12 @@
                 throw new Error('Error ' + response.status);
             }
             
-            var todosProductos = await response.json();
-            var filtro = getFiltro();
-            
-            // Aplicar filtro
-            if (filtro === 'disponibles') {
-                productos = todosProductos.filter(function(p) { return p.disponible === true; });
-            } else if (filtro === 'no_disponibles') {
-                productos = todosProductos.filter(function(p) { return p.disponible === false; });
-            } else {
-                productos = todosProductos;
-            }
-            
+            productos = await response.json();
             console.log('Productos cargados:', productos.length);
             renderProductos();
         } catch (error) {
-            console.error('Error:', error);
-            document.getElementById('productosContainer').innerHTML = 
-                '<div class="alert alert-error">❌ Error al cargar los productos</div>';
-        } finally {
-            if (typeof hideLoader === 'function') hideLoader();
+            console.error('Error cargando productos:', error);
+            container.innerHTML = '<div class="alert alert-error">❌ Error al cargar los productos: ' + error.message + '</div>';
         }
     }
 
@@ -210,23 +183,16 @@
         var html = '<div class="table-container">' +
             '<table class="productos-table">' +
                 '<thead>' +
-                    '<tr>' +
-                        '<th>Producto</th>' +
-                        '<th>Descripción</th>' +
-                        '<th>Precio</th>' +
-                        '<th>Estado</th>' +
-                        '<th>Disponible</th>' +
-                        '<th>Acciones</th>' +
-                    '</tr>' +
+                    '<tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Acciones</th></tr>' +
                 '</thead>' +
                 '<tbody>';
         
         for (var i = 0; i < productos.length; i++) {
             var p = productos[i];
             var isAvailable = p.disponible === true;
-            var rowClass = isAvailable ? '' : 'producto-no-disponible';
+            var rowStyle = isAvailable ? '' : 'style="opacity:0.6; background-color:#f9f9f9;"';
             
-            html += '<tr id="row-' + p.id + '" class="' + rowClass + '">' +
+            html += '<tr id="row-' + p.id + '" ' + rowStyle + '>' +
                 '<td><strong>' + escapeHtml(p.nombre) + '</strong></td>' +
                 '<td>' + escapeHtml(p.descripcion || '-') + '</td>' +
                 '<td>$' + (p.precio || 0).toLocaleString() + '</td>' +
@@ -236,27 +202,17 @@
                     '</span>' +
                 '</td>' +
                 '<td>' +
-                    '<div class="toggle-switch ' + (isAvailable ? 'active' : '') + '" ' +
-                         'onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ')"></div>' +
-                '</td>' +
-                '<td>' +
-                    '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')">✏️</button>' +
-                    '<button class="btn btn-sm btn-danger" onclick="eliminarProducto(\'' + p.id + '\')">🗑️</button>' +
+                    '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')">✏️ Editar</button>' +
+                    '<button class="btn btn-sm btn-danger" onclick="eliminarProducto(\'' + p.id + '\')" style="margin-left:8px;">🗑️ Eliminar</button>' +
+                    '<button class="btn btn-sm ' + (isAvailable ? 'btn-warning' : 'btn-success') + '" onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ')" style="margin-left:8px;">' +
+                        (isAvailable ? '🔴 Deshabilitar' : '🟢 Habilitar') +
+                    '</button>' +
                 '</td>' +
             '</tr>';
         }
         
         html += '</tbody></table></div>';
         container.innerHTML = html;
-        
-        // Aplicar estilos a productos no disponibles
-        var style = document.getElementById('producto-style');
-        if (!style) {
-            style = document.createElement('style');
-            style.id = 'producto-style';
-            style.textContent = '.producto-no-disponible { opacity: 0.6; background-color: #f9f9f9; } .producto-no-disponible:hover { opacity: 0.8; }';
-            document.head.appendChild(style);
-        }
     }
 
     async function cargarConfig() {
@@ -275,7 +231,7 @@
         var usarIA = document.getElementById('usarIA').checked;
         var btn = event.target;
         btn.disabled = true;
-        if (typeof showLoader === 'function') showLoader();
+        btn.textContent = 'Guardando...';
         
         try {
             var response = await fetch('/api/tenant/' + tenantId + '/config/ia', {
@@ -286,15 +242,16 @@
             });
             
             if (response.ok) {
-                if (typeof showAlert === 'function') showAlert('✅ Configuración guardada', 'success');
+                showAlertLocal('✅ Configuración guardada', 'success');
             } else {
-                if (typeof showAlert === 'function') showAlert('Error al guardar configuración', 'error');
+                showAlertLocal('Error al guardar configuración', 'error');
             }
         } catch (error) {
-            if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
+            console.error('Error:', error);
+            showAlertLocal('Error de conexión', 'error');
         } finally {
             btn.disabled = false;
-            if (typeof hideLoader === 'function') hideLoader();
+            btn.textContent = '💾 Guardar Configuración';
         }
     }
 
@@ -337,7 +294,6 @@
     async function eliminarProducto(productId) {
         if (!confirm('¿Estás seguro de eliminar este producto?')) return;
         
-        if (typeof showLoader === 'function') showLoader();
         try {
             var response = await fetch('/admin/delete_product/' + tenantId + '/' + productId, { 
                 method: 'DELETE',
@@ -345,20 +301,21 @@
             });
             
             if (response.ok) {
-                if (typeof showAlert === 'function') showAlert('✅ Producto eliminado', 'success');
+                showAlertLocal('✅ Producto eliminado', 'success');
                 cargarProductos();
             } else {
-                if (typeof showAlert === 'function') showAlert('Error al eliminar el producto', 'error');
+                var error = await response.text();
+                showAlertLocal('Error al eliminar: ' + error, 'error');
             }
         } catch (error) {
-            if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
-        } finally {
-            if (typeof hideLoader === 'function') hideLoader();
+            console.error('Error:', error);
+            showAlertLocal('Error de conexión', 'error');
         }
     }
 
     async function toggleProducto(productId, nuevoEstado) {
-        if (typeof showLoader === 'function') showLoader();
+        console.log('Toggle producto:', productId, 'nuevo estado:', nuevoEstado);
+        
         try {
             var response = await fetch('/admin/toggle_product/' + tenantId + '/' + productId, {
                 method: 'PUT',
@@ -367,16 +324,31 @@
                 credentials: 'include'
             });
             
+            console.log('Toggle response status:', response.status);
+            
             if (response.ok) {
-                cargarProductos();
+                showAlertLocal(nuevoEstado ? '✅ Producto habilitado' : '⚠️ Producto deshabilitado', 'success');
+                cargarProductos(); // Recargar la lista
             } else {
-                if (typeof showAlert === 'function') showAlert('Error al cambiar estado', 'error');
+                var error = await response.text();
+                console.error('Error en toggle:', error);
+                showAlertLocal('Error al cambiar estado: ' + response.status, 'error');
             }
         } catch (error) {
-            if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
-        } finally {
-            if (typeof hideLoader === 'function') hideLoader();
+            console.error('Error en toggle:', error);
+            showAlertLocal('Error de conexión', 'error');
         }
+    }
+
+    function showAlertLocal(message, type) {
+        var container = document.getElementById('alertContainer');
+        if (!container) return;
+        
+        var alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-' + type;
+        alertDiv.innerHTML = message + '<button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.25rem;" onclick="this.parentElement.remove()">×</button>';
+        container.appendChild(alertDiv);
+        setTimeout(function() { if(alertDiv.parentElement) alertDiv.remove(); }, 5000);
     }
 
     function escapeHtml(text) {
@@ -386,6 +358,7 @@
         return div.innerHTML;
     }
 
+    // Formulario producto
     document.getElementById('formProducto').addEventListener('submit', async function(e) {
         e.preventDefault();
         
@@ -399,37 +372,39 @@
         
         var submitBtn = e.target.querySelector('button[type="submit"]');
         submitBtn.disabled = true;
-        if (typeof showLoader === 'function') showLoader();
+        submitBtn.textContent = 'Guardando...';
         
         try {
-            var url, options;
+            var url, method;
             if (currentEditId) {
                 url = '/admin/update_product/' + tenantId + '/' + currentEditId;
-                options = { method: 'PUT', body: JSON.stringify(producto) };
+                method = 'PUT';
             } else {
                 url = '/admin/add_product/' + tenantId;
-                options = { method: 'POST', body: JSON.stringify(producto) };
+                method = 'POST';
             }
             
             var response = await fetch(url, {
-                method: options.method,
+                method: method,
                 headers: { 'Content-Type': 'application/json' },
-                body: options.body,
+                body: JSON.stringify(producto),
                 credentials: 'include'
             });
             
             if (response.ok) {
-                if (typeof showAlert === 'function') showAlert(currentEditId ? '✅ Producto actualizado' : '✅ Producto agregado', 'success');
+                showAlertLocal(currentEditId ? '✅ Producto actualizado' : '✅ Producto agregado', 'success');
                 cerrarModalProducto();
                 cargarProductos();
             } else {
-                if (typeof showAlert === 'function') showAlert('Error al guardar el producto', 'error');
+                var error = await response.text();
+                showAlertLocal('Error al guardar: ' + error, 'error');
             }
         } catch (error) {
-            if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
+            console.error('Error:', error);
+            showAlertLocal('Error de conexión', 'error');
         } finally {
             submitBtn.disabled = false;
-            if (typeof hideLoader === 'function') hideLoader();
+            submitBtn.textContent = 'Guardar';
         }
     });
 
@@ -448,52 +423,53 @@
 </script>
 
 <style>
-    .producto-no-disponible {
-        opacity: 0.6;
-        background-color: #f9f9f9;
+    .btn-warning {
+        background: #f59e0b;
+        color: white;
     }
-    .producto-no-disponible:hover {
-        opacity: 0.8;
+    .btn-warning:hover {
+        background: #d97706;
     }
-    .toggle-switch {
-        width: 44px;
-        height: 24px;
-        background: #ccc;
-        border-radius: 24px;
-        position: relative;
-        cursor: pointer;
-        transition: background 0.3s;
+    .btn-success {
+        background: #10b981;
+        color: white;
     }
-    .toggle-switch.active {
-        background: #25D366;
-    }
-    .toggle-switch::after {
-        content: '';
-        position: absolute;
-        width: 20px;
-        height: 20px;
-        background: white;
-        border-radius: 50%;
-        top: 2px;
-        left: 2px;
-        transition: left 0.3s;
-    }
-    .toggle-switch.active::after {
-        left: 22px;
+    .btn-success:hover {
+        background: #059669;
     }
     .badge-success {
         background: #d1fae5;
         color: #065f46;
-        padding: 4px 8px;
+        padding: 4px 12px;
         border-radius: 20px;
         font-size: 0.75rem;
     }
     .badge-warning {
         background: #fed7aa;
         color: #92400e;
-        padding: 4px 8px;
+        padding: 4px 12px;
         border-radius: 20px;
         font-size: 0.75rem;
+    }
+    .alert-success {
+        background: #d1fae5;
+        color: #065f46;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .alert-error {
+        background: #fee2e2;
+        color: #991b1b;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
 </style>
 {% endblock %}
