@@ -4,15 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}WhatsApp Bot SaaS{% endblock %}</title>
-    <link rel="icon" type="image/png" href="/static/favicon.png">
-    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- CSS Principal -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    <!-- Loader -->
     <div id="loaderOverlay" class="loader-overlay">
         <div class="loader"></div>
     </div>
 
+    <!-- Navbar (opcional, se puede ocultar) -->
     {% if not hide_navbar %}
     <nav class="navbar">
         <div class="navbar-container">
@@ -35,26 +37,38 @@
     </nav>
     {% endif %}
 
+    <!-- Alertas -->
     <div id="alertContainer" class="container mt-3"></div>
 
-    {% block content %}{% endblock %}
+    <!-- Contenido principal -->
+    <main>
+        {% block content %}{% endblock %}
+    </main>
 
+    <!-- Footer -->
     <footer class="footer">
-        <p>¿Tienes preguntas? <a href="mailto:soporte@whatsappbotsaas.com">soporte@whatsappbotsaas.com</a></p>
-        <p style="margin-top: 1rem;">© 2024 WhatsApp Bot SaaS - Todos los derechos reservados</p>
+        <div class="container">
+            <p>¿Tienes preguntas? <a href="mailto:soporte@whatsappbotsaas.com">soporte@whatsappbotsaas.com</a></p>
+            <p style="margin-top: 1rem;">© 2024 WhatsApp Bot SaaS - Todos los derechos reservados</p>
+        </div>
     </footer>
 
+    <!-- Scripts Globales -->
     <script>
         function showLoader() {
-            document.getElementById('loaderOverlay').classList.add('active');
+            const loader = document.getElementById('loaderOverlay');
+            if (loader) loader.classList.add('active');
         }
         
         function hideLoader() {
-            document.getElementById('loaderOverlay').classList.remove('active');
+            const loader = document.getElementById('loaderOverlay');
+            if (loader) loader.classList.remove('active');
         }
         
         function showAlert(message, type = 'info') {
             const container = document.getElementById('alertContainer');
+            if (!container) return;
+            
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert alert-${type}`;
             alertDiv.innerHTML = `
@@ -67,10 +81,15 @@
         
         async function cerrarSesion() {
             showLoader();
-            await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-            window.location.href = '/';
+            try {
+                await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+                window.location.href = '/';
+            } catch (error) {
+                window.location.href = '/';
+            }
         }
         
+        // Funciones globales
         window.showLoader = showLoader;
         window.hideLoader = hideLoader;
         window.showAlert = showAlert;

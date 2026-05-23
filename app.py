@@ -20,7 +20,10 @@ from functools import wraps
 setup_logging()
 
 # Al inicio de app.py
-app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
+app = Flask(__name__, 
+            template_folder='web/templates',
+            static_folder='web/static',
+            static_url_path='/static')
 
 # Configuración de sesión
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -981,6 +984,8 @@ def get_pedidos_tenant(tenant_id):
 def debug_test():
     return jsonify({'status': 'ok', 'message': 'API funcionando correctamente'})
 
+
+
 @app.route('/debug/tesseract', methods=['GET'])
 def test_tesseract():
     import subprocess
@@ -1315,6 +1320,27 @@ def migrar_todos_tenants():
         except Exception as e:
             resultados.append({'tenant': tenant_id, 'status': 'error', 'error': str(e)})
     return jsonify({'resultados': resultados, 'total': len(tenants)})
+
+# En app.py, agrega:
+@app.route('/test-css')
+def test_css():
+    return '''
+    <html>
+        <head>
+            <link rel="stylesheet" href="/static/css/style.css">
+        </head>
+        <body>
+            <div class="navbar">
+                <div>Test</div>
+            </div>
+            <div class="card">
+                <p>Si ves esto con estilos, el CSS funciona</p>
+            </div>
+            <button class="btn">Botón de prueba</button>
+        </body>
+    </html>
+    '''
+
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
