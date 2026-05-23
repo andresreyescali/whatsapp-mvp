@@ -532,6 +532,7 @@ def admin_menu():
 @tenant_owner_required_from_args
 def train_ia_page():
     return render_template('train.html')
+
 # ==================== PRODUCTOS (CRUD) ====================
 
 @app.route('/api/tenant/<tenant_id>/menu', methods=['GET'])

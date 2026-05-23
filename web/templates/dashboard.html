@@ -1,61 +1,52 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Dashboard - WhatsApp Bot SaaS</title>
-    <link rel="stylesheet" href="/static/css/main.css">
-    <style>
-        .negocios-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 1.5rem;
-        }
-        .badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 500;
-        }
-        .badge-success {
-            background: #d4edda;
-            color: #155724;
-        }
-        .badge-warning {
-            background: #fff3cd;
-            color: #856404;
-        }
-    </style>
-</head>
-<body>
-    <!-- Navbar -->
-    <nav class="navbar">
-        <div class="navbar-brand">
-            🤖 WhatsApp Bot SaaS
-            <span>Beta</span>
-        </div>
-        <div class="navbar-menu">
-            <a href="/dashboard">Dashboard</a>
-            <div id="userInfo" class="user-info"></div>
-        </div>
-    </nav>
+{% extends "base.html" %}
 
-    <div class="container">
-        <div id="alertContainer"></div>
+{% block title %}Dashboard - WhatsApp Bot SaaS{% endblock %}
 
-        <!-- Stats -->
+{% block content %}
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-menu">
+            <div class="sidebar-item">
+                <a href="/dashboard" class="sidebar-link active">
+                    <span class="icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="#" class="sidebar-link" id="firstBusinessLink" style="display: none;">
+                    <span class="icon">🍽️</span>
+                    <span>Mi Negocio</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="#" class="sidebar-link" id="menuLink" style="display: none;">
+                    <span class="icon">📋</span>
+                    <span>Gestión de Menú</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="#" class="sidebar-link" id="trainLink" style="display: none;">
+                    <span class="icon">🤖</span>
+                    <span>Entrenar IA</span>
+                </a>
+            </div>
+        </div>
+    </aside>
+
+    <main class="main-content">
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="number" id="totalNegocios">0</div>
-                <div class="label">Negocios</div>
+                <div class="stat-icon">🏪</div>
+                <div class="stat-value" id="totalNegocios">0</div>
+                <div class="stat-label">Negocios</div>
             </div>
             <div class="stat-card">
-                <div class="number" id="verificados">0</div>
-                <div class="label">Verificados</div>
+                <div class="stat-icon">✅</div>
+                <div class="stat-value" id="verificados">0</div>
+                <div class="stat-label">Verificados</div>
             </div>
         </div>
 
-        <!-- Header -->
         <div class="d-flex justify-between align-center mb-4">
             <h2>Mis Negocios</h2>
             <button class="btn btn-primary" onclick="abrirModalCrear()">
@@ -63,55 +54,225 @@
             </button>
         </div>
 
-        <!-- Negocios Container -->
-        <div id="negociosContainer"></div>
-    </div>
-
-    <!-- Modal Crear Negocio -->
-    <div id="modalCrear" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Registrar Nuevo Negocio</h3>
-                <button class="modal-close" onclick="cerrarModalCrear()">&times;</button>
-            </div>
-            <form id="formCrearNegocio">
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label class="form-label">Nombre del negocio *</label>
-                        <input type="text" id="nombreNegocio" class="form-control" required placeholder="Ej: Mi Pastelería">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Teléfono de WhatsApp (phone_id) *</label>
-                        <input type="text" id="phoneId" class="form-control" required placeholder="Ej: 123456789012345">
-                        <small class="text-muted">El número de teléfono asociado a tu cuenta de WhatsApp Business</small>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Token de WhatsApp *</label>
-                        <input type="text" id="token" class="form-control" required placeholder="Token de Meta">
-                        <small class="text-muted">El token de acceso permanente de tu aplicación de Meta</small>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Tipo de negocio</label>
-                        <select id="tipoNegocio" class="form-control">
-                            <option value="restaurante">🍽️ Restaurante</option>
-                            <option value="pasteleria">🍰 Pastelería</option>
-                            <option value="panaderia">🥖 Panadería</option>
-                            <option value="inmobiliaria">🏠 Inmobiliaria</option>
-                            <option value="venta_autos">🚗 Venta de Autos</option>
-                            <option value="venta_motos">🏍️ Venta de Motos</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline" onclick="cerrarModalCrear()">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Registrar</button>
-                </div>
-            </form>
+        <div id="negociosContainer" class="grid grid-cols-2">
+            <div class="loading">Cargando negocios...</div>
         </div>
-    </div>
+    </main>
+</div>
 
-    <script type="module">
-        import './static/js/dashboard.js';
-    </script>
-</body>
-</html>
+<!-- Modal Crear Negocio -->
+<div id="modalCrear" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Registrar Nuevo Negocio</h3>
+            <button class="modal-close" onclick="cerrarModalCrear()">&times;</button>
+        </div>
+        <form id="formCrearNegocio">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Nombre del negocio *</label>
+                    <input type="text" id="nombreNegocio" class="form-control" required placeholder="Ej: Mi Pastelería">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Teléfono de WhatsApp (phone_id) *</label>
+                    <input type="text" id="phoneId" class="form-control" required placeholder="Ej: 123456789012345">
+                    <small class="text-muted">El número de teléfono asociado a tu cuenta de WhatsApp Business</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Token de WhatsApp *</label>
+                    <input type="text" id="token" class="form-control" required placeholder="Token de Meta">
+                    <small class="text-muted">El token de acceso permanente de tu aplicación de Meta</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Tipo de negocio</label>
+                    <select id="tipoNegocio" class="form-control">
+                        <option value="restaurante">🍽️ Restaurante</option>
+                        <option value="pasteleria">🍰 Pastelería</option>
+                        <option value="panaderia">🥖 Panadería</option>
+                        <option value="inmobiliaria">🏠 Inmobiliaria</option>
+                        <option value="venta_autos">🚗 Venta de Autos</option>
+                        <option value="venta_motos">🏍️ Venta de Motos</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="cerrarModalCrear()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Registrar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    let negocios = [];
+
+    async function cargarNegocios() {
+        showLoader();
+        try {
+            const response = await fetch('/api/negocios/usuario', { credentials: 'include' });
+            if (response.ok) {
+                negocios = await response.json();
+                renderNegocios();
+                actualizarStats();
+                actualizarSidebar();
+            }
+        } catch (error) {
+            showAlert('Error al cargar negocios', 'error');
+        } finally {
+            hideLoader();
+        }
+    }
+
+    function renderNegocios() {
+        const container = document.getElementById('negociosContainer');
+        
+        if (!negocios.length) {
+            container.innerHTML = `
+                <div class="card text-center" style="grid-column: 1/-1;">
+                    <div class="card-body">
+                        <p>📭 No tienes negocios registrados.</p>
+                        <button class="btn btn-primary" onclick="abrirModalCrear()">+ Crear mi primer negocio</button>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = negocios.map(negocio => `
+            <div class="card fade-in">
+                <div class="card-header">
+                    <h3 class="card-title">${escapeHtml(negocio.nombre)}</h3>
+                    <span class="badge ${negocio.verificado ? 'badge-success' : 'badge-warning'}">
+                        ${negocio.verificado ? '✅ Verificado' : '⚠️ Pendiente'}
+                    </span>
+                </div>
+                <div class="card-body">
+                    <p><strong>📞 Teléfono:</strong> ${negocio.phone_id || 'No configurado'}</p>
+                    <div class="d-flex gap-2 mt-4">
+                        <a href="/admin/menu?tenant_id=${negocio.id}" class="btn btn-sm btn-primary">📋 Gestionar Menú</a>
+                        <a href="/panel/${negocio.id}" class="btn btn-sm btn-outline">📊 Panel</a>
+                        ${!negocio.verificado ? `
+                            <button class="btn btn-sm btn-secondary" onclick="verificarNegocio('${negocio.id}')">🔐 Verificar</button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function actualizarStats() {
+        document.getElementById('totalNegocios').innerText = negocios.length;
+        document.getElementById('verificados').innerText = negocios.filter(n => n.verificado).length;
+    }
+
+    function actualizarSidebar() {
+        if (negocios.length > 0) {
+            const primerNegocio = negocios[0];
+            const businessLink = document.getElementById('firstBusinessLink');
+            const menuLink = document.getElementById('menuLink');
+            const trainLink = document.getElementById('trainLink');
+            
+            if (businessLink) {
+                businessLink.href = `/panel/${primerNegocio.id}`;
+                businessLink.style.display = 'flex';
+            }
+            if (menuLink) {
+                menuLink.href = `/admin/menu?tenant_id=${primerNegocio.id}`;
+                menuLink.style.display = 'flex';
+            }
+            if (trainLink) {
+                trainLink.href = `/admin/train?tenant_id=${primerNegocio.id}`;
+                trainLink.style.display = 'flex';
+            }
+        }
+    }
+
+    function abrirModalCrear() {
+        document.getElementById('modalCrear').classList.add('active');
+    }
+
+    function cerrarModalCrear() {
+        document.getElementById('modalCrear').classList.remove('active');
+        document.getElementById('formCrearNegocio').reset();
+    }
+
+    async function verificarNegocio(tenantId) {
+        const codigo = prompt('Ingresa el código de verificación que recibiste por email:');
+        if (!codigo) return;
+        
+        showLoader();
+        try {
+            const response = await fetch('/api/negocio/verificar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tenant_id: tenantId, codigo }),
+                credentials: 'include'
+            });
+            const result = await response.json();
+            if (result.success) {
+                showAlert('✅ Negocio verificado exitosamente', 'success');
+                cargarNegocios();
+            } else {
+                showAlert(result.error || 'Código incorrecto', 'error');
+            }
+        } catch (error) {
+            showAlert('Error al verificar', 'error');
+        } finally {
+            hideLoader();
+        }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    document.getElementById('formCrearNegocio').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const data = {
+            nombre: document.getElementById('nombreNegocio').value,
+            phone_id: document.getElementById('phoneId').value,
+            token: document.getElementById('token').value,
+            tipo_negocio: document.getElementById('tipoNegocio').value
+        };
+        
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Registrando...';
+        showLoader();
+        
+        try {
+            const response = await fetch('/api/negocio/registrar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+                credentials: 'include'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                showAlert('✅ Negocio creado exitosamente. Revisa tu email para el código de verificación.', 'success');
+                cerrarModalCrear();
+                cargarNegocios();
+            } else {
+                showAlert(result.error || 'Error al crear el negocio', 'error');
+            }
+        } catch (error) {
+            showAlert('Error de conexión', 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Registrar';
+            hideLoader();
+        }
+    });
+
+    window.abrirModalCrear = abrirModalCrear;
+    window.cerrarModalCrear = cerrarModalCrear;
+    window.verificarNegocio = verificarNegocio;
+
+    cargarNegocios();
+</script>
+{% endblock %}

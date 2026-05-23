@@ -144,7 +144,7 @@ def tenant_required(f):
 
 @app.route('/')
 def landing():
-    return render_template('landing.html')
+    return render_template('index.html')
 
 @app.route('/terminos')
 def terminos():
@@ -345,11 +345,8 @@ def update_perfil():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    if session['usuario_id'] == 'super_admin':
-        return redirect('/')
-    usuario = {'id': session['usuario_id'], 'email': session['email'], 'nombre': session.get('nombre')}
-    negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
-    return render_template('dashboard_usuario.html', usuario=usuario, negocios=negocios)
+    return render_template('dashboard.html')
+ 
 
 # ==================== NEGOCIOS (TENANTS) ====================
 
@@ -528,12 +525,13 @@ def registro_web():
 @login_required
 @tenant_owner_required_from_args
 def admin_menu():
-    tenant_id = request.args.get('tenant_id')
-    tenant = tenant_repo.find_by_id(tenant_id)
-    if not tenant:
-        return f"Tenant no encontrado: {tenant_id}", 404
-    return render_template('menu.html', tenant=tenant)
+    return render_template('menu.html')
 
+@app.route('/admin/train', methods=['GET'])
+@login_required
+@tenant_owner_required_from_args
+def train_ia_page():
+    return render_template('train.html')
 # ==================== PRODUCTOS (CRUD) ====================
 
 @app.route('/api/tenant/<tenant_id>/menu', methods=['GET'])
