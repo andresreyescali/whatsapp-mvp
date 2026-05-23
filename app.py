@@ -572,13 +572,29 @@ def registro_web():
 @login_required
 @tenant_owner_required_from_args
 def admin_menu():
-    return render_template('menu.html')
+    tenant_id = request.args.get('tenant_id')
+    if not tenant_id:
+        return redirect('/dashboard')
+    
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if not tenant:
+        return redirect('/dashboard')
+    
+    return render_template('menu.html', tenant=tenant)
 
 @app.route('/admin/train', methods=['GET'])
 @login_required
 @tenant_owner_required_from_args
 def train_ia_page():
-    return render_template('train.html')
+    tenant_id = request.args.get('tenant_id')
+    if not tenant_id:
+        return redirect('/dashboard')
+    
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if not tenant:
+        return redirect('/dashboard')
+    
+    return render_template('train.html', tenant_id=tenant_id)
 
 # ==================== PRODUCTOS (CRUD) ====================
 
