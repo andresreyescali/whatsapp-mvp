@@ -30,8 +30,8 @@
                 {% else %}
                 <div class="nav-buttons">
                     <button class="nav-btn" onclick="window.location.href='/'">Inicio</button>
-                    <button class="nav-btn" onclick="scrollToAuth('login')">Iniciar Sesión</button>
-                    <button class="nav-btn" onclick="scrollToAuth('register')">Registrarse</button>
+                    <button class="nav-btn" onclick="irAFormulario('login')">Iniciar Sesión</button>
+                    <button class="nav-btn" onclick="irAFormulario('register')">Registrarse</button>
                 </div>
                 {% endif %}
             </div>
@@ -87,21 +87,41 @@
             }
         }
         
-        function scrollToAuth(tipo) {
-            // Esta función se define en index.html cuando existe
-            if (typeof window.scrollToAuthGlobal === 'function') {
-                window.scrollToAuthGlobal(tipo);
+        function irAFormulario(tipo) {
+            // Si estamos en landing page, hacer scroll al formulario
+            if (window.location.pathname === '/') {
+                if (typeof window.scrollToAuthForm === 'function') {
+                    window.scrollToAuthForm(tipo);
+                } else {
+                    // Si la función no está disponible, recargar y luego ir
+                    window.location.href = '/#' + tipo;
+                }
             } else {
-                // Si no está en landing page, ir a home
-                window.location.href = '/';
+                // Si no estamos en landing page, ir a ella
+                window.location.href = '/#' + tipo;
             }
+        }
+        
+        // Al cargar la página, si hay un hash, scrollear al formulario
+        if (window.location.hash === '#login') {
+            setTimeout(function() {
+                if (typeof window.scrollToAuthForm === 'function') {
+                    window.scrollToAuthForm('login');
+                }
+            }, 500);
+        } else if (window.location.hash === '#register') {
+            setTimeout(function() {
+                if (typeof window.scrollToAuthForm === 'function') {
+                    window.scrollToAuthForm('register');
+                }
+            }, 500);
         }
         
         window.showLoader = showLoader;
         window.hideLoader = hideLoader;
         window.showAlert = showAlert;
         window.cerrarSesion = cerrarSesion;
-        window.scrollToAuth = scrollToAuth;
+        window.irAFormulario = irAFormulario;
     </script>
     {% block extra_js %}{% endblock %}
 </body>

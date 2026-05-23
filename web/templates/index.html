@@ -12,14 +12,16 @@
         border-radius: 0 0 2rem 2rem;
         margin-bottom: 2rem;
     }
-    .hero h1 { font-size: 3rem; margin-bottom: 1rem; color: white; }
-    .hero p { font-size: 1.25rem; max-width: 600px; margin: 0 auto; opacity: 0.9; }
-    .hero-buttons {
-        display: flex;
-        gap: 1rem;
-        justify-content: center;
-        margin-top: 2rem;
-        flex-wrap: wrap;
+    .hero h1 { 
+        font-size: 3rem; 
+        margin-bottom: 1rem; 
+        color: white; 
+    }
+    .hero p { 
+        font-size: 1.25rem; 
+        max-width: 600px; 
+        margin: 0 auto; 
+        opacity: 0.9; 
     }
     .features-grid {
         display: grid;
@@ -95,54 +97,6 @@
         margin-top: 0.25rem;
         display: block;
     }
-    .nav-buttons {
-        display: flex;
-        gap: 1rem;
-        align-items: center;
-    }
-    .nav-btn {
-        background: transparent;
-        border: 1px solid rgba(255,255,255,0.3);
-        color: white;
-        padding: 0.5rem 1rem;
-        border-radius: 0.5rem;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .nav-btn:hover {
-        background: rgba(255,255,255,0.1);
-        border-color: white;
-    }
-    .btn-hero-primary {
-        background: white;
-        color: #075E54;
-        border: none;
-        padding: 0.75rem 1.5rem;
-        font-size: 1rem;
-        font-weight: 600;
-        border-radius: 0.5rem;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .btn-hero-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-    }
-    .btn-hero-secondary {
-        background: transparent;
-        border: 2px solid white;
-        color: white;
-        padding: 0.75rem 1.5rem;
-        font-size: 1rem;
-        font-weight: 600;
-        border-radius: 0.5rem;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .btn-hero-secondary:hover {
-        background: rgba(255,255,255,0.1);
-        transform: translateY(-2px);
-    }
 </style>
 {% endblock %}
 
@@ -152,10 +106,6 @@
 <div class="hero">
     <h1>🤖 Automatiza tus ventas por WhatsApp</h1>
     <p>IA que atiende a tus clientes, toma pedidos y los registra automáticamente</p>
-    <div class="hero-buttons">
-        <button class="btn-hero-primary" onclick="scrollToAuth('login')">Iniciar Sesión</button>
-        <button class="btn-hero-secondary" onclick="scrollToAuth('register')">Registrarse Gratis</button>
-    </div>
 </div>
 
 <div class="features-grid">
@@ -240,28 +190,29 @@
 </div>
 
 <script>
-    function scrollToAuth(tipo) {
+    // Función global para que la navbar pueda llamarla
+    window.scrollToAuthForm = function(tipo) {
         const authSection = document.getElementById('auth-section');
-        authSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        
-        // Pequeño delay para asegurar que el scroll termine antes de cambiar el formulario
-        setTimeout(function() {
-            if (tipo === 'login') {
-                mostrarFormulario('login');
-            } else {
-                mostrarFormulario('register');
-            }
-            // Resaltar el formulario
-            const form = document.getElementById(tipo === 'login' ? 'loginForm' : 'registerForm');
-            if (form) {
-                form.style.transition = 'all 0.3s';
-                form.style.boxShadow = '0 0 0 3px #075E54, 0 10px 25px -5px rgba(0,0,0,0.1)';
-                setTimeout(function() {
-                    form.style.boxShadow = '';
-                }, 1000);
-            }
-        }, 500);
-    }
+        if (authSection) {
+            authSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setTimeout(function() {
+                if (tipo === 'login') {
+                    mostrarFormulario('login');
+                } else {
+                    mostrarFormulario('register');
+                }
+                // Resaltar el formulario
+                const form = document.getElementById(tipo === 'login' ? 'loginForm' : 'registerForm');
+                if (form) {
+                    form.style.transition = 'all 0.3s';
+                    form.style.boxShadow = '0 0 0 3px #075E54, 0 10px 25px -5px rgba(0,0,0,0.1)';
+                    setTimeout(function() {
+                        form.style.boxShadow = '';
+                    }, 1000);
+                }
+            }, 500);
+        }
+    };
 
     function mostrarFormulario(tipo) {
         const loginForm = document.getElementById('loginForm');
@@ -290,17 +241,13 @@
     // Formatear teléfono (agregar +57 si es necesario)
     function formatearTelefono(telefono) {
         if (!telefono) return '';
-        // Limpiar caracteres no numéricos
         let limpio = telefono.replace(/[^0-9]/g, '');
-        // Si tiene 10 dígitos y empieza con 3, agregar +57
         if (limpio.length === 10 && limpio.startsWith('3')) {
             return '+57' + limpio;
         }
-        // Si ya tiene código de país 57 pero sin +
         if (limpio.length === 12 && limpio.startsWith('57')) {
             return '+' + limpio;
         }
-        // Si ya tiene + al inicio
         if (telefono.startsWith('+')) {
             return telefono;
         }
@@ -340,18 +287,15 @@
     document.getElementById('formRegister').addEventListener('submit', async (e) => {
         e.preventDefault();
         
-        // Limpiar errores previos
         document.getElementById('emailError').innerText = '';
         document.getElementById('passwordError').innerText = '';
         
-        // Validar email
         const email = document.getElementById('registerEmail').value;
         if (!validarEmail(email)) {
-            document.getElementById('emailError').innerText = 'Ingresa un correo electrónico válido (ej: nombre@dominio.com)';
+            document.getElementById('emailError').innerText = 'Ingresa un correo electrónico válido';
             return;
         }
         
-        // Validar contraseñas
         const password = document.getElementById('registerPassword').value;
         const confirmPassword = document.getElementById('registerConfirmPassword').value;
         
@@ -365,7 +309,6 @@
             return;
         }
         
-        // Formatear teléfono
         let telefono = document.getElementById('registerTelefono').value;
         telefono = formatearTelefono(telefono);
         
@@ -386,11 +329,10 @@
             const result = await response.json();
             
             if (result.success) {
-                showAlert('✅ Cuenta creada exitosamente. Ahora puedes iniciar sesión.', 'success');
+                showAlert('✅ Cuenta creada exitosamente', 'success');
                 mostrarFormulario('login');
                 document.getElementById('formRegister').reset();
                 document.getElementById('loginEmail').value = email;
-                // Scroll al formulario de login
                 document.getElementById('auth-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
             } else {
                 showAlert(result.error || 'Error al registrarse', 'error');
@@ -402,7 +344,6 @@
         }
     });
 
-    window.scrollToAuth = scrollToAuth;
     window.mostrarFormulario = mostrarFormulario;
 </script>
 {% endblock %}
