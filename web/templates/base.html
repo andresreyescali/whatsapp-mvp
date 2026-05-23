@@ -8,10 +8,12 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    <!-- Loader -->
     <div id="loaderOverlay" class="loader-overlay">
         <div class="loader"></div>
     </div>
 
+    <!-- Navbar -->
     {% if not hide_navbar %}
     <nav class="navbar">
         <div class="navbar-container">
@@ -23,6 +25,7 @@
             <div class="navbar-menu">
                 {% if session.usuario_id %}
                 <a href="/dashboard">Dashboard</a>
+                <a href="/dashboard" class="mobile-only">Dashboard</a>
                 <div class="user-info">
                     <span>{{ session.nombre or session.email }}</span>
                     <button class="btn btn-sm btn-outline" onclick="cerrarSesion()">Salir</button>
@@ -39,12 +42,15 @@
     </nav>
     {% endif %}
 
+    <!-- Alert Container -->
     <div id="alertContainer" class="container mt-3"></div>
 
+    <!-- Main Content -->
     <main>
         {% block content %}{% endblock %}
     </main>
 
+    <!-- Footer -->
     <footer class="footer">
         <div class="container">
             <p>¿Tienes preguntas? <a href="mailto:soporte@whatsappbotsaas.com">soporte@whatsappbotsaas.com</a></p>
@@ -104,22 +110,47 @@
             background: #f0f0f0;
             transform: translateY(-1px);
         }
+        
+        .mobile-only {
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .mobile-only {
+                display: inline-block;
+            }
+            .navbar-menu a:not(.mobile-only) {
+                display: none;
+            }
+        }
     </style>
 
     <script>
+        // Función para mostrar loader
         function showLoader() {
             const loader = document.getElementById('loaderOverlay');
-            if (loader) loader.classList.add('active');
+            if (loader) {
+                loader.classList.add('active');
+            } else {
+                console.warn('Loader element not found');
+            }
         }
         
+        // Función para ocultar loader
         function hideLoader() {
             const loader = document.getElementById('loaderOverlay');
-            if (loader) loader.classList.remove('active');
+            if (loader) {
+                loader.classList.remove('active');
+            }
         }
         
+        // Función para mostrar alertas
         function showAlert(message, type = 'info') {
             const container = document.getElementById('alertContainer');
-            if (!container) return;
+            if (!container) {
+                console.warn('Alert container not found');
+                return;
+            }
             
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert alert-${type}`;
@@ -131,16 +162,19 @@
             setTimeout(() => alertDiv.remove(), 5000);
         }
         
+        // Función para cerrar sesión
         async function cerrarSesion() {
             showLoader();
             try {
                 await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
                 window.location.href = '/';
             } catch (error) {
+                console.error('Logout error:', error);
                 window.location.href = '/';
             }
         }
         
+        // Función para ir al formulario de auth
         function irAFormulario(tipo) {
             if (window.location.pathname === '/') {
                 if (typeof window.scrollToAuthForm === 'function') {
@@ -153,6 +187,29 @@
             }
         }
         
+        // Verificar autenticación al cargar (para páginas protegidas)
+        async function verificarAutenticacion() {
+            // No verificar en landing page
+            if (window.location.pathname === '/' || window.location.pathname === '/registro') {
+                return true;
+            }
+            
+            try {
+                const response = await fetch('/api/usuario/perfil', { credentials: 'include' });
+                if (!response.ok) {
+                    console.warn('No autenticado, redirigiendo a login');
+                    window.location.href = '/';
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                console.error('Error verificando autenticación:', error);
+                window.location.href = '/';
+                return false;
+            }
+        }
+        
+        // Manejo de hash para scroll a formulario
         if (window.location.hash === '#login') {
             setTimeout(function() {
                 if (typeof window.scrollToAuthForm === 'function') {
@@ -167,12 +224,27 @@
             }, 500);
         }
         
+        // Exponer funciones globalmente
         window.showLoader = showLoader;
         window.hideLoader = hideLoader;
         window.showAlert = showAlert;
         window.cerrarSesion = cerrarSesion;
         window.irAFormulario = irAFormulario;
+        window.verificarAutenticacion = verificarAutenticacion;
+        
+        // Ejecutar verificación al cargar (solo en páginas protegidas)
+        if (window.location.pathname !== '/' && window.location.pathname !== '/registro') {
+            verificarAutenticacion();
+        }
+        
+        console.log('Base.html cargado - Funciones globales disponibles:', {
+            showLoader: typeof showLoader,
+            hideLoader: typeof hideLoader,
+            showAlert: typeof showAlert,
+            cerrarSesion: typeof cerrarSesion
+        });
     </script>
+    
     {% block extra_js %}{% endblock %}
 </body>
 </html>

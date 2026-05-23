@@ -121,22 +121,48 @@
     let productos = [];
     let currentEditId = null;
 
+    // Verificar que las funciones globales existen
+    if (typeof showLoader === 'undefined') {
+        console.error('Funciones globales no cargadas');
+        window.showLoader = function() { console.log('showLoader fallback'); };
+        window.hideLoader = function() { console.log('hideLoader fallback'); };
+        window.showAlert = function(msg, type) { alert(msg); };
+    }
+
     async function cargarProductos() {
-        showLoader();
+        if (typeof showLoader === 'function') showLoader();
         try {
-            const response = await fetch(`/api/tenant/${tenantId}/menu`, { credentials: 'include' });
+            console.log('Cargando productos para tenant:', tenantId);
+            const response = await fetch(`/api/tenant/${tenantId}/menu`, { 
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            console.log('Response status:', response.status);
+            
             if (response.status === 401) {
                 window.location.href = '/';
                 return;
             }
-            if (!response.ok) throw new Error('Error al cargar menú');
+            
+            if (!response.ok) {
+                throw new Error(`Error ${response.status}`);
+            }
+            
             productos = await response.json();
+            console.log('Productos cargados:', productos.length);
             renderProductos();
         } catch (error) {
             console.error('Error:', error);
-            document.getElementById('productosContainer').innerHTML = '<div class="alert alert-error">❌ Error al cargar los productos</div>';
+            document.getElementById('productosContainer').innerHTML = `
+                <div class="alert alert-error">
+                    ❌ Error al cargar los productos: ${error.message}
+                    <br><br>
+                    <button class="btn btn-sm btn-primary" onclick="cargarProductos()">Reintentar</button>
+                </div>
+            `;
         } finally {
-            hideLoader();
+            if (typeof hideLoader === 'function') hideLoader();
         }
     }
 
@@ -148,6 +174,7 @@
                 <div class="text-center p-5">
                     <p>📭 No hay productos en el menú</p>
                     <button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>
+                    <button class="btn btn-outline" onclick="cargarProductos()" style="margin-left: 10px;">🔄 Recargar</button>
                 </div>
             `;
             return;
@@ -162,9 +189,9 @@
                     <tbody>
                         ${productos.map(p => `
                             <tr id="row-${p.id}">
-                                <td><strong>${escapeHtml(p.nombre)}</strong></td>
+                                <td><strong>${escapeHtml(p.nombre)}</strong></strong></td>
                                 <td>${escapeHtml(p.descripcion || '-')}</td>
-                                <td>$${p.precio.toLocaleString()}</td>
+                                <td>$${(p.precio || 0).toLocaleString()}</td>
                                 <td>
                                     <span class="badge ${p.disponible ? 'badge-success' : 'badge-warning'}">
                                         ${p.disponible ? 'Disponible' : 'No disponible'}
@@ -202,7 +229,7 @@
         const usarIA = document.getElementById('usarIA').checked;
         const btn = event.target;
         btn.disabled = true;
-        showLoader();
+        if (typeof showLoader === 'function') showLoader();
         
         try {
             const response = await fetch(`/api/tenant/${tenantId}/config/ia`, {
@@ -213,15 +240,16 @@
             });
             
             if (response.ok) {
-                showAlert('✅ Configuración guardada', 'success');
+                if (typeof showAlert === 'function') showAlert('✅ Configuración guardada', 'success');
             } else {
-                showAlert('Error al guardar configuración', 'error');
+                if (typeof showAlert === 'function') showAlert('Error al guardar configuración', 'error');
             }
         } catch (error) {
-            showAlert('Error de conexión', 'error');
+            console.error('Error:', error);
+            if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
         } finally {
             btn.disabled = false;
-            hideLoader();
+            if (typeof hideLoader === 'function') hideLoader();
         }
     }
 
@@ -260,7 +288,7 @@
     async function eliminarProducto(productId) {
         if (!confirm('¿Estás seguro de eliminar este producto?')) return;
         
-        showLoader();
+        if (typeof showLoader === 'function') showLoader();
         try {
             const response = await fetch(`/admin/delete_product/${tenantId}/${productId}`, { 
                 method: 'DELETE',
@@ -268,20 +296,20 @@
             });
             
             if (response.ok) {
-                showAlert('✅ Producto eliminado', 'success');
+                if (typeof showAlert === 'function') showAlert('✅ Producto eliminado', 'success');
                 cargarProductos();
             } else {
-                showAlert('Error al eliminar el producto', 'error');
+                if (typeof showAlert === 'function') showAlert('Error al eliminar el producto', 'error');
             }
         } catch (error) {
-            showAlert('Error de conexión', 'error');
+            if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
         } finally {
-            hideLoader();
+            if (typeof hideLoader === 'function') hideLoader();
         }
     }
 
     async function toggleProducto(productId, nuevoEstado) {
-        showLoader();
+        if (typeof showLoader === 'function') showLoader();
         try {
             const response = await fetch(`/admin/toggle_product/${tenantId}/${productId}`, {
                 method: 'PUT',
@@ -293,12 +321,12 @@
             if (response.ok) {
                 cargarProductos();
             } else {
-                showAlert('Error al cambiar estado', 'error');
+                if (typeof showAlert === 'function') showAlert('Error al cambiar estado', 'error');
             }
         } catch (error) {
-            showAlert('Error de conexión', 'error');
+            if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
         } finally {
-            hideLoader();
+            if (typeof hideLoader === 'function') hideLoader();
         }
     }
 
@@ -322,7 +350,7 @@
         
         const submitBtn = e.target.querySelector('button[type="submit"]');
         submitBtn.disabled = true;
-        showLoader();
+        if (typeof showLoader === 'function') showLoader();
         
         try {
             let url, options;
@@ -341,27 +369,30 @@
             });
             
             if (response.ok) {
-                showAlert(currentEditId ? '✅ Producto actualizado' : '✅ Producto agregado', 'success');
+                if (typeof showAlert === 'function') showAlert(currentEditId ? '✅ Producto actualizado' : '✅ Producto agregado', 'success');
                 cerrarModalProducto();
                 cargarProductos();
             } else {
-                showAlert('Error al guardar el producto', 'error');
+                if (typeof showAlert === 'function') showAlert('Error al guardar el producto', 'error');
             }
         } catch (error) {
-            showAlert('Error de conexión', 'error');
+            if (typeof showAlert === 'function') showAlert('Error de conexión', 'error');
         } finally {
             submitBtn.disabled = false;
-            hideLoader();
+            if (typeof hideLoader === 'function') hideLoader();
         }
     });
 
+    // Exponer funciones globalmente
     window.abrirModalProducto = abrirModalProducto;
     window.cerrarModalProducto = cerrarModalProducto;
     window.editarProducto = editarProducto;
     window.eliminarProducto = eliminarProducto;
     window.toggleProducto = toggleProducto;
     window.guardarConfig = guardarConfig;
+    window.cargarProductos = cargarProductos;
 
+    // Inicializar
     cargarProductos();
     cargarConfig();
 </script>
