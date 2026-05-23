@@ -237,9 +237,10 @@
                 '<td>' +
                     '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')">✏️ Editar</button>' +
                     '<button class="btn btn-sm btn-danger" onclick="eliminarProducto(\'' + p.id + '\')" style="margin-left:8px;">🗑️ Eliminar</button>' +
-                    '<button class="btn btn-sm ' + (isAvailable ? 'btn-warning' : 'btn-success') + '" onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ')" style="margin-left:8px;">' +
+                    '<button class="btn btn-sm ' + (isAvailable ? 'btn-warning' : 'btn-success') + '" ' +
+                        'onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ', event)">' +
                         (isAvailable ? '🔴 Deshabilitar' : '🟢 Habilitar') +
-                    '</button>' +
+                '</button>' +
                 '</td>' +
             '</tr>';
         }
@@ -347,17 +348,28 @@
         }
     }
 
-    async function toggleProducto(productId, nuevoEstado) {
-        console.log('Toggle producto:', productId, 'nuevo estado:', nuevoEstado);
-        console.log('URL:', '/admin/toggle_product/' + tenantId + '/' + productId);
+   async function toggleProducto(productId, nuevoEstado, event) {
+        // Prevenir que el evento se propague
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
         
-        var btn = event.target;
-        var originalText = btn.innerText;
-        btn.disabled = true;
-        btn.innerText = 'Procesando...';
+        console.log('Toggle producto:', productId, 'nuevo estado:', nuevoEstado);
+        
+        // Construir URL absoluta
+        var url = window.location.origin + '/admin/toggle_product/' + tenantId + '/' + productId;
+        console.log('URL completa:', url);
+        
+        var btn = event ? event.target : document.querySelector('button[onclick*="toggleProducto"][data-id="' + productId + '"]');
+        if (btn) {
+            var originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = 'Procesando...';
+        }
         
         try {
-            var response = await fetch('/admin/toggle_product/' + tenantId + '/' + productId, {
+            var response = await fetch(url, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ disponible: nuevoEstado }),
@@ -380,11 +392,12 @@
             console.error('Error en fetch:', error);
             showAlertLocal('Error de conexión: ' + error.message, 'error');
         } finally {
-            btn.disabled = false;
-            btn.innerText = originalText;
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
         }
     }
-
     function showAlertLocal(message, type) {
         var container = document.getElementById('alertContainer');
         if (!container) return;
