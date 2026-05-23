@@ -719,11 +719,16 @@ def update_product(tenant_id, product_id):
 @tenant_owner_required
 def toggle_product(tenant_id, product_id):
     if request.method == 'OPTIONS':
-        return '', 200
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Methods', 'PUT, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        return response, 200
     try:
-        data = request.json
+        data = request.get_json()
         disponible = data.get('disponible', True)
         schema_name = _get_schema_name(tenant_id)
+        
+        logger.info(f"Toggle producto: tenant={tenant_id}, product={product_id}, disponible={disponible}, schema={schema_name}")
         
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
@@ -732,12 +737,15 @@ def toggle_product(tenant_id, product_id):
             conn.commit()
         
         if updated > 0:
-            return jsonify({'status': 'ok'}), 200
+            logger.info(f"Producto {product_id} actualizado a disponible={disponible}")
+            return jsonify({'status': 'ok', 'message': 'Producto actualizado'}), 200
         return jsonify({'error': 'Producto no encontrado'}), 404
     except Exception as e:
         logger.error(f'Error toggling producto: {e}')
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
+    
 @app.route('/admin/update_tenant/<tenant_id>', methods=['PUT', 'OPTIONS'])
 @login_required
 @tenant_owner_required

@@ -59,6 +59,29 @@
             </div>
         </div>
 
+        <!-- Filtros -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="card-title">🔍 Mostrar productos</h3>
+            </div>
+            <div class="card-body">
+                <div class="d-flex gap-4">
+                    <label class="d-flex align-center gap-2">
+                        <input type="radio" name="filtro" value="todos" checked onchange="cargarProductos()">
+                        <span>Todos</span>
+                    </label>
+                    <label class="d-flex align-center gap-2">
+                        <input type="radio" name="filtro" value="disponibles" onchange="cargarProductos()">
+                        <span>Solo disponibles</span>
+                    </label>
+                    <label class="d-flex align-center gap-2">
+                        <input type="radio" name="filtro" value="no_disponibles" onchange="cargarProductos()">
+                        <span>Solo no disponibles</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
         <!-- Productos -->
         <div class="card">
             <div class="card-header">
@@ -120,20 +143,17 @@
     var tenantId = '{{ tenant.id }}';
     var productos = [];
     var currentEditId = null;
+    var filtroActual = 'todos';
 
-    // Función para verificar autenticación sin redirigir automáticamente
-    async function verificarSesion() {
-        try {
-            var response = await fetch('/api/usuario/perfil', { credentials: 'include' });
-            if (!response.ok) {
-                console.error('Sesión no válida, status:', response.status);
-                return false;
+    function getFiltro() {
+        var radios = document.getElementsByName('filtro');
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) {
+                filtroActual = radios[i].value;
+                return filtroActual;
             }
-            return true;
-        } catch (error) {
-            console.error('Error verificando sesión:', error);
-            return false;
         }
+        return 'todos';
     }
 
     async function cargarProductos() {
@@ -142,7 +162,10 @@
         container.innerHTML = '<div class="loading">Cargando productos...</div>';
         
         try {
-            var response = await fetch('/api/tenant/' + tenantId + '/menu', { 
+            var url = '/api/tenant/' + tenantId + '/menu';
+            console.log('Fetching:', url);
+            
+            var response = await fetch(url, { 
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -150,7 +173,6 @@
             console.log('Response status:', response.status);
             
             if (response.status === 401 || response.status === 403) {
-                console.error('Error de autenticación:', response.status);
                 container.innerHTML = '<div class="alert alert-error">❌ Sesión expirada. <a href="/">Inicia sesión nuevamente</a></div>';
                 return;
             }
@@ -159,8 +181,19 @@
                 throw new Error('Error ' + response.status);
             }
             
-            productos = await response.json();
-            console.log('Productos cargados:', productos.length);
+            var todosProductos = await response.json();
+            console.log('Total productos en BD:', todosProductos.length);
+            
+            var filtro = getFiltro();
+            if (filtro === 'disponibles') {
+                productos = todosProductos.filter(function(p) { return p.disponible === true; });
+            } else if (filtro === 'no_disponibles') {
+                productos = todosProductos.filter(function(p) { return p.disponible === false; });
+            } else {
+                productos = todosProductos;
+            }
+            
+            console.log('Productos mostrados:', productos.length, 'Filtro:', filtro);
             renderProductos();
         } catch (error) {
             console.error('Error cargando productos:', error);
@@ -189,10 +222,10 @@
         
         for (var i = 0; i < productos.length; i++) {
             var p = productos[i];
-            var isAvailable = p.disponible === true;
-            var rowStyle = isAvailable ? '' : 'style="opacity:0.6; background-color:#f9f9f9;"';
+            var isAvailable = (p.disponible === true);
+            var rowClass = isAvailable ? '' : 'producto-no-disponible';
             
-            html += '<tr id="row-' + p.id + '" ' + rowStyle + '>' +
+            html += '<tr id="row-' + p.id + '" class="' + rowClass + '">' +
                 '<td><strong>' + escapeHtml(p.nombre) + '</strong></td>' +
                 '<td>' + escapeHtml(p.descripcion || '-') + '</td>' +
                 '<td>$' + (p.precio || 0).toLocaleString() + '</td>' +
@@ -267,7 +300,7 @@
             document.getElementById('productoDescripcion').value = producto.descripcion || '';
             document.getElementById('productoPrecio').value = producto.precio;
             document.getElementById('productoCategoria').value = producto.categoria || 'general';
-            document.getElementById('productoDisponible').checked = producto.disponible === true;
+            document.getElementById('productoDisponible').checked = (producto.disponible === true);
         } else {
             title.textContent = '➕ Agregar Producto';
             document.getElementById('formProducto').reset();
@@ -305,7 +338,8 @@
                 cargarProductos();
             } else {
                 var error = await response.text();
-                showAlertLocal('Error al eliminar: ' + error, 'error');
+                console.error('Error:', error);
+                showAlertLocal('Error al eliminar: ' + response.status, 'error');
             }
         } catch (error) {
             console.error('Error:', error);
@@ -315,6 +349,12 @@
 
     async function toggleProducto(productId, nuevoEstado) {
         console.log('Toggle producto:', productId, 'nuevo estado:', nuevoEstado);
+        console.log('URL:', '/admin/toggle_product/' + tenantId + '/' + productId);
+        
+        var btn = event.target;
+        var originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = 'Procesando...';
         
         try {
             var response = await fetch('/admin/toggle_product/' + tenantId + '/' + productId, {
@@ -324,19 +364,24 @@
                 credentials: 'include'
             });
             
-            console.log('Toggle response status:', response.status);
+            console.log('Response status:', response.status);
             
             if (response.ok) {
+                var result = await response.json();
+                console.log('Resultado:', result);
                 showAlertLocal(nuevoEstado ? '✅ Producto habilitado' : '⚠️ Producto deshabilitado', 'success');
-                cargarProductos(); // Recargar la lista
+                cargarProductos();
             } else {
-                var error = await response.text();
-                console.error('Error en toggle:', error);
+                var errorText = await response.text();
+                console.error('Error response:', errorText);
                 showAlertLocal('Error al cambiar estado: ' + response.status, 'error');
             }
         } catch (error) {
-            console.error('Error en toggle:', error);
-            showAlertLocal('Error de conexión', 'error');
+            console.error('Error en fetch:', error);
+            showAlertLocal('Error de conexión: ' + error.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = originalText;
         }
     }
 
@@ -358,7 +403,6 @@
         return div.innerHTML;
     }
 
-    // Formulario producto
     document.getElementById('formProducto').addEventListener('submit', async function(e) {
         e.preventDefault();
         
@@ -384,6 +428,8 @@
                 method = 'POST';
             }
             
+            console.log('Guardando producto:', url, producto);
+            
             var response = await fetch(url, {
                 method: method,
                 headers: { 'Content-Type': 'application/json' },
@@ -397,7 +443,8 @@
                 cargarProductos();
             } else {
                 var error = await response.text();
-                showAlertLocal('Error al guardar: ' + error, 'error');
+                console.error('Error:', error);
+                showAlertLocal('Error al guardar: ' + response.status, 'error');
             }
         } catch (error) {
             console.error('Error:', error);
@@ -408,7 +455,6 @@
         }
     });
 
-    // Exponer funciones globalmente
     window.abrirModalProducto = abrirModalProducto;
     window.cerrarModalProducto = cerrarModalProducto;
     window.editarProducto = editarProducto;
@@ -417,12 +463,18 @@
     window.guardarConfig = guardarConfig;
     window.cargarProductos = cargarProductos;
 
-    // Inicializar
     cargarProductos();
     cargarConfig();
 </script>
 
 <style>
+    .producto-no-disponible {
+        opacity: 0.6;
+        background-color: #f9f9f9;
+    }
+    .producto-no-disponible:hover {
+        opacity: 0.8;
+    }
     .btn-warning {
         background: #f59e0b;
         color: white;
@@ -470,6 +522,23 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+    }
+    .productos-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .productos-table th,
+    .productos-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    .productos-table th {
+        background: #f9fafb;
+        font-weight: 600;
+    }
+    .table-container {
+        overflow-x: auto;
     }
 </style>
 {% endblock %}
