@@ -145,6 +145,30 @@
     var currentEditId = null;
     var filtroActual = 'todos';
 
+    // Verificar sesión antes de cada operación
+    async function verificarSesion() {
+        try {
+            var response = await fetch('/api/check-session', { 
+                method: 'GET',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) {
+                console.error('Sesión expirada');
+                showAlertLocal('⚠️ Tu sesión ha expirado. Serás redirigido a la página de inicio.', 'error');
+                setTimeout(function() {
+                    window.location.href = '/';
+                }, 2000);
+                return false;
+            }
+            return true;
+        } catch (error) {
+            console.error('Error verificando sesión:', error);
+            window.location.href = '/';
+            return false;
+        }
+    }
+
     function getFiltro() {
         var radios = document.getElementsByName('filtro');
         for (var i = 0; i < radios.length; i++) {
@@ -157,6 +181,9 @@
     }
 
     async function cargarProductos() {
+        var sessionOk = await verificarSesion();
+        if (!sessionOk) return;
+        
         console.log('Cargando productos...');
         var container = document.getElementById('productosContainer');
         container.innerHTML = '<div class="loading">Cargando productos...</div>';
@@ -240,7 +267,7 @@
                     '<button class="btn btn-sm ' + (isAvailable ? 'btn-warning' : 'btn-success') + '" ' +
                         'onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ', event)">' +
                         (isAvailable ? '🔴 Deshabilitar' : '🟢 Habilitar') +
-                '</button>' +
+                    '</button>' +
                 '</td>' +
             '</tr>';
         }
@@ -250,6 +277,9 @@
     }
 
     async function cargarConfig() {
+        var sessionOk = await verificarSesion();
+        if (!sessionOk) return;
+        
         try {
             var response = await fetch('/api/tenant/' + tenantId + '/config', { credentials: 'include' });
             if (response.ok) {
@@ -262,6 +292,9 @@
     }
 
     async function guardarConfig() {
+        var sessionOk = await verificarSesion();
+        if (!sessionOk) return;
+        
         var usarIA = document.getElementById('usarIA').checked;
         var btn = event.target;
         btn.disabled = true;
@@ -326,6 +359,9 @@
     }
 
     async function eliminarProducto(productId) {
+        var sessionOk = await verificarSesion();
+        if (!sessionOk) return;
+        
         if (!confirm('¿Estás seguro de eliminar este producto?')) return;
         
         try {
@@ -348,20 +384,23 @@
         }
     }
 
-   async function toggleProducto(productId, nuevoEstado, event) {
-        // Prevenir que el evento se propague
+    async function toggleProducto(productId, nuevoEstado, event) {
+        // Prevenir propagación
         if (event) {
             event.preventDefault();
             event.stopPropagation();
         }
         
+        // Verificar sesión
+        var sessionOk = await verificarSesion();
+        if (!sessionOk) return;
+        
         console.log('Toggle producto:', productId, 'nuevo estado:', nuevoEstado);
         
-        // Construir URL absoluta
         var url = window.location.origin + '/admin/toggle_product/' + tenantId + '/' + productId;
         console.log('URL completa:', url);
         
-        var btn = event ? event.target : document.querySelector('button[onclick*="toggleProducto"][data-id="' + productId + '"]');
+        var btn = event ? event.target : null;
         if (btn) {
             var originalText = btn.innerText;
             btn.disabled = true;
@@ -383,6 +422,9 @@
                 console.log('Resultado:', result);
                 showAlertLocal(nuevoEstado ? '✅ Producto habilitado' : '⚠️ Producto deshabilitado', 'success');
                 cargarProductos();
+            } else if (response.status === 401 || response.status === 403) {
+                showAlertLocal('❌ Sesión expirada. Serás redirigido.', 'error');
+                setTimeout(function() { window.location.href = '/'; }, 2000);
             } else {
                 var errorText = await response.text();
                 console.error('Error response:', errorText);
@@ -398,6 +440,7 @@
             }
         }
     }
+
     function showAlertLocal(message, type) {
         var container = document.getElementById('alertContainer');
         if (!container) return;
@@ -418,6 +461,9 @@
 
     document.getElementById('formProducto').addEventListener('submit', async function(e) {
         e.preventDefault();
+        
+        var sessionOk = await verificarSesion();
+        if (!sessionOk) return;
         
         var producto = {
             nombre: document.getElementById('productoNombre').value,
@@ -454,6 +500,9 @@
                 showAlertLocal(currentEditId ? '✅ Producto actualizado' : '✅ Producto agregado', 'success');
                 cerrarModalProducto();
                 cargarProductos();
+            } else if (response.status === 401 || response.status === 403) {
+                showAlertLocal('❌ Sesión expirada. Serás redirigido.', 'error');
+                setTimeout(function() { window.location.href = '/'; }, 2000);
             } else {
                 var error = await response.text();
                 console.error('Error:', error);
@@ -476,6 +525,7 @@
     window.guardarConfig = guardarConfig;
     window.cargarProductos = cargarProductos;
 
+    // Inicializar
     cargarProductos();
     cargarConfig();
 </script>

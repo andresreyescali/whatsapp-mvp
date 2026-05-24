@@ -17,6 +17,7 @@ from ai.training import trainer
 from ai.client import ai_client
 from auth.auth import auth_manager
 from functools import wraps
+from datetime import timedelta
 
 setup_logging()
 
@@ -26,8 +27,13 @@ app = Flask(__name__,
             static_folder='web/static',
             static_url_path='/static')
 
-# Configuración de sesión
+# Configuración de sesión - AGREGAR ESTO
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_PERMANENT'] = True
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
+app.config['SESSION_COOKIE_SECURE'] = False  # True si usas HTTPS (Render usa HTTPS)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # Configurar CORS
 @app.after_request
@@ -306,7 +312,7 @@ def api_auth_login():
     data = request.json
     result = auth_manager.login(data.get('email'), data.get('password'))
     if result.get('success'):
-        session.clear()  # Limpiar sesión anterior
+        session.clear()
         session['usuario_id'] = result['usuario_id']
         session['email'] = result['email']
         session['nombre'] = result.get('nombre')
@@ -1409,7 +1415,11 @@ def test_css():
         </body>
     </html>
     '''
-
+@app.route('/api/check-session', methods=['GET'])
+def check_session():
+    if 'usuario_id' in session:
+        return jsonify({'authenticated': True, 'usuario_id': session['usuario_id']})
+    return jsonify({'authenticated': False}), 401
 
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
