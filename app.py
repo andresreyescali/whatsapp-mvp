@@ -27,11 +27,11 @@ app = Flask(__name__,
             static_folder='web/static',
             static_url_path='/static')
 
-# Configuración de sesión - AGREGAR ESTO
+# Configuración de sesión - AGREGAR DESPUÉS DE CREAR app
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
-app.config['SESSION_COOKIE_SECURE'] = False  # True si usas HTTPS (Render usa HTTPS)
+app.config['SESSION_COOKIE_SECURE'] = False  # True si usas HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
@@ -1417,8 +1417,14 @@ def test_css():
     '''
 @app.route('/api/check-session', methods=['GET'])
 def check_session():
+    """Verifica si la sesión está activa"""
     if 'usuario_id' in session:
-        return jsonify({'authenticated': True, 'usuario_id': session['usuario_id']})
+        return jsonify({
+            'authenticated': True, 
+            'usuario_id': session['usuario_id'],
+            'email': session.get('email'),
+            'nombre': session.get('nombre')
+        })
     return jsonify({'authenticated': False}), 401
 
 if __name__ == '__main__':

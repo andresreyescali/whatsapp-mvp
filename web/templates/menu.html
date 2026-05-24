@@ -153,22 +153,37 @@
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
             });
-            if (!response.ok) {
-                console.error('Sesión expirada');
+            
+            if (response.status === 401) {
+                console.log('Sesión no válida - Status 401');
                 showAlertLocal('⚠️ Tu sesión ha expirado. Serás redirigido a la página de inicio.', 'error');
                 setTimeout(function() {
                     window.location.href = '/';
                 }, 2000);
                 return false;
             }
+            
+            if (!response.ok) {
+                console.error('Error en check-session:', response.status);
+                return false;
+            }
+            
+            var data = await response.json();
+            if (!data.authenticated) {
+                console.log('Sesión no autenticada');
+                showAlertLocal('⚠️ Tu sesión ha expirado. Serás redirigido.', 'error');
+                setTimeout(function() { window.location.href = '/'; }, 2000);
+                return false;
+            }
+            
+            console.log('Sesión válida para usuario:', data.usuario_id);
             return true;
         } catch (error) {
             console.error('Error verificando sesión:', error);
-            window.location.href = '/';
-            return false;
+            // No redirigir inmediatamente, podría ser un error de red
+            return true; // Asumir que la sesión es válida
         }
     }
-
     function getFiltro() {
         var radios = document.getElementsByName('filtro');
         for (var i = 0; i < radios.length; i++) {
@@ -235,7 +250,7 @@
             container.innerHTML = 
                 '<div class="text-center p-5">' +
                     '<p>📭 No hay productos en el menú</p>' +
-                    '<button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>' +
+                    '<button type="button" class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>' +
                 '</div>';
             return;
         }
