@@ -183,6 +183,8 @@ class IATrainer:
         1. El símbolo '$' puede aparecer como '5' o 'S' en el texto OCR. Corrígelo.
         2. Los precios pueden estar en formatos: "25000", "25.000", "25,000" o "$25.000"
         3. Normaliza todos los precios a números sin puntos ni comas (ej: 25000)
+        4. si en la imagen los precios inician con simbolo '$' entonces todos los precios lo tendran.
+        5. ignora acentos y tildes, reemplaza con la letra sin el acento.
         
         IMPORTANTE: Devuelve SOLO un JSON válido.
         
