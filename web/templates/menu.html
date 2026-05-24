@@ -62,13 +62,13 @@
         <!-- Filtros -->
         <div class="card mb-4">
             <div class="card-header">
-                <h3 class="card-title">🔍 Mostrar productos</h3>
+                <h3 class="card-title">🔍 Filtros</h3>
             </div>
             <div class="card-body">
                 <div class="d-flex gap-4">
                     <label class="d-flex align-center gap-2">
                         <input type="radio" name="filtro" value="todos" checked onchange="cargarProductos()">
-                        <span>Todos</span>
+                        <span>Todos los productos</span>
                     </label>
                     <label class="d-flex align-center gap-2">
                         <input type="radio" name="filtro" value="disponibles" onchange="cargarProductos()">
@@ -86,6 +86,7 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">📦 Productos</h3>
+                <span class="badge badge-info" id="productosCount">0 productos</span>
             </div>
             <div id="productosContainer" class="loading">Cargando productos...</div>
         </div>
@@ -141,11 +142,11 @@
 
 <script>
     var tenantId = '{{ tenant.id }}';
-    var productos = [];
+    var todosProductos = [];  // Almacenar todos los productos sin filtrar
+    var productosMostrados = [];
     var currentEditId = null;
     var filtroActual = 'todos';
 
-    // Verificar sesión antes de cada operación
     async function verificarSesion() {
         try {
             var response = await fetch('/api/check-session', { 
@@ -155,41 +156,42 @@
             });
             
             if (response.status === 401) {
-                console.log('Sesión no válida - Status 401');
-                showAlertLocal('⚠️ Tu sesión ha expirado. Serás redirigido a la página de inicio.', 'error');
-                setTimeout(function() {
-                    window.location.href = '/';
-                }, 2000);
-                return false;
-            }
-            
-            if (!response.ok) {
-                console.error('Error en check-session:', response.status);
-                return false;
-            }
-            
-            var data = await response.json();
-            if (!data.authenticated) {
-                console.log('Sesión no autenticada');
                 showAlertLocal('⚠️ Tu sesión ha expirado. Serás redirigido.', 'error');
                 setTimeout(function() { window.location.href = '/'; }, 2000);
                 return false;
             }
             
-            console.log('Sesión válida para usuario:', data.usuario_id);
-            return true;
+            if (!response.ok) return false;
+            
+            var data = await response.json();
+            return data.authenticated === true;
         } catch (error) {
             console.error('Error verificando sesión:', error);
-            // No redirigir inmediatamente, podría ser un error de red
-            return true; // Asumir que la sesión es válida
+            return true;
         }
     }
+
+    function aplicarFiltro() {
+        var filtro = getFiltro();
+        filtroActual = filtro;
+        
+        if (filtro === 'disponibles') {
+            productosMostrados = todosProductos.filter(function(p) { return p.disponible === true; });
+        } else if (filtro === 'no_disponibles') {
+            productosMostrados = todosProductos.filter(function(p) { return p.disponible === false; });
+        } else {
+            productosMostrados = todosProductos;
+        }
+        
+        console.log('Filtro:', filtro, 'Mostrando:', productosMostrados.length, 'de', todosProductos.length);
+        renderProductos();
+    }
+
     function getFiltro() {
         var radios = document.getElementsByName('filtro');
         for (var i = 0; i < radios.length; i++) {
             if (radios[i].checked) {
-                filtroActual = radios[i].value;
-                return filtroActual;
+                return radios[i].value;
             }
         }
         return 'todos';
@@ -205,16 +207,12 @@
         
         try {
             var url = '/api/tenant/' + tenantId + '/menu';
-            console.log('Fetching:', url);
-            
             var response = await fetch(url, { 
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
             });
             
-            console.log('Response status:', response.status);
-            
-            if (response.status === 401 || response.status === 403) {
+            if (response.status === 401) {
                 container.innerHTML = '<div class="alert alert-error">❌ Sesión expirada. <a href="/">Inicia sesión nuevamente</a></div>';
                 return;
             }
@@ -223,20 +221,12 @@
                 throw new Error('Error ' + response.status);
             }
             
-            var todosProductos = await response.json();
+            todosProductos = await response.json();
             console.log('Total productos en BD:', todosProductos.length);
             
-            var filtro = getFiltro();
-            if (filtro === 'disponibles') {
-                productos = todosProductos.filter(function(p) { return p.disponible === true; });
-            } else if (filtro === 'no_disponibles') {
-                productos = todosProductos.filter(function(p) { return p.disponible === false; });
-            } else {
-                productos = todosProductos;
-            }
+            document.getElementById('productosCount').innerText = todosProductos.length + ' productos';
             
-            console.log('Productos mostrados:', productos.length, 'Filtro:', filtro);
-            renderProductos();
+            aplicarFiltro();
         } catch (error) {
             console.error('Error cargando productos:', error);
             container.innerHTML = '<div class="alert alert-error">❌ Error al cargar los productos: ' + error.message + '</div>';
@@ -246,11 +236,20 @@
     function renderProductos() {
         var container = document.getElementById('productosContainer');
         
-        if (!productos || productos.length === 0) {
+        if (!productosMostrados || productosMostrados.length === 0) {
+            var mensaje = '';
+            if (filtroActual === 'disponibles') {
+                mensaje = '📭 No hay productos disponibles. Deshabilita algunos productos para verlos aquí o cambia el filtro.';
+            } else if (filtroActual === 'no_disponibles') {
+                mensaje = '📭 No hay productos deshabilitados. Todos los productos están disponibles.';
+            } else {
+                mensaje = '📭 No hay productos en el menú. Agrega tu primer producto.';
+            }
+            
             container.innerHTML = 
                 '<div class="text-center p-5">' +
-                    '<p>📭 No hay productos en el menú</p>' +
-                    '<button type="button" class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>' +
+                    '<p>' + mensaje + '</p>' +
+                    (filtroActual === 'todos' ? '<button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>' : '') +
                 '</div>';
             return;
         }
@@ -258,12 +257,12 @@
         var html = '<div class="table-container">' +
             '<table class="productos-table">' +
                 '<thead>' +
-                    '<tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Acciones</th></tr>' +
+                    '<tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Disponible</th><th>Acciones</th></tr>' +
                 '</thead>' +
                 '<tbody>';
         
-        for (var i = 0; i < productos.length; i++) {
-            var p = productos[i];
+        for (var i = 0; i < productosMostrados.length; i++) {
+            var p = productosMostrados[i];
             var isAvailable = (p.disponible === true);
             var rowClass = isAvailable ? '' : 'producto-no-disponible';
             
@@ -277,12 +276,12 @@
                     '</span>' +
                 '</td>' +
                 '<td>' +
+                    '<div class="toggle-switch ' + (isAvailable ? 'active' : '') + '" ' +
+                        'onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ', event)"></div>' +
+                '</td>' +
+                '<td>' +
                     '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')">✏️ Editar</button>' +
                     '<button class="btn btn-sm btn-danger" onclick="eliminarProducto(\'' + p.id + '\')" style="margin-left:8px;">🗑️ Eliminar</button>' +
-                    '<button class="btn btn-sm ' + (isAvailable ? 'btn-warning' : 'btn-success') + '" ' +
-                        'onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ', event)">' +
-                        (isAvailable ? '🔴 Deshabilitar' : '🟢 Habilitar') +
-                    '</button>' +
                 '</td>' +
             '</tr>';
         }
@@ -292,9 +291,6 @@
     }
 
     async function cargarConfig() {
-        var sessionOk = await verificarSesion();
-        if (!sessionOk) return;
-        
         try {
             var response = await fetch('/api/tenant/' + tenantId + '/config', { credentials: 'include' });
             if (response.ok) {
@@ -307,9 +303,6 @@
     }
 
     async function guardarConfig() {
-        var sessionOk = await verificarSesion();
-        if (!sessionOk) return;
-        
         var usarIA = document.getElementById('usarIA').checked;
         var btn = event.target;
         btn.disabled = true;
@@ -365,18 +358,15 @@
     }
 
     function editarProducto(productId) {
-        for (var i = 0; i < productos.length; i++) {
-            if (productos[i].id === productId) {
-                abrirModalProducto(productos[i]);
+        for (var i = 0; i < todosProductos.length; i++) {
+            if (todosProductos[i].id === productId) {
+                abrirModalProducto(todosProductos[i]);
                 break;
             }
         }
     }
 
     async function eliminarProducto(productId) {
-        var sessionOk = await verificarSesion();
-        if (!sessionOk) return;
-        
         if (!confirm('¿Estás seguro de eliminar este producto?')) return;
         
         try {
@@ -389,9 +379,7 @@
                 showAlertLocal('✅ Producto eliminado', 'success');
                 cargarProductos();
             } else {
-                var error = await response.text();
-                console.error('Error:', error);
-                showAlertLocal('Error al eliminar: ' + response.status, 'error');
+                showAlertLocal('Error al eliminar el producto', 'error');
             }
         } catch (error) {
             console.error('Error:', error);
@@ -400,27 +388,14 @@
     }
 
     async function toggleProducto(productId, nuevoEstado, event) {
-        // Prevenir propagación
         if (event) {
             event.preventDefault();
             event.stopPropagation();
         }
         
-        // Verificar sesión
-        var sessionOk = await verificarSesion();
-        if (!sessionOk) return;
-        
         console.log('Toggle producto:', productId, 'nuevo estado:', nuevoEstado);
         
-        var url = window.location.origin + '/admin/toggle_product/' + tenantId + '/' + productId;
-        console.log('URL completa:', url);
-        
-        var btn = event ? event.target : null;
-        if (btn) {
-            var originalText = btn.innerText;
-            btn.disabled = true;
-            btn.innerText = 'Procesando...';
-        }
+        var url = '/admin/toggle_product/' + tenantId + '/' + productId;
         
         try {
             var response = await fetch(url, {
@@ -430,29 +405,18 @@
                 credentials: 'include'
             });
             
-            console.log('Response status:', response.status);
-            
             if (response.ok) {
-                var result = await response.json();
-                console.log('Resultado:', result);
                 showAlertLocal(nuevoEstado ? '✅ Producto habilitado' : '⚠️ Producto deshabilitado', 'success');
-                cargarProductos();
-            } else if (response.status === 401 || response.status === 403) {
-                showAlertLocal('❌ Sesión expirada. Serás redirigido.', 'error');
+                cargarProductos();  // Recargar todos los productos y reaplicar filtro
+            } else if (response.status === 401) {
+                showAlertLocal('❌ Sesión expirada', 'error');
                 setTimeout(function() { window.location.href = '/'; }, 2000);
             } else {
-                var errorText = await response.text();
-                console.error('Error response:', errorText);
-                showAlertLocal('Error al cambiar estado: ' + response.status, 'error');
+                showAlertLocal('Error al cambiar estado', 'error');
             }
         } catch (error) {
-            console.error('Error en fetch:', error);
-            showAlertLocal('Error de conexión: ' + error.message, 'error');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerText = originalText;
-            }
+            console.error('Error:', error);
+            showAlertLocal('Error de conexión', 'error');
         }
     }
 
@@ -477,9 +441,6 @@
     document.getElementById('formProducto').addEventListener('submit', async function(e) {
         e.preventDefault();
         
-        var sessionOk = await verificarSesion();
-        if (!sessionOk) return;
-        
         var producto = {
             nombre: document.getElementById('productoNombre').value,
             descripcion: document.getElementById('productoDescripcion').value,
@@ -502,8 +463,6 @@
                 method = 'POST';
             }
             
-            console.log('Guardando producto:', url, producto);
-            
             var response = await fetch(url, {
                 method: method,
                 headers: { 'Content-Type': 'application/json' },
@@ -515,13 +474,8 @@
                 showAlertLocal(currentEditId ? '✅ Producto actualizado' : '✅ Producto agregado', 'success');
                 cerrarModalProducto();
                 cargarProductos();
-            } else if (response.status === 401 || response.status === 403) {
-                showAlertLocal('❌ Sesión expirada. Serás redirigido.', 'error');
-                setTimeout(function() { window.location.href = '/'; }, 2000);
             } else {
-                var error = await response.text();
-                console.error('Error:', error);
-                showAlertLocal('Error al guardar: ' + response.status, 'error');
+                showAlertLocal('Error al guardar el producto', 'error');
             }
         } catch (error) {
             console.error('Error:', error);
@@ -540,7 +494,6 @@
     window.guardarConfig = guardarConfig;
     window.cargarProductos = cargarProductos;
 
-    // Inicializar
     cargarProductos();
     cargarConfig();
 </script>
@@ -553,19 +506,31 @@
     .producto-no-disponible:hover {
         opacity: 0.8;
     }
-    .btn-warning {
-        background: #f59e0b;
-        color: white;
+    .toggle-switch {
+        width: 44px;
+        height: 24px;
+        background: #ccc;
+        border-radius: 24px;
+        position: relative;
+        cursor: pointer;
+        transition: background 0.3s;
     }
-    .btn-warning:hover {
-        background: #d97706;
+    .toggle-switch.active {
+        background: #25D366;
     }
-    .btn-success {
-        background: #10b981;
-        color: white;
+    .toggle-switch::after {
+        content: '';
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        background: white;
+        border-radius: 50%;
+        top: 2px;
+        left: 2px;
+        transition: left 0.3s;
     }
-    .btn-success:hover {
-        background: #059669;
+    .toggle-switch.active::after {
+        left: 22px;
     }
     .badge-success {
         background: #d1fae5;
@@ -577,6 +542,13 @@
     .badge-warning {
         background: #fed7aa;
         color: #92400e;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+    }
+    .badge-info {
+        background: #dbeafe;
+        color: #1e40af;
         padding: 4px 12px;
         border-radius: 20px;
         font-size: 0.75rem;
