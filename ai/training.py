@@ -209,7 +209,7 @@ class IATrainer:
         3. Normaliza todos los precios a números sin puntos ni comas (ej: 25000)
         4. Si un precio parece ser por kilo/libra/unidad, incluye esa información en la descripción
         5. Agrupa productos similares cuando sea posible
-        6. En una imagen si al inicio del precio aparece el simbolo "$" entonces todos los precios lo tienen, y si alguno no lo tiene entonces o no es un precio o erroneamente lo interpretaste como "5".
+        6. En una imagen si al inicio del precio aparece el simbolo "$" entonces todos los precios lo tienen.
 
         
         IMPORTANTE: Devuelve SOLO un JSON válido. Sin markdown, sin explicaciones.
