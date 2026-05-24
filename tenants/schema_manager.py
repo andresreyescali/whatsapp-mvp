@@ -7,10 +7,13 @@ class SchemaManager:
     
     def _get_schema_name(self, tenant_id: str) -> str:
         """Obtiene el schema_name de un tenant"""
-        from tenants.repository import tenant_repo
-        tenant = tenant_repo.find_by_id(tenant_id)
-        if tenant and tenant.get('schema_name'):
-            return tenant['schema_name']
+        try:
+            from tenants.repository import tenant_repo
+            tenant = tenant_repo.find_by_id(tenant_id)
+            if tenant and tenant.get('schema_name'):
+                return tenant['schema_name']
+        except Exception as e:
+            logger.error(f"Error obteniendo schema_name: {e}")
         return f"tenant_{tenant_id.replace('-', '_')}"
     
     def create_tenant_schema(self, tenant_id: str, tipo_negocio: str):
@@ -21,7 +24,6 @@ class SchemaManager:
         
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                # Crear esquema
                 cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
                 
                 # 1. Tabla de clientes
@@ -58,9 +60,7 @@ class SchemaManager:
                 CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
-                    cliente_numero TEXT NOT NULL,
                     numero_pedido TEXT UNIQUE,
-                    secuencial INTEGER,
                     items JSONB NOT NULL,
                     total INTEGER NOT NULL,
                     estado VARCHAR(50) DEFAULT 'nuevo',
@@ -73,7 +73,7 @@ class SchemaManager:
                     cancelado_at TIMESTAMP
                 )
                 ''')
-            
+                
                 # 4. Tabla de conversaciones
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".conversaciones (
@@ -132,7 +132,6 @@ class SchemaManager:
     def _ensure_tables_exist(self, schema_name: str, cur):
         """Verifica y crea las tablas necesarias si no existen"""
         
-        # Tabla de clientes
         cur.execute(f'''
         CREATE TABLE IF NOT EXISTS "{schema_name}".clientes (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -148,7 +147,6 @@ class SchemaManager:
         )
         ''')
         
-        # Tabla de productos
         cur.execute(f'''
         CREATE TABLE IF NOT EXISTS "{schema_name}".productos (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -161,7 +159,6 @@ class SchemaManager:
         )
         ''')
         
-        # Tabla de pedidos
         cur.execute(f'''
         CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -180,7 +177,6 @@ class SchemaManager:
         )
         ''')
         
-        # Tabla de conversaciones
         cur.execute(f'''
         CREATE TABLE IF NOT EXISTS "{schema_name}".conversaciones (
             id SERIAL PRIMARY KEY,
@@ -193,7 +189,6 @@ class SchemaManager:
         )
         ''')
         
-        # Tabla de carritos
         cur.execute(f'''
         CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
             id SERIAL PRIMARY KEY,
@@ -206,19 +201,15 @@ class SchemaManager:
         )
         ''')
         
-        # Índices
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON "{schema_name}".pedidos(cliente_id)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON "{schema_name}".pedidos(estado)')
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_created ON "{schema_name}".pedidos(created_at DESC)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON "{schema_name}".clientes(numero_telefono)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON "{schema_name}".conversaciones(cliente_numero)')
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_created ON "{schema_name}".conversaciones(created_at DESC)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
     
     def _insert_default_products(self, cursor, schema_name: str, tipo_negocio: str):
         """Inserta productos de ejemplo según el tipo de negocio"""
         
-        # Verificar si ya hay productos
         cursor.execute(f'SELECT COUNT(*) FROM "{schema_name}".productos')
         count = cursor.fetchone()[0]
         if count > 0:
@@ -286,7 +277,7 @@ class SchemaManager:
                 ('Scooter Eléctrica', 'Moto eléctrica, cero emisiones', 8500000, 'electricas')
             ''')
         
-        else:  # otros
+        else:
             cursor.execute(f'''
             INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
             VALUES 
@@ -298,19 +289,24 @@ class SchemaManager:
         """Obtiene el menú completo del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
+            
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f'SELECT id, nombre, descripcion, precio, categoria, disponible FROM "{schema_name}".productos WHERE disponible = true ORDER BY categoria, nombre')
+                    cur.execute(f"""
+                        SELECT id, nombre, descripcion, precio, categoria, disponible 
+                        FROM "{schema_name}".productos 
+                        ORDER BY disponible DESC, categoria, nombre
+                    """)
                     rows = cur.fetchall()
                     productos = []
                     for row in rows:
                         productos.append({
-                            'id': row[0],
+                            'id': str(row[0]),
                             'nombre': row[1],
                             'descripcion': row[2] or '',
                             'precio': row[3],
                             'categoria': row[4] or 'general',
-                            'disponible': row[5] if row[5] is not None else True
+                            'disponible': row[5]
                         })
                     return productos
         except Exception as e:
@@ -327,7 +323,7 @@ class SchemaManager:
                     row = cur.fetchone()
                     if row:
                         return {
-                            'id': row[0],
+                            'id': str(row[0]),
                             'nombre': row[1],
                             'descripcion': row[2],
                             'precio': row[3],

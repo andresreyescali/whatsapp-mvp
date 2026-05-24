@@ -611,15 +611,18 @@ def train_ia_page():
     return render_template('train.html', tenant_id=tenant_id)
 
 # ==================== PRODUCTOS (CRUD) ====================
-
 @app.route('/api/tenant/<tenant_id>/menu', methods=['GET'])
 @login_required
 @tenant_owner_required
 def get_tenant_menu(tenant_id):
     try:
-        menu = schema_manager.get_menu(tenant_id)
+        # Obtener parámetro solo_disponibles (opcional)
+        solo_disponibles = request.args.get('solo_disponibles', 'false').lower() == 'true'
+        
+        menu = schema_manager.get_menu(tenant_id, solo_disponibles)
         return jsonify(menu)
     except Exception as e:
+        logger.error(f"Error obteniendo menú: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tenant/<tenant_id>/config', methods=['GET'])

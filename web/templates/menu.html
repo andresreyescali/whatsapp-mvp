@@ -65,17 +65,17 @@
                 <h3 class="card-title">🔍 Filtros</h3>
             </div>
             <div class="card-body">
-                <div class="d-flex gap-4">
+                <div class="d-flex gap-4 flex-wrap">
                     <label class="d-flex align-center gap-2">
-                        <input type="radio" name="filtro" value="todos" checked onchange="cargarProductos()">
+                        <input type="radio" name="filtro" value="todos" checked onchange="aplicarFiltro()">
                         <span>Todos los productos</span>
                     </label>
                     <label class="d-flex align-center gap-2">
-                        <input type="radio" name="filtro" value="disponibles" onchange="cargarProductos()">
+                        <input type="radio" name="filtro" value="disponibles" onchange="aplicarFiltro()">
                         <span>Solo disponibles</span>
                     </label>
                     <label class="d-flex align-center gap-2">
-                        <input type="radio" name="filtro" value="no_disponibles" onchange="cargarProductos()">
+                        <input type="radio" name="filtro" value="no_disponibles" onchange="aplicarFiltro()">
                         <span>Solo no disponibles</span>
                     </label>
                 </div>
@@ -142,7 +142,7 @@
 
 <script>
     var tenantId = '{{ tenant.id }}';
-    var todosProductos = [];  // Almacenar todos los productos sin filtrar
+    var todosProductos = [];
     var productosMostrados = [];
     var currentEditId = null;
     var filtroActual = 'todos';
@@ -151,8 +151,7 @@
         try {
             var response = await fetch('/api/check-session', { 
                 method: 'GET',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' }
+                credentials: 'include'
             });
             
             if (response.status === 401) {
@@ -172,29 +171,26 @@
     }
 
     function aplicarFiltro() {
-        var filtro = getFiltro();
-        filtroActual = filtro;
-        
-        if (filtro === 'disponibles') {
-            productosMostrados = todosProductos.filter(function(p) { return p.disponible === true; });
-        } else if (filtro === 'no_disponibles') {
-            productosMostrados = todosProductos.filter(function(p) { return p.disponible === false; });
-        } else {
-            productosMostrados = todosProductos;
-        }
-        
-        console.log('Filtro:', filtro, 'Mostrando:', productosMostrados.length, 'de', todosProductos.length);
-        renderProductos();
-    }
-
-    function getFiltro() {
         var radios = document.getElementsByName('filtro');
         for (var i = 0; i < radios.length; i++) {
             if (radios[i].checked) {
-                return radios[i].value;
+                filtroActual = radios[i].value;
+                break;
             }
         }
-        return 'todos';
+        
+        console.log('Aplicando filtro:', filtroActual);
+        
+        if (filtroActual === 'disponibles') {
+            productosMostrados = todosProductos.filter(function(p) { return p.disponible === true; });
+        } else if (filtroActual === 'no_disponibles') {
+            productosMostrados = todosProductos.filter(function(p) { return p.disponible === false; });
+        } else {
+            productosMostrados = todosProductos.slice(); // Copia de todos
+        }
+        
+        console.log('Productos mostrados:', productosMostrados.length, 'de', todosProductos.length);
+        renderProductos();
     }
 
     async function cargarProductos() {
@@ -207,6 +203,8 @@
         
         try {
             var url = '/api/tenant/' + tenantId + '/menu';
+            console.log('Fetching:', url);
+            
             var response = await fetch(url, { 
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
@@ -224,7 +222,10 @@
             todosProductos = await response.json();
             console.log('Total productos en BD:', todosProductos.length);
             
-            document.getElementById('productosCount').innerText = todosProductos.length + ' productos';
+            var disponibles = todosProductos.filter(function(p) { return p.disponible === true; }).length;
+            var noDisponibles = todosProductos.filter(function(p) { return p.disponible === false; }).length;
+            
+            document.getElementById('productosCount').innerHTML = '✅ ' + disponibles + ' disponibles / ⚠️ ' + noDisponibles + ' no disponibles';
             
             aplicarFiltro();
         } catch (error) {
@@ -236,10 +237,12 @@
     function renderProductos() {
         var container = document.getElementById('productosContainer');
         
+        console.log('Renderizando productos. Filtro:', filtroActual, 'Mostrando:', productosMostrados.length);
+        
         if (!productosMostrados || productosMostrados.length === 0) {
             var mensaje = '';
             if (filtroActual === 'disponibles') {
-                mensaje = '📭 No hay productos disponibles. Deshabilita algunos productos para verlos aquí o cambia el filtro.';
+                mensaje = '📭 No hay productos disponibles. Todos los productos están deshabilitados.';
             } else if (filtroActual === 'no_disponibles') {
                 mensaje = '📭 No hay productos deshabilitados. Todos los productos están disponibles.';
             } else {
@@ -277,7 +280,9 @@
                 '</td>' +
                 '<td>' +
                     '<div class="toggle-switch ' + (isAvailable ? 'active' : '') + '" ' +
-                        'onclick="toggleProducto(\'' + p.id + '\', ' + !isAvailable + ', event)"></div>' +
+                        'data-product-id="' + p.id + '" ' +
+                        'data-new-state="' + !isAvailable + '" ' +
+                        'onclick="toggleProducto(this, \'' + p.id + '\', ' + !isAvailable + ', event)"></div>' +
                 '</td>' +
                 '<td>' +
                     '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')">✏️ Editar</button>' +
@@ -387,7 +392,7 @@
         }
     }
 
-    async function toggleProducto(productId, nuevoEstado, event) {
+    async function toggleProducto(element, productId, nuevoEstado, event) {
         if (event) {
             event.preventDefault();
             event.stopPropagation();
@@ -396,6 +401,11 @@
         console.log('Toggle producto:', productId, 'nuevo estado:', nuevoEstado);
         
         var url = '/admin/toggle_product/' + tenantId + '/' + productId;
+        console.log('URL:', url);
+        
+        // Deshabilitar el toggle visualmente mientras se procesa
+        var originalClass = element.className;
+        element.style.opacity = '0.5';
         
         try {
             var response = await fetch(url, {
@@ -405,18 +415,27 @@
                 credentials: 'include'
             });
             
+            console.log('Response status:', response.status);
+            
             if (response.ok) {
                 showAlertLocal(nuevoEstado ? '✅ Producto habilitado' : '⚠️ Producto deshabilitado', 'success');
-                cargarProductos();  // Recargar todos los productos y reaplicar filtro
+                await cargarProductos();  // Recargar todos los productos
             } else if (response.status === 401) {
                 showAlertLocal('❌ Sesión expirada', 'error');
                 setTimeout(function() { window.location.href = '/'; }, 2000);
             } else {
-                showAlertLocal('Error al cambiar estado', 'error');
+                var errorText = await response.text();
+                console.error('Error response:', errorText);
+                showAlertLocal('Error al cambiar estado: ' + response.status, 'error');
+                // Restaurar el estado visual del toggle
+                element.className = originalClass;
+                element.style.opacity = '';
             }
         } catch (error) {
-            console.error('Error:', error);
-            showAlertLocal('Error de conexión', 'error');
+            console.error('Error en fetch:', error);
+            showAlertLocal('Error de conexión: ' + error.message, 'error');
+            element.className = originalClass;
+            element.style.opacity = '';
         }
     }
 
@@ -463,6 +482,8 @@
                 method = 'POST';
             }
             
+            console.log('Guardando producto:', url, producto);
+            
             var response = await fetch(url, {
                 method: method,
                 headers: { 'Content-Type': 'application/json' },
@@ -475,7 +496,9 @@
                 cerrarModalProducto();
                 cargarProductos();
             } else {
-                showAlertLocal('Error al guardar el producto', 'error');
+                var error = await response.text();
+                console.error('Error:', error);
+                showAlertLocal('Error al guardar el producto: ' + response.status, 'error');
             }
         } catch (error) {
             console.error('Error:', error);
@@ -486,6 +509,7 @@
         }
     });
 
+    // Exponer funciones globales
     window.abrirModalProducto = abrirModalProducto;
     window.cerrarModalProducto = cerrarModalProducto;
     window.editarProducto = editarProducto;
@@ -493,7 +517,9 @@
     window.toggleProducto = toggleProducto;
     window.guardarConfig = guardarConfig;
     window.cargarProductos = cargarProductos;
+    window.aplicarFiltro = aplicarFiltro;
 
+    // Inicializar
     cargarProductos();
     cargarConfig();
 </script>
@@ -589,6 +615,12 @@
     }
     .table-container {
         overflow-x: auto;
+    }
+    .gap-4 {
+        gap: 1rem;
+    }
+    .flex-wrap {
+        flex-wrap: wrap;
     }
 </style>
 {% endblock %}
