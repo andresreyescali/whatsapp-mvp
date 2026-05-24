@@ -616,10 +616,7 @@ def train_ia_page():
 @tenant_owner_required
 def get_tenant_menu(tenant_id):
     try:
-        # Obtener parámetro solo_disponibles (opcional)
-        solo_disponibles = request.args.get('solo_disponibles', 'false').lower() == 'true'
-        
-        menu = schema_manager.get_menu(tenant_id, solo_disponibles)
+        menu = schema_manager.get_menu(tenant_id)
         return jsonify(menu)
     except Exception as e:
         logger.error(f"Error obteniendo menú: {e}")
