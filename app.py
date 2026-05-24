@@ -18,6 +18,7 @@ from ai.client import ai_client
 from auth.auth import auth_manager
 from functools import wraps
 from datetime import timedelta
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 setup_logging()
 
@@ -27,11 +28,14 @@ app = Flask(__name__,
             static_folder='web/static',
             static_url_path='/static')
 
+
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
 # Configuración de sesión - AGREGAR DESPUÉS DE CREAR app
-app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.secret_key = os.environ['SECRET_KEY']
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
-app.config['SESSION_COOKIE_SECURE'] = False  # True si usas HTTPS
+app.config['SESSION_COOKIE_SECURE'] = True  # True si usas HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
