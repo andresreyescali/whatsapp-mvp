@@ -812,16 +812,18 @@ def delete_tenant(tenant_id):
 def train_ia(tenant_id):
     if request.method == 'GET':
         return render_template('train.html', tenant_id=tenant_id)
+    
     try:
         data = request.json
         tipo = data.get('tipo')
+        
         if tipo == 'imagen':
             resultado = trainer.procesar_imagen(data.get('imagen'))
         else:
             resultado = trainer.procesar_texto(data.get('texto'))
         
         if not resultado:
-            return jsonify({'error': 'No se pudo procesar'}), 500
+            return jsonify({'error': 'No se pudo procesar la imagen o texto'}), 500
         
         # Asegurar estructura del resultado
         if 'productos' not in resultado:
@@ -860,63 +862,99 @@ def train_ia(tenant_id):
                       prompt_personalizado))
             conn.commit()
         
-        # Guardar productos (evitando duplicados)
-        productos_agregados = 0
-        productos_actualizados = 0
-        
         # Obtener schema_name
         schema_name = _get_schema_name(tenant_id)
         
-        for producto in resultado.get('productos', []):
-            if producto.get('nombre') and producto.get('precio'):
-                try:
-                    nombre = producto.get('nombre').strip()
-                    precio = int(producto.get('precio', 0))
-                    descripcion = producto.get('descripcion', '')
-                    categoria = producto.get('categoria', 'general')
-                    
-                    with db_manager.get_connection(tenant_id) as conn:
-                        with conn.cursor() as cur:
-                            # Verificar si ya existe un producto con el mismo nombre
-                            cur.execute(f'''
-                                SELECT id, precio FROM "{schema_name}".productos 
-                                WHERE nombre ILIKE %s
-                            ''', (nombre,))
-                            existing = cur.fetchone()
-                            
-                            if existing:
-                                # Actualizar producto existente
-                                cur.execute(f'''
-                                    UPDATE "{schema_name}".productos 
-                                    SET precio = %s, descripcion = %s, categoria = %s, 
-                                        disponible = true, updated_at = NOW()
-                                    WHERE nombre ILIKE %s
-                                ''', (precio, descripcion, categoria, nombre))
-                                productos_actualizados += 1
-                                logger.info(f'Producto actualizado: {nombre}')
-                            else:
-                                # Insertar nuevo producto
-                                product_id = str(uuid.uuid4())
-                                cur.execute(f'''
-                                    INSERT INTO "{schema_name}".productos 
-                                    (id, nombre, descripcion, precio, categoria, disponible)
-                                    VALUES (%s, %s, %s, %s, %s, true)
-                                ''', (product_id, nombre, descripcion, precio, categoria))
-                                productos_agregados += 1
-                                logger.info(f'Producto agregado: {nombre}')
-                            conn.commit()
-                            
-                except Exception as e:
-                    logger.warning(f'Error guardando producto {producto.get("nombre")}: {e}')
+        # Guardar productos (evitando duplicados)
+        productos_agregados = 0
+        productos_actualizados = 0
+        errores = 0
         
-        logger.info(f'Entrenamiento completado: {productos_agregados} agregados, {productos_actualizados} actualizados')
+        for producto in resultado.get('productos', []):
+            if not producto.get('nombre'):
+                continue
+                
+            try:
+                nombre = producto.get('nombre').strip()
+                precio = producto.get('precio', 0)
+                
+                # Normalizar precio (puede venir como string con puntos o comas)
+                if isinstance(precio, str):
+                    # Limpiar caracteres no numéricos
+                    precio_limpio = re.sub(r'[^0-9]', '', precio)
+                    precio = int(precio_limpio) if precio_limpio else 0
+                elif isinstance(precio, float):
+                    precio = int(precio)
+                elif not isinstance(precio, int):
+                    precio = 0
+                
+                # Validar precio mínimo (evitar errores donde $ se lee como 5)
+                if precio < 100 and nombre and len(nombre) > 3:
+                    logger.warning(f"Precio sospechosamente bajo para '{nombre}': ${precio}. Verificar manualmente.")
+                    # No saltar, solo advertir
+                
+                descripcion = producto.get('descripcion', '')
+                categoria = producto.get('categoria', 'general')
+                
+                with db_manager.get_connection(tenant_id) as conn:
+                    with conn.cursor() as cur:
+                        # Verificar si ya existe un producto con el mismo nombre (insensible a mayúsculas)
+                        cur.execute(f'''
+                            SELECT id, precio FROM "{schema_name}".productos 
+                            WHERE nombre ILIKE %s
+                        ''', (nombre,))
+                        existing = cur.fetchone()
+                        
+                        if existing:
+                            # Actualizar producto existente
+                            cur.execute(f'''
+                                UPDATE "{schema_name}".productos 
+                                SET precio = %s, descripcion = %s, categoria = %s, 
+                                    disponible = true, updated_at = NOW()
+                                WHERE nombre ILIKE %s
+                            ''', (precio, descripcion, categoria, nombre))
+                            productos_actualizados += 1
+                            logger.info(f'Producto actualizado: {nombre} (precio: ${precio})')
+                        else:
+                            # Insertar nuevo producto
+                            product_id = str(uuid.uuid4())
+                            cur.execute(f'''
+                                INSERT INTO "{schema_name}".productos 
+                                (id, nombre, descripcion, precio, categoria, disponible)
+                                VALUES (%s, %s, %s, %s, %s, true)
+                            ''', (product_id, nombre, descripcion, precio, categoria))
+                            productos_agregados += 1
+                            logger.info(f'Producto agregado: {nombre} (precio: ${precio})')
+                        
+                        conn.commit()
+                        
+            except Exception as e:
+                logger.warning(f'Error guardando producto "{producto.get("nombre")}": {e}')
+                errores += 1
+        
+        # Mensaje de resumen
+        if productos_agregados > 0 or productos_actualizados > 0:
+            mensaje = f'Entrenamiento completado. '
+            if productos_agregados > 0:
+                mensaje += f'{productos_agregados} productos agregados, '
+            if productos_actualizados > 0:
+                mensaje += f'{productos_actualizados} productos actualizados, '
+            if errores > 0:
+                mensaje += f'{errores} errores.'
+            else:
+                mensaje = mensaje.rstrip(', ') + '.'
+        else:
+            mensaje = 'No se encontraron productos para guardar.'
+        
+        logger.info(f'Entrenamiento completado: +{productos_agregados} / ~{productos_actualizados} / !{errores}')
         
         return jsonify({
-            'status': 'ok', 
-            'contexto': resultado, 
+            'status': 'ok',
+            'contexto': resultado,
             'productos_agregados': productos_agregados,
             'productos_actualizados': productos_actualizados,
-            'message': f'Entrenamiento exitoso. {productos_agregados} productos agregados, {productos_actualizados} actualizados.'
+            'errores': errores,
+            'message': mensaje
         })
         
     except Exception as e:

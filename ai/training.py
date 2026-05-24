@@ -2,100 +2,108 @@ import base64
 import io
 import json
 import re
+import logging
 import pytesseract
 from PIL import Image
+import numpy as np
 from core.logger import logger
 from ai.client import ai_client
 
+# Intentar importar OpenCV para procesamiento avanzado de imágenes
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    logger.warning("OpenCV (cv2) no está instalado. El procesamiento de imágenes será limitado. Instala con: pip install opencv-python")
+
 class IATrainer:
-    """Entrenador de IA para cada negocio con soporte OCR"""
+    """Entrenador de IA para cada negocio con soporte OCR mejorado"""
     
-    def procesar_imagen(self, image_base64: str) -> dict:
-        """Procesa una imagen de menú usando Tesseract OCR + IA"""
+    def _preprocesar_imagen(self, image: Image.Image) -> Image.Image:
+        """Preprocesa la imagen para mejorar el reconocimiento OCR"""
         try:
-            # Decodificar imagen
-            image_data = base64.b64decode(image_base64)
-            image = Image.open(io.BytesIO(image_data))
+            if not CV2_AVAILABLE:
+                # Si no hay OpenCV, solo convertir a escala de grises
+                return image.convert('L')
             
-            # Aplicar OCR
-            logger.info("Aplicando OCR a la imagen...")
-            texto_extraido = pytesseract.image_to_string(image, lang='spa')
+            # Convertir PIL a OpenCV
+            img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
             
-            if not texto_extraido or len(texto_extraido.strip()) < 10:
-                logger.warning("No se pudo extraer texto suficiente de la imagen")
-                return None
+            # 1. Convertir a escala de grises
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             
-            logger.info(f"Texto extraído ({len(texto_extraido)} caracteres)")
+            # 2. Redimensionar si es muy pequeña (mejora OCR)
+            height, width = gray.shape
+            if height < 800 or width < 600:
+                scale = max(2, int(1200 / width))
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
+                logger.info(f"Imagen redimensionada: {width}x{height} -> {new_width}x{new_height}")
             
-            # Estructurar con IA
-            resultado = self._estructurar_con_ia(texto_extraido)
-            return resultado
+            # 3. Aplicar filtro bilateral para reducir ruido sin perder bordes
+            denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+            
+            # 4. Aumentar contraste usando CLAHE
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            contrast = clahe.apply(denoised)
+            
+            # 5. Binarización adaptativa (mejor para textos con iluminación variable)
+            binary = cv2.adaptiveThreshold(contrast, 255, 
+                                           cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                           cv2.THRESH_BINARY, 11, 2)
+            
+            # 6. Opcional: Limpiar ruido pequeño
+            kernel = np.ones((1, 1), np.uint8)
+            binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+            
+            # Convertir de vuelta a PIL
+            return Image.fromarray(binary)
             
         except Exception as e:
-            logger.error(f"Error procesando imagen: {e}")
-            return None
+            logger.error(f"Error en preprocesamiento: {e}")
+            return image.convert('L')  # Fallback a escala de grises simple
     
-    def _estructurar_con_ia(self, texto_ocr: str) -> dict:
-        """Usa IA para estructurar el texto extraído por OCR"""
-        logger.info("=== INICIO _estructurar_con_ia ===")
+    def _limpiar_texto_ocr(self, texto: str) -> str:
+        """Limpia y normaliza el texto extraído por OCR"""
+        if not texto:
+            return ""
         
-        if not ai_client.client:
-            logger.error("Cliente de IA no disponible")
-            return None
+        # Reemplazar caracteres confusos comunes
+        correcciones = {
+            '5': '$',      # El símbolo $ a menudo se lee como 5
+            '5$': '$',     # Caso especial
+            'S': '$',      # A veces S se confunde con $
+            's': '$',      # s minúscula
+            '|': '1',      # Pipe como 1
+            'I': '1',      # I mayúscula como 1
+            'l': '1',      # l minúscula como 1
+            'O': '0',      # O mayúscula como 0
+            'o': '0',      # o minúscula como 0
+            ',': '.',      # Normalizar decimales
+            ';': ',',      # Punto y coma como coma
+            '€': '$',      # Euro como dólar
+            '£': '$',      # Libra como dólar
+        }
         
-        # Limitar texto para evitar tokens excesivos
-        texto_limitado = texto_ocr[:2000]
+        for error, correcto in correcciones.items():
+            texto = texto.replace(error, correcto)
         
-        prompt = f"""
-        Extrae productos del siguiente texto de menú.
+        # Corregir patrones de precio comunes
+        # Ej: "25000" vs "25.000" vs "25,000"
+        texto = re.sub(r'(\d+)[.,](\d{3})', r'\1\2', texto)      # 25.000 -> 25000
+        texto = re.sub(r'(\d+)[.,](\d{2})', r'\1.\2', texto)      # 25.00 -> 25.00
+        texto = re.sub(r'\$?(\d+)\$', r'$\1', texto)               # 25000$ -> $25000
         
-        TEXTO:
-        {texto_limitado}
+        # Eliminar caracteres no deseados
+        texto = re.sub(r'[»«•*+_=~]', '', texto)
         
-        IMPORTANTE: Devuelve SOLO un JSON válido. Sin markdown, sin explicaciones.
+        # Normalizar espacios
+        texto = re.sub(r'\s+', ' ', texto)
         
-        Formato exacto:
-        {{"productos": [{{"nombre": "nombre", "precio": 12345, "descripcion": ""}}]}}
-        
-        Si no hay productos, devuelve {{"productos": []}}
-        """
-        
-        try:
-            response = ai_client.client.chat.completions.create(
-                model=ai_client.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1500,
-                temperature=0.2
-            )
-            
-            contenido = response.choices[0].message.content
-            logger.info(f"Respuesta DeepSeek recibida ({len(contenido)} chars)")
-            
-            # Extraer JSON
-            resultado = self._extraer_json(contenido)
-            
-            if resultado and 'productos' in resultado:
-                # Limpiar productos
-                productos_validos = []
-                for p in resultado['productos']:
-                    nombre = p.get('nombre', '')
-                    if nombre and isinstance(nombre, str):
-                        nombre = re.sub(r'[»«•*+_\-]', '', nombre).strip()
-                        if nombre and len(nombre) > 1:
-                            p['nombre'] = nombre
-                            p['precio'] = p.get('precio', 0)
-                            p['descripcion'] = p.get('descripcion', '')
-                            productos_validos.append(p)
-                resultado['productos'] = productos_validos
-                logger.info(f"Productos extraídos: {len(productos_validos)}")
-                return resultado
-            
-            logger.warning("No se pudo extraer JSON válido")
-            return {'productos': []}
-            
-        except Exception as e:
-            logger.error(f"Error en _estructurar_con_ia: {e}")
-            return {'productos': []}
+        return texto.strip()
     
     def _extraer_json(self, texto: str) -> dict:
         """Extrae y parsea JSON de una respuesta de IA"""
@@ -124,6 +132,139 @@ class IATrainer:
             logger.error(f"Error JSON: {e}")
             return None
     
+    def _normalizar_precio(self, precio) -> int:
+        """Normaliza un precio a entero"""
+        if precio is None:
+            return 0
+        
+        if isinstance(precio, int):
+            return precio
+        
+        if isinstance(precio, float):
+            return int(precio)
+        
+        if isinstance(precio, str):
+            # Limpiar caracteres no numéricos
+            precio_limpio = re.sub(r'[^0-9]', '', precio)
+            if precio_limpio:
+                return int(precio_limpio)
+        
+        return 0
+    
+    def procesar_imagen(self, image_base64: str) -> dict:
+        """Procesa una imagen de menú usando Tesseract OCR + IA con preprocesamiento mejorado"""
+        try:
+            # Decodificar imagen
+            image_data = base64.b64decode(image_base64)
+            image = Image.open(io.BytesIO(image_data))
+            
+            logger.info(f"Imagen original: {image.size}, modo: {image.mode}")
+            
+            # Preprocesar imagen
+            processed_image = self._preprocesar_imagen(image)
+            
+            # Configuración de Tesseract para mejor reconocimiento
+            custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789$.,- "'
+            
+            # Aplicar OCR
+            logger.info("Aplicando OCR a la imagen procesada...")
+            texto_extraido = pytesseract.image_to_string(processed_image, lang='spa', config=custom_config)
+            
+            # Limpiar texto extraído
+            texto_extraido = self._limpiar_texto_ocr(texto_extraido)
+            
+            logger.info(f"Texto extraído ({len(texto_extraido)} caracteres)")
+            logger.debug(f"Texto OCR: {texto_extraido[:500]}...")
+            
+            if not texto_extraido or len(texto_extraido.strip()) < 10:
+                logger.warning("No se pudo extraer texto suficiente de la imagen")
+                return None
+            
+            # Estructurar con IA
+            resultado = self._estructurar_con_ia(texto_extraido)
+            return resultado
+            
+        except Exception as e:
+            logger.error(f"Error procesando imagen: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _estructurar_con_ia(self, texto_ocr: str) -> dict:
+        """Usa IA para estructurar el texto extraído por OCR con mejor manejo de precios"""
+        
+        if not ai_client.client:
+            logger.error("Cliente de IA no disponible")
+            return None
+        
+        prompt = f"""
+        Extrae productos y precios del siguiente texto de menú extraído por OCR.
+        
+        TEXTO EXTRAÍDO (puede tener errores):
+        {texto_ocr[:3000]}
+        
+        INSTRUCCIONES IMPORTANTES:
+        1. El símbolo '$' puede aparecer como '5' o 'S' en el texto OCR. Corrígelo.
+        2. Los precios pueden estar en formatos: "25000", "25.000", "25,000" o "$25.000"
+        3. Normaliza todos los precios a números sin puntos ni comas (ej: 25000)
+        4. Si un precio parece ser por kilo/libra/unidad, incluye esa información en la descripción
+        5. Agrupa productos similares cuando sea posible
+        
+        IMPORTANTE: Devuelve SOLO un JSON válido. Sin markdown, sin explicaciones.
+        
+        Formato exacto:
+        {{
+            "productos": [
+                {{"nombre": "nombre del producto", "precio": 25000, "descripcion": "descripción si existe"}},
+                {{"nombre": "otro producto", "precio": 15000, "descripcion": ""}}
+            ],
+            "horario": "horario del negocio si se menciona",
+            "ubicacion": "ubicación si se menciona",
+            "politicas": "políticas si se mencionan",
+            "instrucciones_adicionales": "instrucciones especiales"
+        }}
+        
+        Si no hay productos, devuelve {{"productos": []}}
+        """
+        
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2000,
+                temperature=0.1  # Temperatura más baja para respuestas más consistentes
+            )
+            
+            contenido = response.choices[0].message.content
+            logger.info(f"Respuesta DeepSeek recibida ({len(contenido)} chars)")
+            
+            resultado = self._extraer_json(contenido)
+            
+            if resultado and 'productos' in resultado:
+                productos_validos = []
+                for p in resultado['productos']:
+                    nombre = p.get('nombre', '')
+                    if nombre and isinstance(nombre, str):
+                        # Limpiar nombre
+                        nombre = re.sub(r'[»«•*+_\-]', '', nombre).strip()
+                        if nombre and len(nombre) > 1:
+                            p['nombre'] = nombre
+                            # Normalizar precio
+                            p['precio'] = self._normalizar_precio(p.get('precio', 0))
+                            p['descripcion'] = p.get('descripcion', '')
+                            productos_validos.append(p)
+                
+                resultado['productos'] = productos_validos
+                logger.info(f"Productos extraídos: {len(productos_validos)}")
+                return resultado
+            
+            logger.warning("No se pudo extraer JSON válido")
+            return {'productos': []}
+            
+        except Exception as e:
+            logger.error(f"Error en _estructurar_con_ia: {e}")
+            return {'productos': []}
+    
     def procesar_texto(self, texto: str) -> dict:
         """Procesa texto descriptivo del negocio"""
         logger.info("=== INICIO procesar_texto ===")
@@ -136,13 +277,18 @@ class IATrainer:
         Extrae información de este negocio.
         
         DESCRIPCIÓN:
-        {texto[:2000]}
+        {texto[:3000]}
+        
+        INSTRUCCIONES IMPORTANTES:
+        1. Los precios deben ser números enteros (ej: 25000 en lugar de 25.000)
+        2. Extrae todos los productos mencionados con sus precios
+        3. Si un producto no tiene precio, ignóralo o pon precio 0
         
         IMPORTANTE: Devuelve SOLO un JSON válido.
         
         Formato:
         {{
-            "productos": [{{"nombre": "nombre", "precio": 12345, "descripcion": ""}}],
+            "productos": [{{"nombre": "nombre", "precio": 25000, "descripcion": ""}}],
             "horario": "",
             "ubicacion": "",
             "politicas": "",
@@ -154,11 +300,13 @@ class IATrainer:
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=1500,
-                temperature=0.2
+                max_tokens=2000,
+                temperature=0.1
             )
             
             contenido = response.choices[0].message.content
+            logger.info(f"Respuesta DeepSeek recibida ({len(contenido)} chars)")
+            
             resultado = self._extraer_json(contenido)
             
             if resultado:
@@ -182,6 +330,8 @@ class IATrainer:
                         nombre = re.sub(r'[»«•*+_\-]', '', nombre).strip()
                         if nombre and len(nombre) > 1:
                             p['nombre'] = nombre
+                            p['precio'] = self._normalizar_precio(p.get('precio', 0))
+                            p['descripcion'] = p.get('descripcion', '')
                             productos_validos.append(p)
                 resultado['productos'] = productos_validos
                 
@@ -205,7 +355,7 @@ class IATrainer:
         Eres un asistente de ventas por WhatsApp.
         
         PRODUCTOS:
-        {json.dumps(productos[:30], indent=2)}
+        {json.dumps(productos[:50], indent=2, ensure_ascii=False)}
         
         HORARIO: {horario}
         UBICACION: {ubicacion}
@@ -220,6 +370,7 @@ class IATrainer:
         """
         
         return prompt.strip()
+
 
 # Instancia global
 trainer = IATrainer()
