@@ -819,8 +819,11 @@ def train_ia(tenant_id):
             resultado = trainer.procesar_imagen(data.get('imagen'))
         else:
             resultado = trainer.procesar_texto(data.get('texto'))
+        
         if not resultado:
             return jsonify({'error': 'No se pudo procesar'}), 500
+        
+        # Asegurar estructura del resultado
         if 'productos' not in resultado:
             resultado['productos'] = []
         if 'horario' not in resultado:
@@ -831,6 +834,8 @@ def train_ia(tenant_id):
             resultado['politicas'] = ''
         if 'instrucciones_adicionales' not in resultado:
             resultado['instrucciones_adicionales'] = ''
+        
+        # Guardar contexto en tenant_context
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
                 prompt_personalizado = trainer.generar_prompt_personalizado(resultado)
@@ -847,24 +852,79 @@ def train_ia(tenant_id):
                         politicas = EXCLUDED.politicas,
                         prompt_personalizado = EXCLUDED.prompt_personalizado,
                         updated_at = NOW()
-                ''', (tenant_id, json.dumps(resultado.get('productos', [])), resultado.get('instrucciones_adicionales', ''), resultado.get('horario', ''), resultado.get('ubicacion', ''), resultado.get('politicas', ''), prompt_personalizado))
+                ''', (tenant_id, json.dumps(resultado.get('productos', [])), 
+                      resultado.get('instrucciones_adicionales', ''), 
+                      resultado.get('horario', ''), 
+                      resultado.get('ubicacion', ''), 
+                      resultado.get('politicas', ''), 
+                      prompt_personalizado))
             conn.commit()
+        
+        # Guardar productos (evitando duplicados)
         productos_agregados = 0
+        productos_actualizados = 0
+        
+        # Obtener schema_name
+        schema_name = _get_schema_name(tenant_id)
+        
         for producto in resultado.get('productos', []):
             if producto.get('nombre') and producto.get('precio'):
                 try:
-                    schema_manager.add_product(tenant_id, producto.get('nombre'), int(producto.get('precio', 0)), producto.get('descripcion', ''), producto.get('categoria', 'general'))
-                    productos_agregados += 1
+                    nombre = producto.get('nombre').strip()
+                    precio = int(producto.get('precio', 0))
+                    descripcion = producto.get('descripcion', '')
+                    categoria = producto.get('categoria', 'general')
+                    
+                    with db_manager.get_connection(tenant_id) as conn:
+                        with conn.cursor() as cur:
+                            # Verificar si ya existe un producto con el mismo nombre
+                            cur.execute(f'''
+                                SELECT id, precio FROM "{schema_name}".productos 
+                                WHERE nombre ILIKE %s
+                            ''', (nombre,))
+                            existing = cur.fetchone()
+                            
+                            if existing:
+                                # Actualizar producto existente
+                                cur.execute(f'''
+                                    UPDATE "{schema_name}".productos 
+                                    SET precio = %s, descripcion = %s, categoria = %s, 
+                                        disponible = true, updated_at = NOW()
+                                    WHERE nombre ILIKE %s
+                                ''', (precio, descripcion, categoria, nombre))
+                                productos_actualizados += 1
+                                logger.info(f'Producto actualizado: {nombre}')
+                            else:
+                                # Insertar nuevo producto
+                                product_id = str(uuid.uuid4())
+                                cur.execute(f'''
+                                    INSERT INTO "{schema_name}".productos 
+                                    (id, nombre, descripcion, precio, categoria, disponible)
+                                    VALUES (%s, %s, %s, %s, %s, true)
+                                ''', (product_id, nombre, descripcion, precio, categoria))
+                                productos_agregados += 1
+                                logger.info(f'Producto agregado: {nombre}')
+                            conn.commit()
+                            
                 except Exception as e:
-                    logger.warning(f'Error guardando producto: {e}')
-        logger.info(f'Entrenamiento completado: {productos_agregados} productos guardados')
-        return jsonify({'status': 'ok', 'contexto': resultado, 'productos_guardados': productos_agregados, 'message': f'Entrenamiento exitoso. Se guardaron {productos_agregados} productos.'})
+                    logger.warning(f'Error guardando producto {producto.get("nombre")}: {e}')
+        
+        logger.info(f'Entrenamiento completado: {productos_agregados} agregados, {productos_actualizados} actualizados')
+        
+        return jsonify({
+            'status': 'ok', 
+            'contexto': resultado, 
+            'productos_agregados': productos_agregados,
+            'productos_actualizados': productos_actualizados,
+            'message': f'Entrenamiento exitoso. {productos_agregados} productos agregados, {productos_actualizados} actualizados.'
+        })
+        
     except Exception as e:
         logger.error(f'Error en train_ia: {str(e)}')
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e), 'details': 'Error interno del servidor'}), 500
-
+    
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET', 'DELETE'])
 @login_required
 @tenant_owner_required

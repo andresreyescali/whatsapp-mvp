@@ -336,23 +336,34 @@ class SchemaManager:
             return None
     
     def add_product(self, tenant_id: str, nombre: str, precio: int, descripcion: str = "", categoria: str = "general"):
-        """Agrega un producto al menú"""
+        """Agrega un producto al menú (evita duplicados usando UNIQUE constraint)"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             product_id = str(uuid.uuid4())
+            
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
+                    # Usar ON CONFLICT para actualizar si ya existe
                     cur.execute(f"""
-                        INSERT INTO "{schema_name}".productos (id, nombre, descripcion, precio, categoria)
-                        VALUES (%s, %s, %s, %s, %s)
+                        INSERT INTO "{schema_name}".productos (id, nombre, descripcion, precio, categoria, disponible)
+                        VALUES (%s, %s, %s, %s, %s, true)
+                        ON CONFLICT (nombre) DO UPDATE SET
+                            precio = EXCLUDED.precio,
+                            descripcion = EXCLUDED.descripcion,
+                            categoria = EXCLUDED.categoria,
+                            disponible = true,
+                            updated_at = NOW()
+                        RETURNING id
                     """, (product_id, nombre, descripcion, precio, categoria))
-                conn.commit()
-            logger.info(f'Producto agregado: {nombre} (ID: {product_id}) para tenant {tenant_id}')
-            return product_id
+                    result_id = cur.fetchone()[0]
+                    conn.commit()
+                    
+                    logger.info(f'Producto guardado: {nombre} (ID: {result_id})')
+                    return result_id
         except Exception as e:
             logger.error(f'Error agregando producto: {e}')
             raise
-    
+        
     def update_product(self, tenant_id: str, product_id: str, nombre: str = None, descripcion: str = None, 
                       precio: int = None, categoria: str = None, disponible: bool = None):
         """Actualiza un producto existente"""
