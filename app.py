@@ -64,9 +64,12 @@ register_webhook_routes(app)
 
 def _get_schema_name(tenant_id: str) -> str:
     """Obtiene el schema_name de un tenant"""
-    tenant = tenant_repo.find_by_id(tenant_id)
-    if tenant and tenant.get('schema_name'):
-        return tenant['schema_name']
+    try:
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if tenant and tenant.get('schema_name'):
+            return tenant['schema_name']
+    except Exception as e:
+        logger.error(f"Error obteniendo schema_name: {e}")
     return f"tenant_{tenant_id.replace('-', '_')}"
 
 
@@ -125,21 +128,21 @@ def tenant_owner_required(f):
     @wraps(f)
     def decorated_function(tenant_id, *args, **kwargs):
         if 'usuario_id' not in session:
-            if request.path.startswith('/api/'):
-                return jsonify({'error': 'No autenticado'}), 401
-            return redirect('/')
+            return jsonify({'error': 'No autenticado'}), 401
         
         if session.get('rol_sistema') == 'super_admin':
             return f(tenant_id, *args, **kwargs)
         
-        negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
-        for n in negocios:
-            if n['id'] == tenant_id:
-                return f(tenant_id, *args, **kwargs)
+        try:
+            negocios = auth_manager.get_negocios_usuario(session['usuario_id'])
+            for n in negocios:
+                if n['id'] == tenant_id:
+                    return f(tenant_id, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error verificando acceso: {e}")
+            return jsonify({'error': 'Error de autorización'}), 403
         
-        if request.path.startswith('/api/'):
-            return jsonify({'error': 'No tienes acceso a este negocio'}), 403
-        return "No tienes acceso a este negocio", 403
+        return jsonify({'error': 'No tienes acceso a este negocio'}), 403
     return decorated_function
 
 def tenant_owner_required_from_args(f):
@@ -720,38 +723,55 @@ def update_product(tenant_id, product_id):
         logger.error(f'Error actualizando producto: {e}')
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/toggle_product/<tenant_id>/<product_id>', methods=['PUT', 'OPTIONS'])
+@app.route('/admin/toggle_product/<tenant_id>/<product_id>', methods=['PUT', 'POST', 'OPTIONS'])
 @login_required
 @tenant_owner_required
 def toggle_product(tenant_id, product_id):
     if request.method == 'OPTIONS':
         response = jsonify({'status': 'ok'})
-        response.headers.add('Access-Control-Allow-Methods', 'PUT, OPTIONS')
+        response.headers.add('Access-Control-Allow-Methods', 'PUT, POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
         return response, 200
+    
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         disponible = data.get('disponible', True)
-        schema_name = _get_schema_name(tenant_id)
         
-        logger.info(f"Toggle producto: tenant={tenant_id}, product={product_id}, disponible={disponible}, schema={schema_name}")
+        logger.info(f"Toggle producto: tenant={tenant_id}, product={product_id}, disponible={disponible}")
+        
+        # Obtener schema_name
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if not tenant:
+            logger.error(f"Tenant no encontrado: {tenant_id}")
+            return jsonify({'error': 'Tenant no encontrado'}), 404
+        
+        schema_name = tenant.get('schema_name')
+        if not schema_name:
+            schema_name = f"tenant_{tenant_id.replace('-', '_')}"
+        
+        logger.info(f"Usando schema: {schema_name}")
         
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
+                # Verificar si el producto existe
+                cur.execute(f'SELECT id FROM "{schema_name}".productos WHERE id = %s', (product_id,))
+                if not cur.fetchone():
+                    logger.error(f"Producto no encontrado: {product_id}")
+                    return jsonify({'error': 'Producto no encontrado'}), 404
+                
+                # Actualizar
                 cur.execute(f'UPDATE "{schema_name}".productos SET disponible = %s WHERE id = %s', (disponible, product_id))
-                updated = cur.rowcount
-            conn.commit()
+                conn.commit()
         
-        if updated > 0:
-            logger.info(f"Producto {product_id} actualizado a disponible={disponible}")
-            return jsonify({'status': 'ok', 'message': 'Producto actualizado'}), 200
-        return jsonify({'error': 'Producto no encontrado'}), 404
+        logger.info(f"Producto {product_id} actualizado a disponible={disponible}")
+        return jsonify({'status': 'ok', 'message': 'Producto actualizado'}), 200
+        
     except Exception as e:
         logger.error(f'Error toggling producto: {e}')
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-    
+
 @app.route('/admin/update_tenant/<tenant_id>', methods=['PUT', 'OPTIONS'])
 @login_required
 @tenant_owner_required
