@@ -601,7 +601,7 @@ class MessageHandler:
                 self._guardar_datos_cliente_en_bd(tenant['id'], numero)
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
             else:
-                return "No hay productos en tu carrito. ¿Qué te gustaría ordenar? (ej: 'quiero una torta red velvet')"
+                return "No hay productos en tu carrito. ¿Qué te gustaría ordenar? (ej: 'quiero solicitar ...')"
         
         # Verificar consulta de carrito
         if any(palabra in texto.lower() for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
@@ -668,13 +668,36 @@ INSTRUCCIONES:
             return self._respuesta_fallback(tenant, menu)
     
     def _parece_pedido(self, texto: str) -> bool:
-        """Detecta si el mensaje parece un pedido de producto"""
+        """Detecta si el mensaje parece un pedido de producto o servicio"""
+        # Palabras para detectar pedidos (genéricas)
         palabras_pedido = [
-            'quiero', 'deseo', 'necesito', 'me gustaría', 'una', 'un', 
-            'torta', 'pastel', 'galleta', 'cheesecake', 'red velvet',
-            'chocolate', 'vainilla', 'comprar', 'ordenar', 'pedir'
+            'quiero', 'deseo', 'necesito', 'me gustaría', 'comprar', 
+            'ordenar', 'pedir', 'reservar', 'agendar'
         ]
+        
+        # Palabras específicas de productos (evitar confusiones)
+        palabras_producto = [
+            'torta', 'pastel', 'galleta', 'cheesecake', 'red velvet',
+            'chocolate', 'vainilla', 'pizza', 'hamburguesa'
+        ]
+        
+        # Palabras específicas de viajes
+        palabras_viaje = [
+            'tour', 'viaje', 'islas', 'rosario', 'barú', 'cartagena',
+            'playa', 'vuelo', 'hotel', 'traslado', 'avión'
+        ]
+        
         texto_lower = texto.lower()
+        
+        # Si menciona palabras de viaje, es un pedido de viaje
+        if any(palabra in texto_lower for palabra in palabras_viaje):
+            return True
+        
+        # Si menciona palabras de producto, pero NO palabras de viaje, es pedido de producto
+        if any(palabra in texto_lower for palabra in palabras_producto):
+            return True
+        
+        # Si solo tiene palabras genéricas, también considerar como pedido
         return any(palabra in texto_lower for palabra in palabras_pedido)
     
     def _intentar_agregar_producto(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
