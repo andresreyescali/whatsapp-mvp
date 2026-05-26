@@ -42,7 +42,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 2. Tabla de productos
+                # 2. Tabla de productos/servicios
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".productos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -55,7 +55,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 3. Tabla de pedidos
+                # 3. Tabla de pedidos/reservas
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -100,6 +100,27 @@ class SchemaManager:
                 )
                 ''')
                 
+                # 6. Tabla de reservas (específica para hotel y viajes)
+                if tipo_negocio in ['hotel', 'agencia_viajes']:
+                    cur.execute(f'''
+                    CREATE TABLE IF NOT EXISTS "{schema_name}".reservas (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
+                        cliente_numero TEXT NOT NULL,
+                        servicio TEXT NOT NULL,
+                        fecha_inicio DATE NOT NULL,
+                        fecha_fin DATE,
+                        personas INTEGER DEFAULT 1,
+                habitaciones INTEGER DEFAULT 1,
+                        destino TEXT,
+                        total INTEGER NOT NULL,
+                        estado VARCHAR(50) DEFAULT 'pendiente',
+                        notas TEXT,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    )
+                    ''')
+                
                 # Índices
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON "{schema_name}".pedidos(cliente_id)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON "{schema_name}".pedidos(estado)')
@@ -107,7 +128,11 @@ class SchemaManager:
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON "{schema_name}".conversaciones(cliente_numero)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
                 
-                # Insertar productos de ejemplo
+                if tipo_negocio in ['hotel', 'agencia_viajes']:
+                    cur.execute(f'CREATE INDEX IF NOT EXISTS idx_reservas_cliente ON "{schema_name}".reservas(cliente_id)')
+                    cur.execute(f'CREATE INDEX IF NOT EXISTS idx_reservas_fechas ON "{schema_name}".reservas(fecha_inicio, fecha_fin)')
+                
+                # Insertar productos/servicios de ejemplo según el tipo de negocio
                 self._insert_default_products(cur, schema_name, tipo_negocio)
                 
             conn.commit()
@@ -208,7 +233,7 @@ class SchemaManager:
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
     
     def _insert_default_products(self, cursor, schema_name: str, tipo_negocio: str):
-        """Inserta productos de ejemplo según el tipo de negocio"""
+        """Inserta productos/servicios de ejemplo según el tipo de negocio"""
         
         cursor.execute(f'SELECT COUNT(*) FROM "{schema_name}".productos')
         count = cursor.fetchone()[0]
@@ -275,6 +300,32 @@ class SchemaManager:
                 ('Enduro 250cc', 'Moto doble propósito, para ciudad y carretera', 12500000, 'enduro'),
                 ('Deportiva 300cc', 'Moto deportiva, alta velocidad', 18000000, 'deportivas'),
                 ('Scooter Eléctrica', 'Moto eléctrica, cero emisiones', 8500000, 'electricas')
+            ''')
+        
+        elif tipo_negocio == "hotel":
+            cursor.execute(f'''
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
+            VALUES 
+                ('Habitación Simple', 'Habitación individual, baño privado, WiFi', 150000, 'habitaciones'),
+                ('Habitación Doble', 'Habitación para 2 personas, cama queen, baño privado', 200000, 'habitaciones'),
+                ('Habitación Suite', 'Suite de lujo, jacuzzi, vista panorámica', 350000, 'habitaciones'),
+                ('Desayuno Buffet', 'Desayuno americano incluido', 25000, 'servicios'),
+                ('Lavandería', 'Servicio de lavandería por kilo', 15000, 'servicios'),
+                ('Traslado Aeropuerto', 'Transporte ida y vuelta', 80000, 'servicios'),
+                ('Spa y Masajes', 'Acceso a spa y masaje relajante', 120000, 'servicios')
+            ''')
+        
+        elif tipo_negocio == "agencia_viajes":
+            cursor.execute(f'''
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria)
+            VALUES 
+                ('Paquete Cartagena', '3 noches en Cartagena, hotel playa, desayuno incluido', 850000, 'paquetes'),
+                ('Paquete Santa Marta', '4 noches en Santa Marta, visita Tayrona', 950000, 'paquetes'),
+                ('Paquete Medellín', '3 noches en Medellín, tour ciudad', 650000, 'paquetes'),
+                ('Paquete San Andrés', '5 noches en San Andrés, todo incluido', 1500000, 'paquetes'),
+                ('Seguro de Viaje', 'Asistencia médica y cancelación', 120000, 'servicios'),
+                ('Alquiler de Auto', 'Auto compacto por día', 180000, 'servicios'),
+                ('Tour Ciudad', 'Tour guiado por la ciudad', 80000, 'tours')
             ''')
         
         else:
