@@ -645,6 +645,39 @@ class MessageHandler:
             logger.error(f'Error detectando servicios: {e}')
             return []
     
+    def _detectar_productos_simples(self, texto: str, menu: list) -> list:
+        """Detecta productos por coincidencia simple en el texto (sin IA)"""
+        if not menu:
+            return []
+        
+        texto_lower = texto.lower()
+        productos_encontrados = []
+        
+        for producto in menu:
+            nombre = producto.get('nombre', '').lower()
+            # Buscar si el nombre del producto está en el texto
+            if nombre in texto_lower:
+                cantidad = 1
+                # Buscar cantidad antes del producto (ej: "2 tortas", "3 empanadas")
+                # Patrón: número + espacio + nombre del producto
+                patron = rf'(\d+)\s*{re.escape(nombre)}'
+                match = re.search(patron, texto_lower)
+                if match:
+                    cantidad = int(match.group(1))
+                else:
+                    # También buscar "una", "un"
+                    if re.search(r'\buna?\s+' + re.escape(nombre), texto_lower):
+                        cantidad = 1
+                
+                productos_encontrados.append({
+                    'nombre': producto['nombre'],
+                    'precio': producto.get('precio', 0),
+                    'cantidad': cantidad
+                })
+                logger.info(f"Producto detectado por coincidencia simple: {producto['nombre']} x{cantidad}")
+        
+        return productos_encontrados
+
     def _procesar_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
         """Procesa el mensaje usando IA para entender lenguaje natural"""
         
@@ -868,34 +901,6 @@ Mientras tanto, puedes contactarnos directamente al WhatsApp del negocio."""
 ¿Qué te gustaría ordenar o reservar? Puedes escribir "MENÚ" para ver el catálogo completo o decirme directamente lo que deseas."""
         else:
             return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte hoy?"
-
-def _detectar_productos_simples(self, texto: str, menu: list) -> list:
-    """Detecta productos por coincidencia simple en el texto (sin IA)"""
-    if not menu:
-        return []
-    
-    texto_lower = texto.lower()
-    productos_encontrados = []
-    
-    for producto in menu:
-        nombre = producto.get('nombre', '').lower()
-        # Buscar si el nombre del producto está en el texto
-        if nombre in texto_lower:
-            cantidad = 1
-            # Buscar cantidad antes del producto (ej: "2 tortas", "3 empanadas")
-            patron = rf'(\d+)\s*{re.escape(nombre)}'
-            match = re.search(patron, texto_lower)
-            if match:
-                cantidad = int(match.group(1))
-            
-            productos_encontrados.append({
-                'nombre': producto['nombre'],
-                'precio': producto.get('precio', 0),
-                'cantidad': cantidad
-            })
-            logger.info(f"Producto detectado por coincidencia simple: {producto['nombre']} x{cantidad}")
-    
-    return productos_encontrados
 
 # Instancia global
 message_handler = MessageHandler()
