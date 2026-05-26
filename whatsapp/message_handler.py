@@ -667,31 +667,62 @@ class MessageHandler:
         if numero in self._datos_cliente and self._datos_cliente[numero].get('nombre'):
             self._guardar_datos_cliente_en_bd(tenant['id'], numero)
         
-        # Verificar confirmación
+        # ========== 1. VERIFICAR CONFIRMACIÓN ==========
         if self._cliente_confirmo(texto):
             if carrito_actual.get('items'):
                 self._guardar_datos_cliente_en_bd(tenant['id'], numero)
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
             else:
-                return "No hay servicios/productos en tu carrito. ¿Qué te gustaría reservar o comprar?"
+                return "❌ No hay productos en tu carrito. Por favor, vuelve a indicarme qué deseas ordenar.\n\nEjemplo: 'quiero una torta de chocolate'"
         
-        # Verificar consulta de carrito
+        # ========== 2. VERIFICAR CONSULTA DE CARRITO ==========
         if any(palabra in texto.lower() for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo', 'mi reserva']):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # Detectar intención de reserva/compra y agregar al carrito
-        if self._intencion_reserva(texto) or self._parece_pedido(texto):
+        # ========== 3. DETECTAR PRODUCTOS (PRIORIDAD) ==========
+        # Primero intentar con coincidencia simple (más rápida)
+        productos_detectados = self._detectar_productos_simples(texto, menu)
+        
+        # Si no, usar IA para detectar productos
+        if not productos_detectados:
             productos_detectados = self._detectar_productos_con_ia(texto, menu)
-            if productos_detectados:
-                self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
-                nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
-                return self._mostrar_resumen_carrito(tenant, numero, nuevo_carrito)
         
-        # Si el carrito está vacío y el mensaje parece un pedido, intentar agregar
-        if not carrito_actual.get('items') and (self._parece_pedido(texto) or self._intencion_reserva(texto)):
-            return self._intentar_agregar_producto(texto, tenant, menu, numero, contexto)
+        # ========== 4. AGREGAR PRODUCTOS AL CARRITO ==========
+        if productos_detectados:
+            self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
+            nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
+            
+            # Mostrar resumen con opción de confirmar
+            items_texto = ""
+            for item in nuevo_carrito['items']:
+                subtotal = item.get('precio', 0) * item.get('cantidad', 1)
+                items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${subtotal:,.0f}\n"
+            
+            return f"""✅ **Productos agregados a tu pedido:**
+
+    {items_texto}
+    **Total:** ${nuevo_carrito.get('total', 0):,.0f}
+
+    ¿Algo más o confirmamos el pedido? (responde "confirmo" para finalizar)"""
         
-        # Crear menú simplificado
+        # ========== 5. SI HAY CARRITO PERO NO SE DETECTARON PRODUCTOS ==========
+        if carrito_actual.get('items'):
+            return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
+        
+        # ========== 6. MOSTRAR MENÚ SI ESTÁ VACÍO ==========
+        if menu:
+            primeros = menu[:5]
+            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in primeros])
+            return f"""🌟 **{tenant.get('nombre', 'Bienvenido')}**
+
+    Estos son nuestros productos:
+
+    {sugerencias}
+
+    ¿Qué te gustaría ordenar? Escríbeme el nombre del producto."""
+        
+        # ========== 7. FALLBACK CON IA ==========
+        # Solo llegar aquí si no hay productos detectados y no hay carrito
         menu_simplificado = []
         for p in menu[:30]:
             menu_simplificado.append({
@@ -702,34 +733,24 @@ class MessageHandler:
         
         datos_pendientes = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
         
-        system_prompt = f"""Eres un asistente de ventas y reservas para {tenant.get('nombre', 'Mi negocio')}.
+        system_prompt = f"""Eres un asistente de ventas para {tenant.get('nombre', 'Mi negocio')}.
 
-🏪 INFORMACIÓN DEL NEGOCIO:
-- Horario: {contexto.get('horario', 'No especificado')}
-- Ubicación: {contexto.get('ubicacion', 'No especificada')}
-- Políticas: {contexto.get('politicas', 'No especificadas')}
+    🏪 INFORMACIÓN:
+    - Horario: {contexto.get('horario', 'No especificado')}
+    - Ubicación: {contexto.get('ubicacion', 'No especificada')}
 
-📋 SERVICIOS/PRODUCTOS DISPONIBLES:
-{json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
+    📋 PRODUCTOS:
+    {json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
 
-{resumen_cliente}
+    {resumen_cliente}
 
-{self._get_carrito_info_para_prompt(tenant['id'], numero)}
+    {historial_texto}
 
-📝 DATOS PROPORCIONADOS EN ESTA CONVERSACIÓN:
-{datos_pendientes or "Ninguno aún"}
-
-{historial_texto}
-
-INSTRUCCIONES IMPORTANTES:
-1. Eres un asesor amable y profesional.
-2. Cuando el cliente quiera algo, confirma los detalles.
-3. DESPUÉS de confirmar los detalles, pregunta si desea proceder.
-4. Cuando el cliente diga "confirmo", "si", "proceder", finaliza.
-5. Usa el historial para recordar lo que el cliente ya dijo.
-
-RESPONDE de forma amable, profesional y en español.
-"""
+    INSTRUCCIONES:
+    1. Responde de forma amable y natural en español.
+    2. Ayuda al cliente a elegir un producto.
+    3. No inventes productos que no están en el catálogo.
+    """
         
         user_message = f"Cliente: {texto}\n\nAsistente:"
         
@@ -741,7 +762,7 @@ RESPONDE de forma amable, profesional y en español.
                     {"role": "user", "content": user_message}
                 ],
                 temperature=0.7,
-                max_tokens=600
+                max_tokens=500
             )
             return response.choices[0].message.content
             
@@ -848,6 +869,33 @@ Mientras tanto, puedes contactarnos directamente al WhatsApp del negocio."""
         else:
             return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte hoy?"
 
+def _detectar_productos_simples(self, texto: str, menu: list) -> list:
+    """Detecta productos por coincidencia simple en el texto (sin IA)"""
+    if not menu:
+        return []
+    
+    texto_lower = texto.lower()
+    productos_encontrados = []
+    
+    for producto in menu:
+        nombre = producto.get('nombre', '').lower()
+        # Buscar si el nombre del producto está en el texto
+        if nombre in texto_lower:
+            cantidad = 1
+            # Buscar cantidad antes del producto (ej: "2 tortas", "3 empanadas")
+            patron = rf'(\d+)\s*{re.escape(nombre)}'
+            match = re.search(patron, texto_lower)
+            if match:
+                cantidad = int(match.group(1))
+            
+            productos_encontrados.append({
+                'nombre': producto['nombre'],
+                'precio': producto.get('precio', 0),
+                'cantidad': cantidad
+            })
+            logger.info(f"Producto detectado por coincidencia simple: {producto['nombre']} x{cantidad}")
+    
+    return productos_encontrados
 
 # Instancia global
 message_handler = MessageHandler()
