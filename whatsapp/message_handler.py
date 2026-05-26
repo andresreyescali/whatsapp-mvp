@@ -109,8 +109,42 @@ class MessageHandler:
                         VALUES (%s, %s, %s, %s, NOW())
                     """, (cliente_numero, mensaje, respuesta, 'ia'))
                 conn.commit()
+                logger.info(f"Conversación guardada para {cliente_numero}")
         except Exception as e:
             logger.error(f'Error guardando conversación: {e}')
+    
+    # ==================== MÉTODOS DEL HISTORIAL ====================
+    
+    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 10) -> list:
+        """Obtiene el historial de conversación desde el esquema del tenant"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT mensaje, respuesta, created_at 
+                        FROM "{schema_name}".conversaciones 
+                        WHERE cliente_numero = %s 
+                        ORDER BY created_at ASC 
+                        LIMIT %s
+                    """, (cliente_numero, limit))
+                    rows = cur.fetchall()
+                    logger.info(f"Historial obtenido para {cliente_numero}: {len(rows)} mensajes")
+                    return rows if rows else []
+        except Exception as e:
+            logger.error(f'Error obteniendo historial: {e}')
+            return []
+    
+    def _formatear_historial_para_prompt(self, historial: list) -> str:
+        """Formatea el historial para incluirlo en el prompt de IA"""
+        if not historial:
+            return ""
+        
+        texto = "\n📜 HISTORIAL DE LA CONVERSACIÓN:\n"
+        for h in historial:
+            texto += f"Cliente: {h[0]}\n"
+            texto += f"Asistente: {h[1]}\n"
+        return texto
     
     # ==================== MÉTODOS DEL CARRITO ====================
 
@@ -547,6 +581,13 @@ class MessageHandler:
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
         resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
         
+        # ========== OBTENER HISTORIAL DE CONVERSACIÓN ==========
+        historial = self._get_historial_conversacion(tenant['id'], numero, 10)
+        historial_texto = self._formatear_historial_para_prompt(historial)
+        if historial:
+            logger.info(f"Incluyendo {len(historial)} mensajes del historial en el prompt")
+        # =======================================================
+        
         # Extraer y guardar datos del cliente
         self._extraer_y_guardar_datos(texto, numero)
         
@@ -598,11 +639,14 @@ class MessageHandler:
 📝 DATOS PROPORCIONADOS EN ESTA CONVERSACIÓN:
 {datos_pendientes or "Ninguno aún"}
 
+{historial_texto}
+
 INSTRUCCIONES:
 1. Responde de forma amable y natural en español.
-2. Si el cliente pidió un producto, confírmalo y sugiere agregar algo más.
-3. Si faltan datos (dirección, fecha), pregúntalos amablemente.
-4. Cuando el cliente diga "confirmo" o "si", finaliza el pedido.
+2. Usa el historial para recordar lo que el cliente ya dijo.
+3. Si el cliente pidió un producto, confírmalo y sugiere agregar algo más.
+4. Si faltan datos (dirección, fecha), pregúntalos amablemente.
+5. Cuando el cliente diga "confirmo" o "si", finaliza el pedido.
 """
         
         user_message = f"Cliente: {texto}\n\nAsistente:"
@@ -684,9 +728,9 @@ INSTRUCCIONES:
     
     def _respuesta_fallback(self, tenant: dict, menu: list) -> str:
         """Respuesta de fallback cuando la IA no está disponible"""
-        productos_sugeridos = menu[:5]
-        if productos_sugeridos:
-            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in productos_sugeridos])
+        produkts_sugeridos = menu[:5]
+        if produkts_sugeridos:
+            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in produkts_sugeridos])
             return f"""Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}.
 
 **Productos sugeridos:**
