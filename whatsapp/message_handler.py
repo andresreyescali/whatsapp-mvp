@@ -352,19 +352,19 @@ class MessageHandler:
         return texto
     
     def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
-        """Finaliza el pedido y genera número de seguimiento"""
+        """Finaliza el pedido/reserva y genera número de seguimiento"""
         if not carrito or not carrito.get('items'):
-            return "No hay productos en tu pedido. ¿Qué te gustaría ordenar?"
+            return "No hay productos/servicios en tu carrito. ¿Qué te gustaría reservar?"
         
         datos_cliente = self._datos_cliente.get(numero, {})
         schema_name = self._get_schema_name(tenant['id'])
         
-        # Obtener ubicación del negocio para "recojo en tienda"
+        # Obtener ubicación del negocio
         contexto = self._obtener_contexto_tenant(tenant['id'])
         ubicacion_negocio = contexto.get('ubicacion', '')
         nombre_negocio = tenant.get('nombre', 'nuestro local')
         
-        # Determinar dirección de entrega
+        # Determinar dirección de entrega/recojo
         direccion_entrega = datos_cliente.get('direccion', '')
         if datos_cliente.get('recojo_en_tienda'):
             direccion_entrega = f"Recojo en tienda - {nombre_negocio} - {ubicacion_negocio}"
@@ -378,7 +378,7 @@ class MessageHandler:
         items = carrito['items']
         total = carrito['total']
         
-        # Obtener secuencial y generar número de pedido
+        # Obtener secuencial y generar número de pedido/reserva
         with db_manager.get_connection(tenant['id']) as conn:
             with conn.cursor() as cur:
                 cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
@@ -415,27 +415,30 @@ class MessageHandler:
             
             datos_texto = self._formatear_datos_cliente(datos_cliente)
             
-            return f"""✅ **¡PEDIDO CONFIRMADO!**
+            # Determinar si es reserva o pedido
+            tipo = "RESERVA" if any(p in tenant.get('nombre', '').lower() for p in ['travel', 'tour', 'viaje', 'avars travel']) else "PEDIDO"
+            
+            return f"""✅ **¡{tipo} CONFIRMADA!**
 
-📌 **Número de pedido:** *{numero_pedido}*
+📌 **Número de {tipo.lower()}:** *{numero_pedido}*
 📝 *Guarda este número para hacer seguimiento*
 
 {datos_texto}
 
-📋 **Productos:**
+📋 **Servicios/Productos:**
 {items_texto}
 💰 **Total:** ${total:,.0f}
 
-📦 **Entrega:** {direccion_entrega}
+📦 **Entrega/Recojo:** {direccion_entrega}
 
 🔗 **Link de pago:** {link_pago}
 
-📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
-📞 *Para consultar tu pedido, envía "estado pedido {numero_pedido}"*"""
+📌 *Cuando completes el pago, avísame para confirmar tu {tipo.lower()}.*
+📞 *Para consultar tu {tipo.lower()}, envía "estado {numero_pedido}"*"""
                 
         except Exception as e:
-            logger.error(f'Error creando pedido: {e}')
-            return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
+            logger.error(f'Error creando pedido/reserva: {e}')
+            return "❌ Hubo un error procesando tu solicitud. Por favor intenta de nuevo."
     
     def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
         """Obtiene o crea un cliente en el esquema del tenant"""
@@ -488,6 +491,15 @@ class MessageHandler:
     
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
+    def _intencion_reserva(self, texto: str) -> bool:
+        """Detecta si el cliente quiere reservar un servicio"""
+        palabras_reserva = [
+            'reservar', 'apartar', 'separar', 'confirmar', 'tomar',
+            'me gustaría', 'quiero', 'deseo', 'necesito', 'reserva'
+        ]
+        texto_lower = texto.lower()
+        return any(palabra in texto_lower for palabra in palabras_reserva)
+    
     def _extraer_y_guardar_datos(self, texto: str, numero: str):
         """Extrae datos del cliente usando IA y los guarda temporalmente"""
         if not ai_client.client:
@@ -534,11 +546,12 @@ class MessageHandler:
             logger.error(f'Error extrayendo datos: {e}')
     
     def _cliente_confirmo(self, texto: str) -> bool:
-        """Detecta si el cliente confirmó el pedido"""
+        """Detecta si el cliente confirmó el pedido/reserva"""
         confirmaciones = [
             'si', 'sí', 'dale', 'ok', 'correcto', 'confirmo',
             'confirmar', 'proceder', 'adelante', 'esta bien',
-            'está bien', 'confirmo pedido', 'si confirmo'
+            'está bien', 'confirmo pedido', 'si confirmo', 'reservar',
+            'apartar', 'separar', 'confirmar reserva'
         ]
         texto_lower = texto.lower().strip()
         return texto_lower in confirmaciones or any(c in texto_lower for c in confirmaciones if len(c) > 2)
@@ -546,7 +559,7 @@ class MessageHandler:
     def _mostrar_resumen_carrito(self, tenant: dict, numero: str, carrito: dict) -> str:
         """Muestra el resumen del carrito"""
         if not carrito.get('items'):
-            return "No tienes productos en tu pedido aún. ¿Qué te gustaría ordenar?"
+            return "No tienes productos/servicios en tu carrito aún. ¿Qué te gustaría ordenar o reservar?"
         
         items_texto = ""
         for item in carrito['items']:
@@ -572,6 +585,66 @@ class MessageHandler:
         
         return mensaje
     
+    def _detectar_productos_con_ia(self, texto: str, menu: list) -> list:
+        """Usa IA para detectar productos/servicios y cantidades"""
+        if not ai_client.client or not menu:
+            return []
+        
+        prompt = f"""
+        El cliente quiere reservar un servicio o comprar un producto. Extrae el ítem del siguiente mensaje y relaciónalo con el catálogo.
+        
+        CATÁLOGO DISPONIBLE:
+        {json.dumps([{'nombre': p.get('nombre'), 'precio': p.get('precio')} for p in menu[:30]], indent=2, ensure_ascii=False)}
+        
+        MENSAJE DEL CLIENTE: "{texto}"
+        
+        IMPORTANTE:
+        - El cliente puede mencionar el servicio/producto de forma natural
+        - Extrae la cantidad si la menciona (ej: "para 2 personas" → cantidad: 2, "2 tortas" → cantidad: 2)
+        - Si no menciona cantidad, asume 1
+        - Relaciona con el nombre más cercano en el catálogo
+        
+        Devuelve SOLO un JSON:
+        {{
+            "productos": [
+                {{"nombre": "nombre exacto del catálogo", "cantidad": 1}}
+            ]
+        }}
+        """
+        
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=300
+            )
+            contenido = response.choices[0].message.content
+            contenido = contenido.replace('```json', '').replace('```', '').strip()
+            resultado = json.loads(contenido)
+            
+            productos_encontrados = []
+            for p in resultado.get('productos', []):
+                nombre = p.get('nombre', '')
+                cantidad = p.get('cantidad', 1)
+                
+                # Buscar en el catálogo
+                for producto in menu:
+                    if producto['nombre'].lower() == nombre.lower() or nombre.lower() in producto['nombre'].lower():
+                        productos_encontrados.append({
+                            'nombre': producto['nombre'],
+                            'precio': producto.get('precio', 0),
+                            'cantidad': cantidad
+                        })
+                        break
+            
+            if productos_encontrados:
+                logger.info(f"Servicios/Productos detectados: {productos_encontrados}")
+            return productos_encontrados
+        except Exception as e:
+            logger.error(f'Error detectando servicios: {e}')
+            return []
+    
     def _procesar_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
         """Procesa el mensaje usando IA para entender lenguaje natural"""
         
@@ -581,12 +654,11 @@ class MessageHandler:
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
         resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
         
-        # ========== OBTENER HISTORIAL DE CONVERSACIÓN ==========
+        # Obtener historial
         historial = self._get_historial_conversacion(tenant['id'], numero, 10)
         historial_texto = self._formatear_historial_para_prompt(historial)
         if historial:
-            logger.info(f"Incluyendo {len(historial)} mensajes del historial en el prompt")
-        # =======================================================
+            logger.info(f"Incluyendo {len(historial)} mensajes del historial")
         
         # Extraer y guardar datos del cliente
         self._extraer_y_guardar_datos(texto, numero)
@@ -601,35 +673,43 @@ class MessageHandler:
                 self._guardar_datos_cliente_en_bd(tenant['id'], numero)
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
             else:
-                return "No hay productos en tu carrito. ¿Qué te gustaría ordenar? (ej: 'quiero solicitar ...')"
+                return "No hay servicios/productos en tu carrito. ¿Qué te gustaría reservar o comprar?"
         
         # Verificar consulta de carrito
-        if any(palabra in texto.lower() for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
+        if any(palabra in texto.lower() for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo', 'mi reserva']):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
+        # Detectar intención de reserva/compra y agregar al carrito
+        if self._intencion_reserva(texto) or self._parece_pedido(texto):
+            productos_detectados = self._detectar_productos_con_ia(texto, menu)
+            if productos_detectados:
+                self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
+                nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
+                return self._mostrar_resumen_carrito(tenant, numero, nuevo_carrito)
+        
         # Si el carrito está vacío y el mensaje parece un pedido, intentar agregar
-        if not carrito_actual.get('items') and self._parece_pedido(texto):
+        if not carrito_actual.get('items') and (self._parece_pedido(texto) or self._intencion_reserva(texto)):
             return self._intentar_agregar_producto(texto, tenant, menu, numero, contexto)
         
-        # Crear menú simplificado para el prompt
+        # Crear menú simplificado
         menu_simplificado = []
         for p in menu[:30]:
             menu_simplificado.append({
                 'nombre': p.get('nombre'),
                 'precio': p.get('precio'),
-                'descripcion': p.get('descripcion', '')[:50]
+                'descripcion': p.get('descripcion', '')[:100]
             })
         
         datos_pendientes = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
         
-        system_prompt = f"""Eres un asistente de ventas por WhatsApp para {tenant.get('nombre', 'Mi negocio')}.
+        system_prompt = f"""Eres un asistente de ventas y reservas para {tenant.get('nombre', 'Mi negocio')}.
 
 🏪 INFORMACIÓN DEL NEGOCIO:
 - Horario: {contexto.get('horario', 'No especificado')}
 - Ubicación: {contexto.get('ubicacion', 'No especificada')}
 - Políticas: {contexto.get('politicas', 'No especificadas')}
 
-📋 CATÁLOGO DE PRODUCTOS:
+📋 SERVICIOS/PRODUCTOS DISPONIBLES:
 {json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
 
 {resumen_cliente}
@@ -641,12 +721,14 @@ class MessageHandler:
 
 {historial_texto}
 
-INSTRUCCIONES:
-1. Responde de forma amable y natural en español.
-2. Usa el historial para recordar lo que el cliente ya dijo.
-3. Si el cliente pidió un producto, confírmalo y sugiere agregar algo más.
-4. Si faltan datos (dirección, fecha), pregúntalos amablemente.
-5. Cuando el cliente diga "confirmo" o "si", finaliza el pedido.
+INSTRUCCIONES IMPORTANTES:
+1. Eres un asesor amable y profesional.
+2. Cuando el cliente quiera algo, confirma los detalles.
+3. DESPUÉS de confirmar los detalles, pregunta si desea proceder.
+4. Cuando el cliente diga "confirmo", "si", "proceder", finaliza.
+5. Usa el historial para recordar lo que el cliente ya dijo.
+
+RESPONDE de forma amable, profesional y en español.
 """
         
         user_message = f"Cliente: {texto}\n\nAsistente:"
@@ -659,7 +741,7 @@ INSTRUCCIONES:
                     {"role": "user", "content": user_message}
                 ],
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=600
             )
             return response.choices[0].message.content
             
@@ -669,50 +751,53 @@ INSTRUCCIONES:
     
     def _parece_pedido(self, texto: str) -> bool:
         """Detecta si el mensaje parece un pedido de producto o servicio"""
-        # Palabras para detectar pedidos (genéricas)
         palabras_pedido = [
             'quiero', 'deseo', 'necesito', 'me gustaría', 'comprar', 
-            'ordenar', 'pedir', 'reservar', 'agendar'
+            'ordenar', 'pedir', 'reservar', 'agendar', 'tomar'
         ]
         
-        # Palabras específicas de productos (evitar confusiones)
+        # Palabras específicas de productos (para evitar confusiones)
         palabras_producto = [
             'torta', 'pastel', 'galleta', 'cheesecake', 'red velvet',
             'chocolate', 'vainilla', 'pizza', 'hamburguesa'
         ]
         
-        # Palabras específicas de viajes
-        palabras_viaje = [
+        # Palabras específicas de viajes/servicios
+        palabras_servicio = [
             'tour', 'viaje', 'islas', 'rosario', 'barú', 'cartagena',
-            'playa', 'vuelo', 'hotel', 'traslado', 'avión'
+            'playa', 'vuelo', 'hotel', 'traslado', 'avión', 'reserva'
         ]
         
         texto_lower = texto.lower()
         
-        # Si menciona palabras de viaje, es un pedido de viaje
-        if any(palabra in texto_lower for palabra in palabras_viaje):
+        # Si menciona palabras de servicio, es un pedido de servicio
+        if any(palabra in texto_lower for palabra in palabras_servicio):
             return True
         
-        # Si menciona palabras de producto, pero NO palabras de viaje, es pedido de producto
+        # Si menciona palabras de producto, es pedido de producto
         if any(palabra in texto_lower for palabra in palabras_producto):
             return True
         
-        # Si solo tiene palabras genéricas, también considerar como pedido
+        # Si solo tiene palabras genéricas
         return any(palabra in texto_lower for palabra in palabras_pedido)
     
     def _intentar_agregar_producto(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
-        """Intenta agregar un producto al carrito basado en el mensaje del cliente"""
+        """Intenta agregar un producto/servicio al carrito basado en el mensaje del cliente"""
         if not menu:
-            return "Lo siento, no hay productos disponibles en este momento. Contacta al administrador."
+            return """📭 No hay servicios/productos cargados en el sistema.
+
+Por favor, el administrador debe entrenar la IA con los servicios disponibles.
+
+Mientras tanto, puedes contactarnos directamente al WhatsApp del negocio."""
         
-        # Usar IA para identificar el producto
+        # Usar IA para identificar el producto/servicio
         prompt = f"""
         El cliente dice: "{texto}"
         
         Catálogo disponible:
         {json.dumps([{'nombre': p['nombre'], 'precio': p['precio']} for p in menu[:20]], indent=2, ensure_ascii=False)}
         
-        ¿Qué producto quiere el cliente? Devuelve SOLO el nombre exacto del producto del catálogo.
+        ¿Qué producto o servicio quiere el cliente? Devuelve SOLO el nombre exacto del catálogo.
         Si no está seguro, devuelve "no_seguro".
         """
         
@@ -727,7 +812,7 @@ INSTRUCCIONES:
             
             if producto_nombre == "no_seguro":
                 sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
-                return f"Lo siento, no entendí qué producto deseas. Nuestros productos más populares:\n{sugerencias}\n¿Cuál te gustaría?"
+                return f"Lo siento, no entendí qué deseas. Nuestros servicios/productos más populares:\n{sugerencias}\n¿Cuál te gustaría?"
             
             # Buscar el producto en el menú
             producto = None
@@ -742,24 +827,24 @@ INSTRUCCIONES:
                 return f"✅ Agregado: {producto['nombre']} - ${producto['precio']:,.0f}\n\n{self._mostrar_resumen_carrito(tenant, numero, nuevo_carrito)}"
             else:
                 sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
-                return f"No encontré '{producto_nombre}' en el catálogo. Estos son nuestros productos:\n{sugerencias}\n¿Cuál te gustaría?"
+                return f"No encontré '{producto_nombre}' en el catálogo. Estos son nuestros servicios:\n{sugerencias}\n¿Cuál te gustaría?"
             
         except Exception as e:
-            logger.error(f'Error identificando producto: {e}')
+            logger.error(f'Error identificando producto/servicio: {e}')
             sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
-            return f"¿Qué te gustaría ordenar? Estos son algunos productos:\n{sugerencias}"
+            return f"¿Qué te gustaría ordenar o reservar? Estos son algunos servicios:\n{sugerencias}"
     
     def _respuesta_fallback(self, tenant: dict, menu: list) -> str:
         """Respuesta de fallback cuando la IA no está disponible"""
-        produkts_sugeridos = menu[:5]
-        if produkts_sugeridos:
-            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in produkts_sugeridos])
+        productos_sugeridos = menu[:5]
+        if productos_sugeridos:
+            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in productos_sugeridos])
             return f"""Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}.
 
-**Productos sugeridos:**
+**Servicios/Productos sugeridos:**
 {sugerencias}
 
-¿Qué te gustaría ordenar? Puedes escribir "MENÚ" para ver el catálogo completo o decirme directamente lo que deseas."""
+¿Qué te gustaría ordenar o reservar? Puedes escribir "MENÚ" para ver el catálogo completo o decirme directamente lo que deseas."""
         else:
             return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte hoy?"
 
