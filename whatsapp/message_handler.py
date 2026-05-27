@@ -573,15 +573,32 @@ class MessageHandler:
             logger.error(f'Error extrayendo datos: {e}')
     
     def _cliente_confirmo(self, texto: str) -> bool:
-        """Detecta si el cliente confirmó el pedido/reserva"""
+        """Detecta si el cliente confirmó el pedido o realizó un pago"""
         confirmaciones = [
             'si', 'sí', 'dale', 'ok', 'correcto', 'confirmo',
             'confirmar', 'proceder', 'adelante', 'esta bien',
             'está bien', 'confirmo pedido', 'si confirmo', 'reservar',
             'apartar', 'separar', 'confirmar reserva'
         ]
+        
+        # Palabras clave para pago
+        palabras_pago = [
+            'pague', 'pago', 'pagado', 'transferí', 'consigné', 
+            'pagué', 'ya pague', 'listo el pago', 'transferencia',
+            'consignacion', 'ya transferí', 'ya consigné'
+        ]
+        
         texto_lower = texto.lower().strip()
-        return texto_lower in confirmaciones or any(c in texto_lower for c in confirmaciones if len(c) > 2)
+        
+        # Verificar si es confirmación
+        if texto_lower in confirmaciones or any(c in texto_lower for c in confirmaciones if len(c) > 2):
+            return True
+        
+        # Verificar si es pago
+        if any(palabra in texto_lower for palabra in palabras_pago):
+            return True
+        
+        return False
     
     def _mostrar_resumen_carrito(self, tenant: dict, numero: str, carrito: dict) -> str:
         """Muestra el resumen del carrito"""
@@ -727,6 +744,38 @@ class MessageHandler:
         if numero in self._datos_cliente and self._datos_cliente[numero].get('nombre'):
             self._guardar_datos_cliente_en_bd(tenant['id'], numero)
         
+        texto_lower = texto.lower()
+        
+        # ========== 0. VERIFICAR PAGO (MÁS IMPORTANTE) ==========
+        palabras_pago = ['pague', 'pago', 'pagado', 'transferí', 'consigné', 'pagué', 'ya pague', 'listo el pago']
+        if any(palabra in texto_lower for palabra in palabras_pago):
+            try:
+                # Marcar pedido como pagado
+                resultado = order_repo.marcar_pagado(tenant['id'], numero)
+                if resultado > 0:
+                    return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido.\n\n📦 Recibirás una notificación cuando esté listo para entrega."
+                else:
+                    # Buscar el último pedido del cliente para marcarlo como pagado directamente
+                    schema_name = self._get_schema_name(tenant['id'])
+                    with db_manager.get_connection(tenant['id']) as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(f"""
+                                UPDATE "{schema_name}".pedidos 
+                                SET estado = 'pagado', pagado_at = NOW()
+                                WHERE cliente_numero = %s AND estado = 'nuevo'
+                                ORDER BY created_at DESC LIMIT 1
+                            """, (numero,))
+                            updated = cur.rowcount
+                            conn.commit()
+                    
+                    if updated > 0:
+                        return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
+                    else:
+                        return "✅ ¡Gracias por confirmar el pago! Procesaremos tu pedido lo antes posible."
+            except Exception as e:
+                logger.error(f"Error procesando pago: {e}")
+                return "✅ Gracias por confirmar. Procesaremos tu pedido."
+        
         # ========== 1. VERIFICAR CONFIRMACIÓN ==========
         if self._cliente_confirmo(texto):
             if carrito_actual.get('items'):
@@ -736,14 +785,11 @@ class MessageHandler:
                 return "❌ No hay productos en tu carrito. Por favor, vuelve a indicarme qué deseas ordenar.\n\nEjemplo: 'quiero una torta de chocolate'"
         
         # ========== 2. VERIFICAR CONSULTA DE CARRITO ==========
-        if any(palabra in texto.lower() for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo', 'mi reserva']):
+        if any(palabra in texto_lower for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo', 'mi reserva']):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # ========== 3. DETECTAR PRODUCTOS (PRIORIDAD) ==========
-        # Primero intentar con coincidencia simple (más rápida)
+        # ========== 3. DETECTAR PRODUCTOS ==========
         productos_detectados = self._detectar_productos_simples(texto, menu)
-        
-        # Si no, usar IA para detectar productos
         if not productos_detectados:
             productos_detectados = self._detectar_productos_con_ia(texto, menu)
         
@@ -752,7 +798,6 @@ class MessageHandler:
             self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
             nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
             
-            # Mostrar resumen con opción de confirmar
             items_texto = ""
             for item in nuevo_carrito['items']:
                 subtotal = item.get('precio', 0) * item.get('cantidad', 1)
@@ -782,7 +827,6 @@ class MessageHandler:
     ¿Qué te gustaría ordenar? Escríbeme el nombre del producto."""
         
         # ========== 7. FALLBACK CON IA ==========
-        # Solo llegar aquí si no hay productos detectados y no hay carrito
         menu_simplificado = []
         for p in menu[:30]:
             menu_simplificado.append({
