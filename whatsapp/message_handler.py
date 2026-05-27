@@ -383,18 +383,47 @@ class MessageHandler:
         items = carrito['items']
         total = carrito['total']
         
-        # Obtener secuencial y generar número de pedido/reserva
-        with db_manager.get_connection(tenant['id']) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
-                secuencial = cur.fetchone()[0] or 1
-        
-        fecha_str = datetime.now().strftime('%Y%m%d')
-        numero_pedido = f"{tenant['nombre'][:3].upper()}-{fecha_str}-{secuencial:04d}"
+        # Generar número de pedido
+        fecha_str = datetime.now().strftime('%Y%m%d%H%M%S')
+        numero_pedido = f"{tenant['nombre'][:3].upper()}-{fecha_str}-{str(uuid.uuid4())[:4].upper()}"
         
         try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
+                    # Verificar y crear columnas si no existen
+                    cur.execute(f"""
+                        DO $$ 
+                        BEGIN
+                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                        WHERE table_schema = '{schema_name}' 
+                                        AND table_name = 'pedidos' 
+                                        AND column_name = 'cliente_numero') THEN
+                                ALTER TABLE "{schema_name}".pedidos ADD COLUMN cliente_numero TEXT;
+                            END IF;
+                            
+                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                        WHERE table_schema = '{schema_name}' 
+                                        AND table_name = 'pedidos' 
+                                        AND column_name = 'secuencial') THEN
+                                ALTER TABLE "{schema_name}".pedidos ADD COLUMN secuencial INTEGER;
+                            END IF;
+                            
+                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                        WHERE table_schema = '{schema_name}' 
+                                        AND table_name = 'pedidos' 
+                                        AND column_name = 'numero_pedido') THEN
+                                ALTER TABLE "{schema_name}".pedidos ADD COLUMN numero_pedido TEXT;
+                            END IF;
+                        END $$;
+                    """)
+                    conn.commit()
+                    
+                    # Obtener secuencial
+                    cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
+                    row = cur.fetchone()
+                    secuencial = row[0] if row and row[0] else 1
+                    
+                    # Insertar pedido
                     cur.execute(f"""
                         INSERT INTO "{schema_name}".pedidos 
                         (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas)
@@ -404,47 +433,40 @@ class MessageHandler:
                         total, 'nuevo', direccion_entrega,
                         f"Fecha: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()
                     ))
-                conn.commit()
-            
-            # Limpiar carrito y datos temporales
-            self._guardar_carrito(tenant['id'], numero, [], 0)
-            if numero in self._datos_cliente:
-                del self._datos_cliente[numero]
-            
-            link_pago = generar_link_pago(total, pedido_id)
-            
-            items_texto = ""
-            for item in items:
-                subtotal = item.get('precio', 0) * item.get('cantidad', 1)
-                items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${subtotal:,.0f}\n"
-            
-            datos_texto = self._formatear_datos_cliente(datos_cliente)
-            
-            # Determinar si es reserva o pedido
-            tipo = "RESERVA" if any(p in tenant.get('nombre', '').lower() for p in ['travel', 'tour', 'viaje', 'avars travel']) else "PEDIDO"
-            
-            return f"""✅ **¡{tipo} CONFIRMADA!**
-
-📌 **Número de {tipo.lower()}:** *{numero_pedido}*
-📝 *Guarda este número para hacer seguimiento*
-
-{datos_texto}
-
-📋 **Servicios/Productos:**
-{items_texto}
-💰 **Total:** ${total:,.0f}
-
-📦 **Entrega/Recojo:** {direccion_entrega}
-
-🔗 **Link de pago:** {link_pago}
-
-📌 *Cuando completes el pago, avísame para confirmar tu {tipo.lower()}.*
-📞 *Para consultar tu {tipo.lower()}, envía "estado {numero_pedido}"*"""
+                    conn.commit()
                 
+                # Limpiar carrito y datos temporales
+                self._guardar_carrito(tenant['id'], numero, [], 0)
+                if numero in self._datos_cliente:
+                    del self._datos_cliente[numero]
+                
+                items_texto = ""
+                for item in items:
+                    subtotal = item.get('precio', 0) * item.get('cantidad', 1)
+                    items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${subtotal:,.0f}\n"
+                
+                datos_texto = self._formatear_datos_cliente(datos_cliente)
+                
+                return f"""✅ **¡PEDIDO CONFIRMADO!**
+
+    📌 **Número de pedido:** *{numero_pedido}*
+    📝 *Guarda este número para hacer seguimiento*
+
+    {datos_texto}
+
+    📋 **Productos:**
+    {items_texto}
+    💰 **Total:** ${total:,.0f}
+
+    📦 **Entrega:** {direccion_entrega}
+
+    📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
+    📞 *Para consultar tu pedido, envía "estado {numero_pedido}"*"""
+                    
         except Exception as e:
-            logger.error(f'Error creando pedido/reserva: {e}')
+            logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu solicitud. Por favor intenta de nuevo."
-    
+            
     def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
         """Obtiene o crea un cliente en el esquema del tenant"""
         try:
