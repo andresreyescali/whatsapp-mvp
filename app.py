@@ -68,14 +68,11 @@ register_webhook_routes(app)
 
 def _get_schema_name(tenant_id: str) -> str:
     """Obtiene el schema_name de un tenant"""
-    try:
-        tenant = tenant_repo.find_by_id(tenant_id)
-        if tenant and tenant.get('schema_name'):
-            return tenant['schema_name']
-    except Exception as e:
-        logger.error(f"Error obteniendo schema_name: {e}")
+    from tenants.repository import tenant_repo
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if tenant and tenant.get('schema_name'):
+        return tenant['schema_name']
     return f"tenant_{tenant_id.replace('-', '_')}"
-
 
 # ==================== Formatear Telefono ====================
 
@@ -996,17 +993,31 @@ def get_tenant_context(tenant_id):
 @login_required
 @tenant_owner_required
 def get_conversaciones_cliente(tenant_id, cliente_numero):
+    """Obtiene el historial de conversaciones con un cliente específico"""
     try:
-        with db_manager.get_connection() as conn:
+        schema_name = _get_schema_name(tenant_id)
+        with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT mensaje, respuesta, created_at FROM public.conversaciones_ia WHERE tenant_id = %s AND cliente_numero = %s ORDER BY created_at ASC", (tenant_id, cliente_numero))
+                cur.execute(f"""
+                    SELECT mensaje, respuesta, created_at, tipo
+                    FROM "{schema_name}".conversaciones 
+                    WHERE cliente_numero = %s 
+                    ORDER BY created_at ASC
+                """, (cliente_numero,))
                 rows = cur.fetchall()
-                conversaciones = [{'mensaje': row[0], 'respuesta': row[1], 'fecha': row[2]} for row in rows]
+                conversaciones = []
+                for row in rows:
+                    conversaciones.append({
+                        'mensaje': row[0],
+                        'respuesta': row[1],
+                        'fecha': row[2],
+                        'tipo': row[3] if len(row) > 3 else 'cliente'
+                    })
                 return jsonify(conversaciones)
     except Exception as e:
         logger.error(f'Error cargando historial: {e}')
-        return jsonify([]), 500
-
+        return jsonify([])
+    
 # ==================== PANEL DEL CLIENTE ====================
 
 @app.route('/panel/<tenant_id>')
@@ -1066,23 +1077,40 @@ def detalle_pedido(pedido_id):
 @login_required
 @tenant_owner_required
 def get_conversaciones(tenant_id):
+    """Obtiene resumen de conversaciones por cliente desde el esquema del tenant"""
     try:
-        with db_manager.get_connection() as conn:
+        schema_name = _get_schema_name(tenant_id)
+        with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
+                # Verificar si la tabla existe
                 cur.execute("""
-                    SELECT cliente_numero, MAX(created_at) as ultimo_mensaje, COUNT(*) as total_mensajes
-                    FROM public.conversaciones_ia WHERE tenant_id = %s
-                    GROUP BY cliente_numero ORDER BY ultimo_mensaje DESC LIMIT 50
-                """, (tenant_id,))
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = %s AND table_name = 'conversaciones'
+                    )
+                """, (schema_name,))
+                if not cur.fetchone()[0]:
+                    return jsonify([])
+                
+                cur.execute(f"""
+                    SELECT cliente_numero, 
+                           COUNT(*) as total_mensajes,
+                           MAX(created_at) as ultimo_mensaje
+                    FROM "{schema_name}".conversaciones 
+                    GROUP BY cliente_numero 
+                    ORDER BY ultimo_mensaje DESC 
+                    LIMIT 50
+                """)
                 rows = cur.fetchall()
                 conversaciones = []
                 for row in rows:
                     conversaciones.append({
                         'cliente_numero': row[0],
                         'cliente_nombre': row[0],
-                        'ultimo_mensaje': row[1],
-                        'total_pedidos': row[2] or 0
+                        'total_mensajes': row[1],
+                        'ultimo_mensaje': row[2]
                     })
+                logger.info(f"Conversaciones encontradas para tenant {tenant_id}: {len(conversaciones)}")
                 return jsonify(conversaciones)
     except Exception as e:
         logger.error(f'Error cargando conversaciones: {e}')
@@ -1111,12 +1139,14 @@ def tenant_configuracion(tenant_id):
 @login_required
 @tenant_owner_required
 def get_pedidos_stats(tenant_id):
+    """Obtiene estadísticas de pedidos"""
     try:
+        schema_name = _get_schema_name(tenant_id)
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT estado, COUNT(*) as total 
-                    FROM pedidos 
+                    FROM "{schema_name}".pedidos 
                     GROUP BY estado
                 """)
                 rows = cur.fetchall()
@@ -1126,21 +1156,28 @@ def get_pedidos_stats(tenant_id):
                     'pagado': stats.get('pagado', 0),
                     'enviado': stats.get('enviado', 0),
                     'cancelado': stats.get('cancelado', 0),
-                    'pendiente_pago': stats.get('pendiente_pago', 0)
+                    'pendiente_pago': stats.get('pendiente_pago', 0),
+                    'total': sum(stats.values())
                 })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f'Error obteniendo estadísticas: {e}')
+        return jsonify({
+            'nuevo': 0, 'pagado': 0, 'enviado': 0, 
+            'cancelado': 0, 'pendiente_pago': 0, 'total': 0
+        })
 
 @app.route('/api/tenant/<tenant_id>/pedidos', methods=['GET'])
 @login_required
 @tenant_owner_required
 def get_pedidos_tenant(tenant_id):
+    """Obtiene pedidos del tenant desde el esquema del tenant"""
     estado = request.args.get('estado', 'todos')
     schema_name = _get_schema_name(tenant_id)
     
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
+                # Verificar si la tabla existe
                 cur.execute("""
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables 
@@ -1168,8 +1205,12 @@ def get_pedidos_tenant(tenant_id):
                             pedido['items'] = json.loads(pedido['items'])
                         except:
                             pedido['items'] = []
+                    # Asegurar que cliente_nombre existe
+                    if not pedido.get('cliente_nombre'):
+                        pedido['cliente_nombre'] = pedido.get('cliente_numero', 'N/A')
                     pedidos.append(pedido)
                 
+                logger.info(f"Pedidos encontrados para tenant {tenant_id}: {len(pedidos)}")
                 return jsonify(pedidos)
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
