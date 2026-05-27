@@ -154,23 +154,28 @@ class MessageHandler:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
+                    # Verificar si ya existe
                     cur.execute(f"""
-                        CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
-                            id SERIAL PRIMARY KEY,
-                            cliente_numero TEXT NOT NULL UNIQUE,
-                            items JSONB NOT NULL,
-                            total INTEGER DEFAULT 0,
-                            created_at TIMESTAMP DEFAULT NOW(),
-                            updated_at TIMESTAMP DEFAULT NOW()
-                        )
-                    """)
-                    cur.execute(f"""
-                        INSERT INTO "{schema_name}".carritos (cliente_numero, items, total, created_at, updated_at)
-                        VALUES (%s, %s, %s, NOW(), NOW())
-                        ON CONFLICT (cliente_numero) 
-                        DO UPDATE SET items = EXCLUDED.items, total = EXCLUDED.total, updated_at = NOW()
-                    """, (cliente_numero, json.dumps(items), total))
-                conn.commit()
+                        SELECT id FROM "{schema_name}".carritos 
+                        WHERE cliente_numero = %s
+                    """, (cliente_numero,))
+                    existing = cur.fetchone()
+                    
+                    if existing:
+                        # Actualizar
+                        cur.execute(f"""
+                            UPDATE "{schema_name}".carritos 
+                            SET items = %s, total = %s, updated_at = NOW()
+                            WHERE cliente_numero = %s
+                        """, (json.dumps(items), total, cliente_numero))
+                    else:
+                        # Insertar nuevo
+                        cur.execute(f"""
+                            INSERT INTO "{schema_name}".carritos (cliente_numero, items, total, created_at, updated_at)
+                            VALUES (%s, %s, %s, NOW(), NOW())
+                        """, (cliente_numero, json.dumps(items), total))
+                    conn.commit()
+                    logger.info(f"Carrito guardado para {cliente_numero}: {len(items)} items, total ${total}")
         except Exception as e:
             logger.error(f'Error guardando carrito: {e}')
 
