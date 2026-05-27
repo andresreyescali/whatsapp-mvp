@@ -55,12 +55,14 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 3. Tabla de pedidos/reservas
+                # 3. Tabla de pedidos (CORREGIDA - con secuencial)
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
+                    cliente_numero TEXT NOT NULL,
                     numero_pedido TEXT UNIQUE,
+                    secuencial INTEGER,
                     items JSONB NOT NULL,
                     total INTEGER NOT NULL,
                     estado VARCHAR(50) DEFAULT 'nuevo',
@@ -87,13 +89,12 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 5. Tabla de carritos
+                # 5. Tabla de carritos (CORREGIDA - con UNIQUE constraint)
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
                     id SERIAL PRIMARY KEY,
-                    cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
-                    cliente_numero TEXT NOT NULL,
-                    items JSONB DEFAULT '[]',
+                    cliente_numero TEXT NOT NULL UNIQUE,
+                    items JSONB NOT NULL DEFAULT '[]',
                     total INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
@@ -111,7 +112,7 @@ class SchemaManager:
                         fecha_inicio DATE NOT NULL,
                         fecha_fin DATE,
                         personas INTEGER DEFAULT 1,
-                habitaciones INTEGER DEFAULT 1,
+                        habitaciones INTEGER DEFAULT 1,
                         destino TEXT,
                         total INTEGER NOT NULL,
                         estado VARCHAR(50) DEFAULT 'pendiente',
@@ -124,6 +125,7 @@ class SchemaManager:
                 # Índices
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON "{schema_name}".pedidos(cliente_id)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON "{schema_name}".pedidos(estado)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_numero ON "{schema_name}".pedidos(numero_pedido)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON "{schema_name}".clientes(numero_telefono)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON "{schema_name}".conversaciones(cliente_numero)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
@@ -188,7 +190,9 @@ class SchemaManager:
         CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
+            cliente_numero TEXT NOT NULL,
             numero_pedido TEXT UNIQUE,
+            secuencial INTEGER,
             items JSONB NOT NULL,
             total INTEGER NOT NULL,
             estado VARCHAR(50) DEFAULT 'nuevo',
@@ -217,9 +221,8 @@ class SchemaManager:
         cur.execute(f'''
         CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
             id SERIAL PRIMARY KEY,
-            cliente_id UUID REFERENCES "{schema_name}".clientes(id) ON DELETE SET NULL,
-            cliente_numero TEXT NOT NULL,
-            items JSONB DEFAULT '[]',
+            cliente_numero TEXT NOT NULL UNIQUE,
+            items JSONB NOT NULL DEFAULT '[]',
             total INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
@@ -228,6 +231,7 @@ class SchemaManager:
         
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON "{schema_name}".pedidos(cliente_id)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON "{schema_name}".pedidos(estado)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_numero ON "{schema_name}".pedidos(numero_pedido)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_clientes_telefono ON "{schema_name}".clientes(numero_telefono)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON "{schema_name}".conversaciones(cliente_numero)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
@@ -394,22 +398,31 @@ class SchemaManager:
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Usar ON CONFLICT para actualizar si ya existe
-                    cur.execute(f"""
-                        INSERT INTO "{schema_name}".productos (id, nombre, descripcion, precio, categoria, disponible)
-                        VALUES (%s, %s, %s, %s, %s, true)
-                        ON CONFLICT (nombre) DO UPDATE SET
-                            precio = EXCLUDED.precio,
-                            descripcion = EXCLUDED.descripcion,
-                            categoria = EXCLUDED.categoria,
-                            disponible = true,
-                            updated_at = NOW()
-                        RETURNING id
-                    """, (product_id, nombre, descripcion, precio, categoria))
-                    result_id = cur.fetchone()[0]
-                    conn.commit()
+                    # Verificar si ya existe un producto con el mismo nombre
+                    cur.execute(f'SELECT id FROM "{schema_name}".productos WHERE nombre ILIKE %s', (nombre,))
+                    existing = cur.fetchone()
                     
-                    logger.info(f'Producto guardado: {nombre} (ID: {result_id})')
+                    if existing:
+                        # Actualizar producto existente
+                        cur.execute(f"""
+                            UPDATE "{schema_name}".productos 
+                            SET precio = %s, descripcion = %s, categoria = %s, disponible = true, updated_at = NOW()
+                            WHERE nombre ILIKE %s
+                            RETURNING id
+                        """, (precio, descripcion, categoria, nombre))
+                        result_id = cur.fetchone()[0]
+                        logger.info(f'Producto actualizado: {nombre}')
+                    else:
+                        # Insertar nuevo producto
+                        cur.execute(f"""
+                            INSERT INTO "{schema_name}".productos (id, nombre, descripcion, precio, categoria, disponible)
+                            VALUES (%s, %s, %s, %s, %s, true)
+                            RETURNING id
+                        """, (product_id, nombre, descripcion, precio, categoria))
+                        result_id = cur.fetchone()[0]
+                        logger.info(f'Producto agregado: {nombre}')
+                    
+                    conn.commit()
                     return result_id
         except Exception as e:
             logger.error(f'Error agregando producto: {e}')
