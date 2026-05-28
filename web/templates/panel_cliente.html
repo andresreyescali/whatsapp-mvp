@@ -158,9 +158,9 @@
 </style>
 
 <div class="tabs">
-    <div class="tab active" onclick="mostrarTab('pedidos')">📦 Pedidos</div>
-    <div class="tab" onclick="mostrarTab('conversaciones')">💬 Conversaciones</div>
-    <div class="tab" onclick="mostrarTab('configuracion')">⚙️ Configuración</div>
+    <div class="tab active" onclick="mostrarTab('pedidos', event)">📦 Pedidos</div>
+    <div class="tab" onclick="mostrarTab('conversaciones', event)">💬 Conversaciones</div>
+    <div class="tab" onclick="mostrarTab('configuracion', event)">⚙️ Configuración</div>
 </div>
 
 <!-- Tab: Pedidos -->
@@ -202,7 +202,7 @@
             <option value="ayer">📅 Ayer</option>
             <option value="semana">📅 Última semana</option>
             <option value="mes">📅 Último mes</option>
-            <option value="todos">📅 Todos los periodos</option>
+            <option value="todos" selected>📅 Todos los periodos</option>
         </select>
         
         <input type="text" id="filtroCliente" class="filtro-input" placeholder="🔍 Buscar por cliente..." onkeyup="cargarPedidos()" style="min-width: 200px;">
@@ -262,7 +262,7 @@
     const API_BASE = window.location.origin;
     let pedidosCache = [];
 
-    function mostrarTab(tab) {
+    function mostrarTab(tab, event) {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         event.target.classList.add('active');
         
@@ -281,55 +281,135 @@
     }
 
     function filtrarPorFecha(pedidos, rango) {
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    const ayer = new Date(hoy);
-    ayer.setDate(ayer.getDate() - 1);
-    const semana = new Date(hoy);
-    semana.setDate(semana.getDate() - 7);
-    const mes = new Date(hoy);
-    mes.setMonth(mes.getMonth() - 1);
-    
-    switch(rango) {
-        case 'hoy':
-            return pedidos.filter(p => new Date(p.created_at) >= hoy);
-        case 'ayer':
-            return pedidos.filter(p => {
-                const fecha = new Date(p.created_at);
-                fecha.setHours(0, 0, 0, 0);
-                return fecha.getTime() === ayer.getTime();
-            });
-        case 'semana':
-            return pedidos.filter(p => new Date(p.created_at) >= semana);
-        case 'mes':
-            return pedidos.filter(p => new Date(p.created_at) >= mes);
-        default:
-            return pedidos;
-    }
-}
-    async function cargarPedidos() {
-    const estado = document.getElementById('filtroEstado').value;
-    const fecha = document.getElementById('filtroFecha').value;
-    const cliente = document.getElementById('filtroCliente').value.toLowerCase();
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=todos`);
-        console.log('Respuesta del servidor:', response);
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const ayer = new Date(hoy);
+        ayer.setDate(ayer.getDate() - 1);
+        const semana = new Date(hoy);
+        semana.setDate(semana.getDate() - 7);
+        const mes = new Date(hoy);
+        mes.setMonth(mes.getMonth() - 1);
         
-        const pedidos = await response.json();
-        console.log('Pedidos recibidos:', pedidos);
+        switch(rango) {
+            case 'hoy':
+                return pedidos.filter(p => new Date(p.created_at) >= hoy);
+            case 'ayer':
+                return pedidos.filter(p => {
+                    const fecha = new Date(p.created_at);
+                    fecha.setHours(0, 0, 0, 0);
+                    return fecha.getTime() === ayer.getTime();
+                });
+            case 'semana':
+                return pedidos.filter(p => new Date(p.created_at) >= semana);
+            case 'mes':
+                return pedidos.filter(p => new Date(p.created_at) >= mes);
+            default:
+                return pedidos;
+        }
+    }
+
+    async function cargarPedidos() {
+        const estado = document.getElementById('filtroEstado').value;
+        const fecha = document.getElementById('filtroFecha').value;
+        const cliente = document.getElementById('filtroCliente').value.toLowerCase();
+        
+        const container = document.getElementById('pedidosContainer');
+        container.innerHTML = '<div class="loading">Cargando pedidos...</div>';
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}`, {
+                credentials: 'include'
+            });
+            console.log('Response status:', response.status);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            let pedidos = await response.json();
+            console.log('Pedidos recibidos:', pedidos);
+            
+            if (!pedidos || pedidos.length === 0) {
+                container.innerHTML = '<div class="empty">📭 No hay pedidos</div>';
+                return;
+            }
+            
+            // Aplicar filtros
+            let pedidosFiltrados = filtrarPorFecha(pedidos, fecha);
+            if (cliente) {
+                pedidosFiltrados = pedidosFiltrados.filter(p => 
+                    (p.cliente_nombre && p.cliente_nombre.toLowerCase().includes(cliente)) ||
+                    (p.cliente_numero && p.cliente_numero.toLowerCase().includes(cliente))
+                );
+            }
+            
+            pedidosCache = pedidosFiltrados;
+            actualizarStats(pedidos);
+            renderPedidos(pedidosFiltrados);
+            
+        } catch (error) {
+            console.error('Error cargando pedidos:', error);
+            container.innerHTML = '<div class="empty">❌ Error al cargar pedidos: ' + error.message + '</div>';
+        }
+    }
+    
+    function renderPedidos(pedidos) {
+        const container = document.getElementById('pedidosContainer');
         
         if (!pedidos || pedidos.length === 0) {
-            document.getElementById('pedidosContainer').innerHTML = '<div class="empty">📭 No hay pedidos</div>';
+            container.innerHTML = '<div class="empty">📭 No hay pedidos con los filtros seleccionados</div>';
             return;
         }
         
-        // Mostrar pedidos...
-    } catch (error) {
-        console.error('Error:', error);
-        document.getElementById('pedidosContainer').innerHTML = '<div class="empty">❌ Error al cargar pedidos: ' + error.message + '</div>';
+        let html = '';
+        for (const pedido of pedidos) {
+            let estadoClass = '';
+            let estadoTexto = pedido.estado || 'nuevo';
+            if (estadoTexto === 'nuevo') estadoClass = 'estado-nuevo';
+            else if (estadoTexto === 'pagado') estadoClass = 'estado-pagado';
+            else if (estadoTexto === 'enviado') estadoClass = 'estado-enviado';
+            else estadoClass = 'estado-cancelado';
+            
+            // Procesar items
+            let items = [];
+            if (pedido.items) {
+                if (Array.isArray(pedido.items)) {
+                    items = pedido.items;
+                } else if (typeof pedido.items === 'string') {
+                    try {
+                        items = JSON.parse(pedido.items);
+                    } catch(e) { items = []; }
+                }
+            }
+            
+            const nombreCliente = pedido.cliente_nombre || pedido.cliente_numero || 'Cliente';
+            const numeroPedido = pedido.numero_pedido || pedido.id?.substring(0, 8) || 'N/A';
+            
+            html += `
+                <div class="pedido-card">
+                    <div class="pedido-header">
+                        <span><strong>📱 ${escapeHtml(nombreCliente)}</strong></span>
+                        <span><strong>📄 ${escapeHtml(numeroPedido)}</strong></span>
+                        <span class="estado-badge ${estadoClass}">${estadoTexto.toUpperCase()}</span>
+                    </div>
+                    <div class="pedido-items">
+                        <strong>🛒 Productos:</strong>
+                        <ul>
+                            ${items.map(i => `<li>${i.cantidad || 1}x ${escapeHtml(i.nombre)} - $${((i.precio || 0) * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <p><strong>💰 Total:</strong> $${(pedido.total || 0).toLocaleString()}</p>
+                    <p><strong>🕒 Fecha:</strong> ${new Date(pedido.created_at).toLocaleString()}</p>
+                    <div class="pedido-actions">
+                        <button class="btn-sm btn-detalle" onclick="verDetalle('${pedido.id}')">🔍 Ver detalle</button>
+                        <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${pedido.cliente_numero}')">💬 WhatsApp</button>
+                        <button class="btn-sm btn-historial" onclick="verHistorialCliente('${pedido.cliente_numero}', '${escapeHtml(nombreCliente)}')">📜 Historial</button>
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
     }
-}
     
     function actualizarStats(pedidos) {
         const hoy = new Date();
@@ -352,7 +432,6 @@
         document.getElementById('totalTodos').innerText = pedidos.length;
     }
 
-
     async function cambiarEstado(pedidoId, nuevoEstado) {
         if (!confirm(`¿Marcar este pedido como ${nuevoEstado}?`)) return;
         
@@ -360,49 +439,58 @@
             const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/estado`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ estado: nuevoEstado })
+                body: JSON.stringify({ estado: nuevoEstado }),
+                credentials: 'include'
             });
             const result = await response.json();
             if (result.success) {
+                showAlert('✅ Estado actualizado', 'success');
                 cargarPedidos();
             } else {
-                alert('Error: ' + result.error);
+                showAlert('Error: ' + (result.error || 'No se pudo actualizar'), 'error');
             }
         } catch (error) {
-            alert('Error de conexión');
+            showAlert('Error de conexión', 'error');
         }
     }
 
     async function verDetalle(pedidoId) {
         try {
-            const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/detalle`);
+            const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/detalle`, {
+                credentials: 'include'
+            });
             const pedido = await response.json();
             
-            const items = pedido.items ? (Array.isArray(pedido.items) ? pedido.items : JSON.parse(pedido.items)) : [];
+            const items = pedido.items ? (Array.isArray(pedido.items) ? pedido.items : 
+                (typeof pedido.items === 'string' ? JSON.parse(pedido.items) : [])) : [];
             const nombreCliente = pedido.cliente_nombre || pedido.cliente_numero;
             
             let estadoClass = '';
-            if (pedido.estado === 'nuevo' || pedido.estado === 'pendiente_pago') estadoClass = 'estado-nuevo';
-            else if (pedido.estado === 'pagado') estadoClass = 'estado-pagado';
-            else if (pedido.estado === 'enviado') estadoClass = 'estado-enviado';
+            const estado = pedido.estado || 'nuevo';
+            if (estado === 'nuevo') estadoClass = 'estado-nuevo';
+            else if (estado === 'pagado') estadoClass = 'estado-pagado';
+            else if (estado === 'enviado') estadoClass = 'estado-enviado';
             else estadoClass = 'estado-cancelado';
             
             let html = `
                 <div class="pedido-header">
                     <span><strong>📱 Cliente:</strong> ${escapeHtml(nombreCliente)}</span>
-                    <span class="estado-badge ${estadoClass}">${pedido.estado.toUpperCase()}</span>
+                    <span class="estado-badge ${estadoClass}">${estado.toUpperCase()}</span>
                 </div>
-                <p><strong>📞 Teléfono:</strong> ${pedido.cliente_numero}</p>
+                <p><strong>📞 Teléfono:</strong> ${pedido.cliente_numero || 'N/A'}</p>
+                <p><strong>📄 Número de pedido:</strong> ${pedido.numero_pedido || 'N/A'}</p>
                 <p><strong>🕒 Fecha:</strong> ${new Date(pedido.created_at).toLocaleString()}</p>
                 ${pedido.pagado_at ? `<p><strong>✅ Pagado el:</strong> ${new Date(pedido.pagado_at).toLocaleString()}</p>` : ''}
                 ${pedido.enviado_at ? `<p><strong>🚚 Enviado el:</strong> ${new Date(pedido.enviado_at).toLocaleString()}</p>` : ''}
                 <div class="pedido-items">
                     <strong>🛒 Productos:</strong>
                     <ul>
-                        ${items.map(i => `<li>${i.cantidad || 1}x ${escapeHtml(i.nombre)} - $${(i.precio * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
+                        ${items.map(i => `<li>${i.cantidad || 1}x ${escapeHtml(i.nombre)} - $${((i.precio || 0) * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
                     </ul>
                 </div>
-                <p><strong>💰 Total:</strong> $${pedido.total.toLocaleString()}</p>
+                <p><strong>💰 Total:</strong> $${(pedido.total || 0).toLocaleString()}</p>
+                ${pedido.direccion_entrega ? `<p><strong>📍 Entrega:</strong> ${escapeHtml(pedido.direccion_entrega)}</p>` : ''}
+                ${pedido.notas ? `<p><strong>📝 Notas:</strong> ${escapeHtml(pedido.notas)}</p>` : ''}
             `;
             
             let actionsHtml = `
@@ -410,42 +498,47 @@
                 <button class="btn-sm btn-historial" onclick="verHistorialCliente('${pedido.cliente_numero}', '${escapeHtml(nombreCliente)}')">📜 Ver historial</button>
             `;
             
-            if (pedido.estado === 'nuevo' || pedido.estado === 'pendiente_pago') {
+            if (estado === 'nuevo') {
                 actionsHtml += `<button class="btn-sm btn-pagar" onclick="cambiarEstado('${pedido.id}', 'pagado')">✅ Marcar pagado</button>`;
             }
-            if (pedido.estado === 'pagado') {
+            if (estado === 'pagado') {
                 actionsHtml += `<button class="btn-sm btn-enviar" onclick="cambiarEstado('${pedido.id}', 'enviado')">🚚 Marcar enviado</button>`;
             }
             
-            document.getElementById('detalleTitulo').innerHTML = `📋 Pedido ${pedido.id.substring(0, 8)}...`;
+            document.getElementById('detalleTitulo').innerHTML = `📋 Pedido ${pedido.numero_pedido || pedido.id.substring(0, 8)}`;
             document.getElementById('detalleContent').innerHTML = html;
             document.getElementById('detalleActions').innerHTML = actionsHtml;
             document.getElementById('detalleModal').style.display = 'flex';
         } catch (error) {
             console.error('Error:', error);
-            alert('Error al cargar detalle');
+            showAlert('Error al cargar detalle', 'error');
         }
     }
 
     async function cargarConversaciones() {
+        const container = document.getElementById('conversacionesContainer');
+        container.innerHTML = '<div class="loading">Cargando conversaciones...</div>';
+        
         try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/conversaciones`);
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/conversaciones`, {
+                credentials: 'include'
+            });
             const conversaciones = await response.json();
             
             if (!conversaciones || conversaciones.length === 0) {
-                document.getElementById('conversacionesContainer').innerHTML = '<div class="empty">💬 No hay conversaciones aún</div>';
+                container.innerHTML = '<div class="empty">💬 No hay conversaciones aún</div>';
                 return;
             }
             
             let html = '';
-            conversaciones.forEach(conv => {
+            for (const conv of conversaciones) {
                 const nombreCliente = conv.cliente_nombre || conv.cliente_numero;
                 html += `
                     <div class="conversacion-card">
                         <div class="pedido-header">
                             <span><strong>📱 ${escapeHtml(nombreCliente)}</strong></span>
-                            <span>📦 ${conv.total_pedidos || 0} pedidos</span>
-                            <span>🕒 ${new Date(conv.ultimo_mensaje).toLocaleString()}</span>
+                            <span>📦 ${conv.total_pedidos || conv.total_mensajes || 0} mensajes</span>
+                            <span>🕒 ${conv.ultimo_mensaje ? new Date(conv.ultimo_mensaje).toLocaleString() : 'N/A'}</span>
                         </div>
                         <div class="pedido-actions">
                             <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${conv.cliente_numero}')">💬 WhatsApp</button>
@@ -453,24 +546,28 @@
                         </div>
                     </div>
                 `;
-            });
-            document.getElementById('conversacionesContainer').innerHTML = html;
+            }
+            container.innerHTML = html;
         } catch (error) {
             console.error('Error:', error);
-            document.getElementById('conversacionesContainer').innerHTML = '<div class="empty">❌ Error al cargar conversaciones</div>';
+            container.innerHTML = '<div class="empty">❌ Error al cargar conversaciones</div>';
         }
     }
 
     async function verHistorialCliente(clienteNumero, clienteNombre) {
         try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/conversaciones/cliente/${clienteNumero}`);
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/conversaciones/cliente/${clienteNumero}`, {
+                credentials: 'include'
+            });
             const conversaciones = await response.json();
             
             let html = `<h3>📜 Historial con ${escapeHtml(clienteNombre)}</h3>`;
+            html += `<p><strong>📞 Teléfono:</strong> ${clienteNumero}</p>`;
+            
             if (!conversaciones || conversaciones.length === 0) {
                 html += '<p>No hay conversaciones previas con este cliente.</p>';
             } else {
-                conversaciones.forEach(c => {
+                for (const c of conversaciones) {
                     html += `
                         <div class="mensaje-cliente">
                             <strong>🧑 Cliente:</strong> ${escapeHtml(c.mensaje)}
@@ -481,21 +578,25 @@
                             <div style="font-size:10px; color:#666; margin-top:5px;">${new Date(c.fecha).toLocaleString()}</div>
                         </div>
                     `;
-                });
+                }
             }
             
             document.getElementById('detalleTitulo').innerHTML = 'Historial de Conversación';
             document.getElementById('detalleContent').innerHTML = html;
-            document.getElementById('detalleActions').innerHTML = '<button class="btn-sm" onclick="cerrarModal()">Cerrar</button>';
+            document.getElementById('detalleActions').innerHTML = '<button class="btn-sm btn-chat" onclick="abrirWhatsApp(\'' + clienteNumero + '\')">💬 WhatsApp</button><button class="btn-sm" onclick="cerrarModal()">Cerrar</button>';
             document.getElementById('detalleModal').style.display = 'flex';
         } catch (error) {
             console.error('Error:', error);
-            alert('Error al cargar el historial');
+            showAlert('Error al cargar el historial', 'error');
         }
     }
 
     function abrirWhatsApp(numero) {
-        window.open(`https://wa.me/${numero}`, '_blank');
+        if (numero) {
+            window.open(`https://wa.me/${numero}`, '_blank');
+        } else {
+            showAlert('No hay número de teléfono disponible', 'warning');
+        }
     }
 
     function cerrarModal() {
@@ -504,7 +605,9 @@
 
     async function cargarConfiguracion() {
         try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/configuracion`);
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/configuracion`, {
+                credentials: 'include'
+            });
             const config = await response.json();
             document.getElementById('configHorario').value = config.horario || '';
             document.getElementById('configUbicacion').value = config.ubicacion || '';
@@ -526,17 +629,28 @@
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/configuracion`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
+                body: JSON.stringify(data),
+                credentials: 'include'
             });
             if (response.ok) {
-                alert('✅ Configuración guardada correctamente');
+                showAlert('✅ Configuración guardada correctamente', 'success');
             } else {
-                alert('❌ Error al guardar la configuración');
+                showAlert('❌ Error al guardar la configuración', 'error');
             }
         } catch (error) {
-            alert('❌ Error de conexión');
+            showAlert('❌ Error de conexión', 'error');
         }
     };
+
+    function showAlert(message, type) {
+        const container = document.getElementById('alertContainer');
+        if (!container) return;
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type}`;
+        alertDiv.innerHTML = message + '<button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.25rem;" onclick="this.parentElement.remove()">×</button>';
+        container.appendChild(alertDiv);
+        setTimeout(() => alertDiv.remove(), 5000);
+    }
 
     function escapeHtml(text) {
         if (!text) return '';
