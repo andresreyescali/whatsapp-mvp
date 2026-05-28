@@ -1144,9 +1144,20 @@ def get_pedidos_stats(tenant_id):
         schema_name = _get_schema_name(tenant_id)
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                cur.execute(f"""
+                # Verificar si la tabla existe
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = %s AND table_name = 'pedidos'
+                    )
+                """, (schema_name,))
+                if not cur.fetchone()[0]:
+                    return jsonify({'nuevo': 0, 'pagado': 0, 'enviado': 0, 'cancelado': 0, 'total': 0})
+                
+                # IMPORTANTE: NO usar prefijo
+                cur.execute("""
                     SELECT estado, COUNT(*) as total 
-                    FROM "{schema_name}".pedidos 
+                    FROM pedidos 
                     GROUP BY estado
                 """)
                 rows = cur.fetchall()
@@ -1161,10 +1172,7 @@ def get_pedidos_stats(tenant_id):
                 })
     except Exception as e:
         logger.error(f'Error obteniendo estadísticas: {e}')
-        return jsonify({
-            'nuevo': 0, 'pagado': 0, 'enviado': 0, 
-            'cancelado': 0, 'pendiente_pago': 0, 'total': 0
-        })
+        return jsonify({'nuevo': 0, 'pagado': 0, 'enviado': 0, 'cancelado': 0, 'total': 0})
 
 @app.route('/api/tenant/<tenant_id>/pedidos', methods=['GET'])
 @login_required
@@ -1173,6 +1181,8 @@ def get_pedidos_tenant(tenant_id):
     """Obtiene pedidos del tenant desde el esquema del tenant"""
     estado = request.args.get('estado', 'todos')
     schema_name = _get_schema_name(tenant_id)
+    
+    logger.info(f"Obteniendo pedidos para tenant {tenant_id}, schema: {schema_name}, estado: {estado}")
     
     try:
         with db_manager.get_connection(tenant_id) as conn:
@@ -1184,15 +1194,21 @@ def get_pedidos_tenant(tenant_id):
                         WHERE table_schema = %s AND table_name = 'pedidos'
                     )
                 """, (schema_name,))
-                if not cur.fetchone()[0]:
+                tabla_existe = cur.fetchone()[0]
+                logger.info(f"Tabla pedidos existe: {tabla_existe}")
+                
+                if not tabla_existe:
                     return jsonify([])
                 
+                # IMPORTANTE: NO usar "{schema_name}".pedidos porque ya estamos en el schema
                 if estado == 'todos':
-                    cur.execute(f'SELECT * FROM "{schema_name}".pedidos ORDER BY created_at DESC')
+                    cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
                 else:
-                    cur.execute(f'SELECT * FROM "{schema_name}".pedidos WHERE estado = %s ORDER BY created_at DESC', (estado,))
+                    cur.execute("SELECT * FROM pedidos WHERE estado = %s ORDER BY created_at DESC", (estado,))
                 
                 rows = cur.fetchall()
+                logger.info(f"Filas obtenidas: {len(rows)}")
+                
                 if not rows:
                     return jsonify([])
                 
@@ -1200,22 +1216,28 @@ def get_pedidos_tenant(tenant_id):
                 pedidos = []
                 for row in rows:
                     pedido = dict(zip(columns, row))
+                    # Procesar items (JSON)
                     if pedido.get('items') and isinstance(pedido['items'], str):
                         try:
                             pedido['items'] = json.loads(pedido['items'])
                         except:
                             pedido['items'] = []
-                    # Asegurar que cliente_nombre existe
+                    
+                    # Asegurar cliente_nombre
                     if not pedido.get('cliente_nombre'):
                         pedido['cliente_nombre'] = pedido.get('cliente_numero', 'N/A')
+                    
                     pedidos.append(pedido)
                 
-                logger.info(f"Pedidos encontrados para tenant {tenant_id}: {len(pedidos)}")
+                logger.info(f"Pedidos procesados: {len(pedidos)}")
                 return jsonify(pedidos)
+                
     except Exception as e:
         logger.error(f'Error cargando pedidos: {e}')
-        return jsonify([])
-
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+        
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
