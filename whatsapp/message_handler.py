@@ -415,7 +415,7 @@ class MessageHandler:
     # ==================== EXTRACCIÓN DE PRODUCTOS DEL HISTORIAL ====================
     
     def _extraer_productos_del_historial(self, historial: list, menu: list) -> list:
-        """Extrae productos mencionados en el historial de conversación"""
+        """Extrae productos mencionados en el historial de conversaciónn"""
         if not historial or not menu:
             return []
         
