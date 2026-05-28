@@ -390,7 +390,7 @@ class MessageHandler:
     
     # ==================== HISTORIAL ====================
     
-    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 8) -> list:
+    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 10) -> list:
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -411,6 +411,27 @@ class MessageHandler:
         for h in historial:
             texto += f"Cliente: {h[0]}\nAsistente: {h[1]}\n"
         return texto
+    
+    # ==================== EXTRACCIÓN DE PRODUCTOS DEL HISTORIAL ====================
+    
+    def _extraer_productos_del_historial(self, historial: list, menu: list) -> list:
+        """Extrae productos mencionados en el historial de conversación"""
+        if not historial or not menu:
+            return []
+        
+        productos = []
+        for h in historial[-6:]:
+            mensaje = h[0]
+            productos.extend(self._detectar_productos_simples(mensaje, menu))
+        
+        # Eliminar duplicados por nombre
+        vistos = set()
+        unicos = []
+        for p in productos:
+            if p['nombre'] not in vistos:
+                vistos.add(p['nombre'])
+                unicos.append(p)
+        return unicos
     
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
@@ -486,7 +507,7 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
         
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
         resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
-        historial = self._get_historial_conversacion(tenant['id'], numero, 8)
+        historial = self._get_historial_conversacion(tenant['id'], numero, 10)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
         self._extraer_y_guardar_datos(texto, numero)
@@ -513,60 +534,68 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
                 logger.error(f"Error procesando pago: {e}")
                 return "✅ Gracias por confirmar. Procesaremos tu pedido."
         
-        # 2. Verificar confirmación
+        # 2. Verificar confirmación - CON RECUPERACIÓN DE PRODUCTOS DEL HISTORIAL
         if self._cliente_confirmo(texto):
             if carrito_actual.get('items'):
                 self._guardar_datos_cliente_en_bd(tenant['id'], numero)
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
             else:
-                return "❌ No hay productos en tu carrito. ¿Qué te gustaría ordenar? (ej: 'quiero una torta de chocolate')"
+                # Intentar recuperar productos del historial
+                productos_del_historial = self._extraer_productos_del_historial(historial, menu)
+                if productos_del_historial:
+                    self._agregar_al_carrito(tenant['id'], numero, productos_del_historial)
+                    carrito_actual = self._cargar_carrito(tenant['id'], numero)
+                    if carrito_actual.get('items'):
+                        return self._finalizar_pedido(tenant, numero, carrito_actual)
+                return "❌ No hay productos en tu carrito. Por favor, primero dime qué deseas ordenar y luego confirma.\n\nEjemplo: 'quiero 25 empanadas hawaianas'"
         
         # 3. Verificar consulta de carrito
         if any(p in texto_lower for p in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # 4. Detectar productos automáticamente
-        productos = self._detectar_productos_simples(texto, menu)
-        if productos:
-            self._agregar_al_carrito(tenant['id'], numero, productos)
+        # 4. Detectar productos en el mensaje actual
+        productos_detectados = self._detectar_productos_simples(texto, menu)
+        
+        # 5. Si hay productos, agregar al carrito
+        if productos_detectados:
+            self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
             nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
             items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in nuevo_carrito['items']])
             return f"""✅ **Agregado a tu pedido:**
+
 {items_texto}
 **Total:** ${nuevo_carrito.get('total', 0):,.0f}
-¿Algo más o confirmamos el pedido? (responde "confirmo")"""
+
+¿Algo más o confirmamos el pedido? (responde "confirmo" para finalizar)"""
         
-        # 5. Si hay carrito, mostrar resumen
+        # 6. Si hay carrito, mostrar resumen
         if carrito_actual.get('items'):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # 6. Si no hay carrito ni productos detectados, usar IA para conversación natural
+        # 7. Si no hay carrito ni productos detectados, usar IA
         menu_simplificado = [{'nombre': p.get('nombre'), 'precio': p.get('precio')} for p in menu[:30]]
         
-        system_prompt = f"""Eres un asistente de ventas conversacional y amable para {tenant.get('nombre', 'Mi negocio')}.
+        system_prompt = f"""Eres un asistente de ventas conversacional para {tenant.get('nombre', 'Mi negocio')}.
 
 🏪 INFORMACIÓN:
 - Horario: {contexto.get('horario', 'No especificado')}
 - Ubicación: {contexto.get('ubicacion', 'No especificada')}
-- Políticas: {contexto.get('politicas', 'No especificadas')}
 
-📋 PRODUCTOS DISPONIBLES:
+📋 PRODUCTOS:
 {json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
 
 {resumen_cliente}
 {historial_texto}
-{self._get_carrito_info_para_prompt(tenant['id'], numero)}
 
-INSTRUCCIONES IMPORTANTES:
+INSTRUCCIONES:
 1. Responde de forma natural, cálida y conversacional en español.
 2. Ayuda al cliente a elegir productos del catálogo.
-3. Si el cliente pregunta por algo que no está disponible, indícalo amablemente.
-4. NO inventes productos que no están en el catálogo.
-5. Sé breve pero amable.
-6. Cuando el cliente quiera comprar algo, confirma los detalles.
-7. Usa emojis con moderación.
+3. Cuando el cliente pida algo, confirma y pregunta si desea agregar algo más.
+4. Para finalizar, el cliente debe decir "confirmo" o "si".
+5. NO generes números de pedido ni confirmes reservas sin tener productos en el carrito.
+6. Sé breve y cálido.
 
-RESPONDE como un vendedor amable y profesional."""
+RESPONDE en español."""
         
         try:
             response = ai_client.client.chat.completions.create(
