@@ -1032,30 +1032,72 @@ def panel_cliente(tenant_id):
 @app.route('/api/pedido/<pedido_id>/estado', methods=['PUT'])
 @login_required
 def cambiar_estado_pedido(pedido_id):
+    """Cambia el estado de un pedido"""
     data = request.json
     nuevo_estado = data.get('estado')
+    
+    # Obtener todos los tenants y buscar el pedido
     tenants = tenant_repo.get_all()
-    tenant_id = None
-    for t in tenants:
-        with db_manager.get_connection(t['id']) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT tenant_id FROM pedidos WHERE id = %s", (pedido_id,))
-                row = cur.fetchone()
-                if row:
-                    tenant_id = row[0]
-                    break
-    if not tenant_id:
+    tenant_encontrado = None
+    schema_name_encontrado = None
+    
+    for tenant in tenants:
+        schema_name = tenant.get('schema_name')
+        if not schema_name:
+            schema_name = f"tenant_{tenant['id'].replace('-', '_')}"
+        
+        try:
+            with db_manager.get_connection(tenant['id']) as conn:
+                with conn.cursor() as cur:
+                    # Verificar si el pedido existe en este tenant
+                    cur.execute(f"""
+                        SELECT id, estado FROM "{schema_name}".pedidos 
+                        WHERE id = %s
+                    """, (pedido_id,))
+                    row = cur.fetchone()
+                    if row:
+                        tenant_encontrado = tenant['id']
+                        schema_name_encontrado = schema_name
+                        estado_actual = row[1]
+                        break
+        except Exception as e:
+            logger.warning(f"Error buscando pedido en tenant {tenant['id']}: {e}")
+            continue
+    
+    if not tenant_encontrado:
         return jsonify({'error': 'Pedido no encontrado'}), 404
-    fecha_campo = {'pagado': 'pagado_at', 'enviado': 'enviado_at', 'cancelado': 'cancelado_at'}.get(nuevo_estado)
-    with db_manager.get_connection(tenant_id) as conn:
-        with conn.cursor() as cur:
-            if fecha_campo:
-                cur.execute(f"UPDATE pedidos SET estado = %s, updated_at = NOW(), {fecha_campo} = NOW() WHERE id = %s", (nuevo_estado, pedido_id))
-            else:
-                cur.execute("UPDATE pedidos SET estado = %s, updated_at = NOW() WHERE id = %s", (nuevo_estado, pedido_id))
-        conn.commit()
-    return jsonify({'success': True, 'mensaje': f'Pedido {nuevo_estado}'})
-
+    
+    # Mapeo de estados a campos de fecha
+    fecha_campo = {
+        'pagado': 'pagado_at',
+        'enviado': 'enviado_at',
+        'cancelado': 'cancelado_at'
+    }.get(nuevo_estado)
+    
+    try:
+        with db_manager.get_connection(tenant_encontrado) as conn:
+            with conn.cursor() as cur:
+                if fecha_campo:
+                    cur.execute(f"""
+                        UPDATE "{schema_name_encontrado}".pedidos 
+                        SET estado = %s, updated_at = NOW(), {fecha_campo} = NOW()
+                        WHERE id = %s
+                    """, (nuevo_estado, pedido_id))
+                else:
+                    cur.execute(f"""
+                        UPDATE "{schema_name_encontrado}".pedidos 
+                        SET estado = %s, updated_at = NOW()
+                        WHERE id = %s
+                    """, (nuevo_estado, pedido_id))
+            conn.commit()
+        
+        logger.info(f"Pedido {pedido_id} actualizado a estado {nuevo_estado}")
+        return jsonify({'success': True, 'mensaje': f'Pedido marcado como {nuevo_estado}'})
+        
+    except Exception as e:
+        logger.error(f'Error actualizando estado del pedido: {e}')
+        return jsonify({'error': str(e)}), 500
+    
 @app.route('/api/pedido/<pedido_id>/detalle', methods=['GET'])
 @login_required
 def detalle_pedido(pedido_id):
