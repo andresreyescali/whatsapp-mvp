@@ -16,17 +16,15 @@ class MessageHandler:
     
     def __init__(self):
         """Inicializa el manejador de mensajes"""
-        self._datos_cliente = {}  # Almacena datos de clientes por número (temporales)
+        self._datos_cliente = {}
     
     def _get_schema_name(self, tenant_id: str) -> str:
-        """Obtiene el schema_name de un tenant"""
         tenant = tenant_repo.find_by_id(tenant_id)
         if tenant and tenant.get('schema_name'):
             return tenant['schema_name']
         return f"tenant_{tenant_id.replace('-', '_')}"
     
     def process(self, phone_id: str, numero: str, texto: str):
-        """Procesa mensaje entrante y envía respuesta"""
         logger.info(f'Procesando mensaje de {numero}: {texto}')
         
         tenant = tenant_repo.find_by_phone_id(phone_id)
@@ -34,9 +32,7 @@ class MessageHandler:
             logger.warning(f'Tenant no encontrado para phone_id: {phone_id}')
             return
         
-        # Asegurar que el esquema del tenant existe
         schema_manager.ensure_schema(tenant['id'])
-        
         menu = self._obtener_menu(tenant['id'])
         contexto = self._obtener_contexto_tenant(tenant['id'])
         
@@ -47,7 +43,6 @@ class MessageHandler:
             self._guardar_conversacion(tenant['id'], numero, texto, respuesta)
 
     def _obtener_menu(self, tenant_id: str) -> list:
-        """Obtiene el menú del tenant desde la base de datos"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -55,34 +50,28 @@ class MessageHandler:
                     cur.execute(f"""
                         SELECT id, nombre, descripcion, precio, categoria, disponible 
                         FROM "{schema_name}".productos 
-                        WHERE disponible = true 
                         ORDER BY categoria, nombre
                     """)
                     rows = cur.fetchall()
-                    productos = []
-                    for row in rows:
-                        productos.append({
-                            'id': str(row[0]),  # Convertir UUID a string
-                            'nombre': row[1],
-                            'descripcion': row[2] or '',
-                            'precio': row[3],
-                            'categoria': row[4] or 'general',
-                            'disponible': row[5]
-                        })
-                    return productos
+                    return [{
+                        'id': str(row[0]),
+                        'nombre': row[1],
+                        'descripcion': row[2] or '',
+                        'precio': row[3],
+                        'categoria': row[4] or 'general',
+                        'disponible': row[5]
+                    } for row in rows]
         except Exception as e:
             logger.error(f'Error obteniendo menú: {e}')
             return []
 
     def _obtener_contexto_tenant(self, tenant_id: str) -> dict:
-        """Obtiene el contexto personalizado del tenant"""
         try:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute('''
                         SELECT instrucciones, horario, ubicacion, politicas, prompt_personalizado 
-                        FROM public.tenant_context 
-                        WHERE tenant_id = %s
+                        FROM public.tenant_context WHERE tenant_id = %s
                     ''', (tenant_id,))
                     row = cur.fetchone()
                     if row:
@@ -99,7 +88,6 @@ class MessageHandler:
             return {}
     
     def _guardar_conversacion(self, tenant_id: str, cliente_numero: str, mensaje: str, respuesta: str):
-        """Guarda la conversación en el esquema del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -109,101 +97,55 @@ class MessageHandler:
                         VALUES (%s, %s, %s, %s, NOW())
                     """, (cliente_numero, mensaje, respuesta, 'ia'))
                 conn.commit()
-                logger.info(f"Conversación guardada para {cliente_numero}")
         except Exception as e:
             logger.error(f'Error guardando conversación: {e}')
-    
-    # ==================== MÉTODOS DEL HISTORIAL ====================
-    
-    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 10) -> list:
-        """Obtiene el historial de conversación desde el esquema del tenant"""
-        try:
-            schema_name = self._get_schema_name(tenant_id)
-            with db_manager.get_connection(tenant_id) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"""
-                        SELECT mensaje, respuesta, created_at 
-                        FROM "{schema_name}".conversaciones 
-                        WHERE cliente_numero = %s 
-                        ORDER BY created_at ASC 
-                        LIMIT %s
-                    """, (cliente_numero, limit))
-                    rows = cur.fetchall()
-                    logger.info(f"Historial obtenido para {cliente_numero}: {len(rows)} mensajes")
-                    return rows if rows else []
-        except Exception as e:
-            logger.error(f'Error obteniendo historial: {e}')
-            return []
-    
-    def _formatear_historial_para_prompt(self, historial: list) -> str:
-        """Formatea el historial para incluirlo en el prompt de IA"""
-        if not historial:
-            return ""
-        
-        texto = "\n📜 HISTORIAL DE LA CONVERSACIÓN:\n"
-        for h in historial:
-            texto += f"Cliente: {h[0]}\n"
-            texto += f"Asistente: {h[1]}\n"
-        return texto
     
     # ==================== MÉTODOS DEL CARRITO ====================
 
     def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
-        """Guarda el carrito en el esquema del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Verificar si ya existe
                     cur.execute(f"""
-                        SELECT id FROM "{schema_name}".carritos 
-                        WHERE cliente_numero = %s
+                        SELECT id FROM "{schema_name}".carritos WHERE cliente_numero = %s
                     """, (cliente_numero,))
                     existing = cur.fetchone()
                     
                     if existing:
-                        # Actualizar
                         cur.execute(f"""
                             UPDATE "{schema_name}".carritos 
                             SET items = %s, total = %s, updated_at = NOW()
                             WHERE cliente_numero = %s
                         """, (json.dumps(items), total, cliente_numero))
                     else:
-                        # Insertar nuevo
                         cur.execute(f"""
                             INSERT INTO "{schema_name}".carritos (cliente_numero, items, total, created_at, updated_at)
                             VALUES (%s, %s, %s, NOW(), NOW())
                         """, (cliente_numero, json.dumps(items), total))
                     conn.commit()
-                    logger.info(f"Carrito guardado para {cliente_numero}: {len(items)} items, total ${total}")
         except Exception as e:
             logger.error(f'Error guardando carrito: {e}')
 
     def _cargar_carrito(self, tenant_id: str, cliente_numero: str) -> dict:
-        """Carga el carrito desde el esquema del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        SELECT items, total FROM "{schema_name}".carritos 
-                        WHERE cliente_numero = %s
+                        SELECT items, total FROM "{schema_name}".carritos WHERE cliente_numero = %s
                     """, (cliente_numero,))
                     row = cur.fetchone()
                     if row:
-                        items = row[0]
-                        if isinstance(items, str):
-                            items = json.loads(items)
-                        return {'items': items or [], 'total': row[1] or 0}
+                        items = row[0] if isinstance(row[0], list) else json.loads(row[0]) if row[0] else []
+                        return {'items': items, 'total': row[1] or 0}
                     return {'items': [], 'total': 0}
         except Exception as e:
             logger.error(f'Error cargando carrito: {e}')
             return {'items': [], 'total': 0}
         
     def _agregar_al_carrito(self, tenant_id: str, cliente_numero: str, productos: list):
-        """Agrega productos al carrito del cliente"""
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
-        
         for p in productos:
             encontrado = False
             for item in carrito['items']:
@@ -218,21 +160,18 @@ class MessageHandler:
                     'cantidad': p.get('cantidad', 1)
                 })
             carrito['total'] += p.get('precio', 0) * p.get('cantidad', 1)
-        
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
     
     # ==================== MÉTODOS DEL CLIENTE ====================
     
     def _obtener_cliente(self, tenant_id: str, cliente_numero: str) -> dict:
-        """Obtiene los datos del cliente desde la BD"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
                         SELECT nombre, cc, email, direccion, numero_telefono
-                        FROM "{schema_name}".clientes
-                        WHERE numero_telefono = %s
+                        FROM "{schema_name}".clientes WHERE numero_telefono = %s
                     """, (cliente_numero,))
                     row = cur.fetchone()
                     if row:
@@ -249,10 +188,8 @@ class MessageHandler:
             return {}
     
     def _guardar_datos_cliente_en_bd(self, tenant_id: str, numero: str):
-        """Guarda los datos temporales del cliente en la base de datos"""
         if numero not in self._datos_cliente:
             return
-        
         datos = self._datos_cliente[numero]
         if not any(datos.values()):
             return
@@ -279,61 +216,40 @@ class MessageHandler:
                         if datos.get('direccion'):
                             updates.append("direccion = %s")
                             params.append(datos['direccion'])
-                        
                         if updates:
                             params.append(row[0])
                             cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
-                            logger.info(f"Cliente {numero} actualizado en BD")
                     else:
                         cliente_id = str(uuid.uuid4())
                         cur.execute(f"""
                             INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion)
                             VALUES (%s, %s, %s, %s, %s, %s)
                         """, (cliente_id, numero, datos.get('nombre'), datos.get('cc'), datos.get('email'), datos.get('direccion')))
-                        logger.info(f"Cliente {numero} creado en BD")
-                    
                     conn.commit()
         except Exception as e:
             logger.error(f'Error guardando cliente en BD: {e}')
     
     def _get_resumen_cliente(self, tenant_id: str, cliente_numero: str) -> str:
-        """Obtiene un resumen estructurado del cliente y sus pedidos"""
-        resumen = []
-        
         cliente = self._obtener_cliente(tenant_id, cliente_numero)
         if cliente and any(cliente.values()):
-            resumen.append("📋 DATOS DEL CLIENTE:")
-            if cliente.get('nombre'):
-                resumen.append(f"- Nombre: {cliente['nombre']}")
-            if cliente.get('cc'):
-                resumen.append(f"- Cédula: {cliente['cc']}")
-            if cliente.get('telefono'):
-                resumen.append(f"- Teléfono: {cliente['telefono']}")
-            if cliente.get('email'):
-                resumen.append(f"- Email: {cliente['email']}")
-            if cliente.get('direccion'):
-                resumen.append(f"- Dirección: {cliente['direccion']}")
-        else:
-            resumen.append("📋 DATOS DEL CLIENTE: No hay datos previos")
-        
-        return "\n".join(resumen)
+            return f"""📋 DATOS DEL CLIENTE:
+- Nombre: {cliente.get('nombre', 'N/A')}
+- Cédula: {cliente.get('cc', 'N/A')}
+- Teléfono: {cliente.get('telefono', 'N/A')}
+- Email: {cliente.get('email', 'N/A')}
+- Dirección: {cliente.get('direccion', 'N/A')}"""
+        return "📋 DATOS DEL CLIENTE: No hay datos previos"
     
     def _get_carrito_info_para_prompt(self, tenant_id: str, cliente_numero: str) -> str:
-        """Obtiene información del carrito para el prompt"""
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
         if not carrito.get('items'):
             return "Carrito vacío"
-        
-        items_texto = ""
-        for item in carrito['items']:
-            items_texto += f"- {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
-        return f"📦 CARRITO ACTUAL:\n{items_texto}💰 Total: ${carrito.get('total', 0):,.0f}"
+        items_texto = "\n".join([f"- {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in carrito['items']])
+        return f"📦 CARRITO ACTUAL:\n{items_texto}\n💰 Total: ${carrito.get('total', 0):,.0f}"
     
     def _formatear_datos_cliente(self, datos: dict) -> str:
-        """Formatea los datos del cliente para confirmación"""
         if not datos:
             return ""
-        
         texto = ""
         if datos.get('nombre'):
             texto += f"\n📝 **Nombre:** {datos['nombre']}"
@@ -346,35 +262,27 @@ class MessageHandler:
         if datos.get('direccion'):
             texto += f"\n📍 **Dirección:** {datos['direccion']}"
         if datos.get('fecha_entrega'):
-            texto += f"\n📅 **Fecha de entrega:** {datos['fecha_entrega']}"
+            texto += f"\n📅 **Fecha:** {datos['fecha_entrega']}"
         if datos.get('hora_entrega'):
             texto += f"\n⏰ **Hora:** {datos['hora_entrega']}"
         if datos.get('recojo_en_tienda'):
             texto += f"\n🏪 **Recojo en tienda**"
         if datos.get('pago_contraentrega'):
             texto += f"\n💰 **Pago:** Contraentrega"
-        
         return texto
     
     def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
-        """Finaliza el pedido/reserva y genera número de seguimiento"""
         if not carrito or not carrito.get('items'):
-            return "No hay productos/servicios en tu carrito. ¿Qué te gustaría reservar?"
+            return "No hay productos en tu carrito. ¿Qué te gustaría ordenar?"
         
         datos_cliente = self._datos_cliente.get(numero, {})
         schema_name = self._get_schema_name(tenant['id'])
         
-        # Obtener ubicación del negocio
         contexto = self._obtener_contexto_tenant(tenant['id'])
-        ubicacion_negocio = contexto.get('ubicacion', '')
-        nombre_negocio = tenant.get('nombre', 'nuestro local')
-        
-        # Determinar dirección de entrega/recojo
         direccion_entrega = datos_cliente.get('direccion', '')
         if datos_cliente.get('recojo_en_tienda'):
-            direccion_entrega = f"Recojo en tienda - {nombre_negocio} - {ubicacion_negocio}"
+            direccion_entrega = f"Recojo en tienda - {tenant.get('nombre')} - {contexto.get('ubicacion', '')}"
         
-        # Guardar cliente en BD
         cliente_id = self._obtener_o_crear_cliente(tenant['id'], numero, datos_cliente)
         if not cliente_id:
             return "❌ Hubo un error con tus datos. Por favor intenta de nuevo."
@@ -383,92 +291,66 @@ class MessageHandler:
         items = carrito['items']
         total = carrito['total']
         
-        # Generar número de pedido
+        with db_manager.get_connection(tenant['id']) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
+                secuencial = cur.fetchone()[0] or 1
+        
         fecha_str = datetime.now().strftime('%Y%m%d%H%M%S')
         numero_pedido = f"{tenant['nombre'][:3].upper()}-{fecha_str}-{str(uuid.uuid4())[:4].upper()}"
         
         try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
-                    # Verificar y crear columnas si no existen
+                    # Verificar columnas
                     cur.execute(f"""
                         DO $$ 
                         BEGIN
                             IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                                        WHERE table_schema = '{schema_name}' 
-                                        AND table_name = 'pedidos' 
-                                        AND column_name = 'cliente_numero') THEN
+                                        WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'cliente_numero') THEN
                                 ALTER TABLE "{schema_name}".pedidos ADD COLUMN cliente_numero TEXT;
                             END IF;
-                            
                             IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                                        WHERE table_schema = '{schema_name}' 
-                                        AND table_name = 'pedidos' 
-                                        AND column_name = 'secuencial') THEN
+                                        WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'secuencial') THEN
                                 ALTER TABLE "{schema_name}".pedidos ADD COLUMN secuencial INTEGER;
                             END IF;
-                            
                             IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                                        WHERE table_schema = '{schema_name}' 
-                                        AND table_name = 'pedidos' 
-                                        AND column_name = 'numero_pedido') THEN
+                                        WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'numero_pedido') THEN
                                 ALTER TABLE "{schema_name}".pedidos ADD COLUMN numero_pedido TEXT;
                             END IF;
                         END $$;
                     """)
                     conn.commit()
                     
-                    # Obtener secuencial
-                    cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
-                    row = cur.fetchone()
-                    secuencial = row[0] if row and row[0] else 1
-                    
-                    # Insertar pedido
-                    cur.execute(f"""
-                        INSERT INTO "{schema_name}".pedidos 
-                        (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        pedido_id, cliente_id, numero, numero_pedido, secuencial, json.dumps(items),
-                        total, 'nuevo', direccion_entrega,
-                        f"Fecha: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()
-                    ))
-                    conn.commit()
-                
-                # Limpiar carrito y datos temporales
-                self._guardar_carrito(tenant['id'], numero, [], 0)
-                if numero in self._datos_cliente:
-                    del self._datos_cliente[numero]
-                
-                items_texto = ""
-                for item in items:
-                    subtotal = item.get('precio', 0) * item.get('cantidad', 1)
-                    items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${subtotal:,.0f}\n"
-                
-                datos_texto = self._formatear_datos_cliente(datos_cliente)
-                
-                return f"""✅ **¡PEDIDO CONFIRMADO!**
+                    cur.execute(f'INSERT INTO "{schema_name}".pedidos (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)', (pedido_id, cliente_id, numero, numero_pedido, secuencial, json.dumps(items), total, 'nuevo', direccion_entrega, f"Fecha: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()))
+                conn.commit()
+            
+            self._guardar_carrito(tenant['id'], numero, [], 0)
+            if numero in self._datos_cliente:
+                del self._datos_cliente[numero]
+            
+            items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in items])
+            datos_texto = self._formatear_datos_cliente(datos_cliente)
+            
+            return f"""✅ **¡PEDIDO CONFIRMADO!**
 
-    📌 **Número de pedido:** *{numero_pedido}*
-    📝 *Guarda este número para hacer seguimiento*
+📌 **Número de pedido:** *{numero_pedido}*
+📝 *Guarda este número para hacer seguimiento*
+{datos_texto}
 
-    {datos_texto}
+📋 **Productos:**
+{items_texto}
+💰 **Total:** ${total:,.0f}
 
-    📋 **Productos:**
-    {items_texto}
-    💰 **Total:** ${total:,.0f}
+📦 **Entrega:** {direccion_entrega}
 
-    📦 **Entrega:** {direccion_entrega}
-
-    📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
-    📞 *Para consultar tu pedido, envía "estado {numero_pedido}"*"""
-                    
+📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
+📞 *Para consultar tu pedido, envía "estado {numero_pedido}"*"""
         except Exception as e:
             logger.error(f'Error creando pedido: {e}')
             return "❌ Hubo un error procesando tu solicitud. Por favor intenta de nuevo."
-            
+    
     def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
-        """Obtiene o crea un cliente en el esquema del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -479,8 +361,7 @@ class MessageHandler:
                     if row:
                         cliente_id = row[0]
                         if datos_cliente:
-                            updates = []
-                            params = []
+                            updates, params = [], []
                             if datos_cliente.get('nombre') and not row[1]:
                                 updates.append("nombre = %s")
                                 params.append(datos_cliente['nombre'])
@@ -500,56 +381,46 @@ class MessageHandler:
                         return cliente_id
                     else:
                         cliente_id = str(uuid.uuid4())
-                        cur.execute(f"""
-                            INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (
-                            cliente_id, numero,
-                            datos_cliente.get('nombre') if datos_cliente else None,
-                            datos_cliente.get('cc') if datos_cliente else None,
-                            datos_cliente.get('email') if datos_cliente else None,
-                            datos_cliente.get('direccion') if datos_cliente else None
-                        ))
+                        cur.execute(f'INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion) VALUES (%s, %s, %s, %s, %s, %s)', (cliente_id, numero, datos_cliente.get('nombre') if datos_cliente else None, datos_cliente.get('cc') if datos_cliente else None, datos_cliente.get('email') if datos_cliente else None, datos_cliente.get('direccion') if datos_cliente else None))
                         conn.commit()
                         return cliente_id
         except Exception as e:
             logger.error(f'Error gestionando cliente: {e}')
             return None
     
+    # ==================== HISTORIAL ====================
+    
+    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 8) -> list:
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT mensaje, respuesta FROM "{schema_name}".conversaciones 
+                        WHERE cliente_numero = %s ORDER BY created_at ASC LIMIT %s
+                    """, (cliente_numero, limit))
+                    return cur.fetchall()
+        except Exception as e:
+            logger.error(f'Error obteniendo historial: {e}')
+            return []
+    
+    def _formatear_historial_para_prompt(self, historial: list) -> str:
+        if not historial:
+            return ""
+        texto = "\n📜 HISTORIAL DE LA CONVERSACIÓN:\n"
+        for h in historial:
+            texto += f"Cliente: {h[0]}\nAsistente: {h[1]}\n"
+        return texto
+    
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
-    def _intencion_reserva(self, texto: str) -> bool:
-        """Detecta si el cliente quiere reservar un servicio"""
-        palabras_reserva = [
-            'reservar', 'apartar', 'separar', 'confirmar', 'tomar',
-            'me gustaría', 'quiero', 'deseo', 'necesito', 'reserva'
-        ]
-        texto_lower = texto.lower()
-        return any(palabra in texto_lower for palabra in palabras_reserva)
-    
     def _extraer_y_guardar_datos(self, texto: str, numero: str):
-        """Extrae datos del cliente usando IA y los guarda temporalmente"""
         if not ai_client.client:
             return
         
-        prompt = f"""
-        Extrae información del cliente del siguiente mensaje.
-        
-        MENSAJE: "{texto}"
-        
-        Devuelve SOLO un JSON:
-        {{
-            "nombre": "nombre completo",
-            "cc": "número de cédula",
-            "telefono": "número de teléfono",
-            "email": "correo electrónico",
-            "direccion": "dirección completa",
-            "fecha_entrega": "fecha",
-            "hora_entrega": "hora",
-            "recojo_en_tienda": false,
-            "pago_contraentrega": false
-        }}
-        """
+        prompt = f"""Extrae información del cliente del siguiente mensaje.
+MENSAJE: "{texto}"
+Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "direccion": "", "fecha_entrega": "", "hora_entrega": "", "recojo_en_tienda": false, "pago_contraentrega": false}}"""
         
         try:
             response = ai_client.client.chat.completions.create(
@@ -568,410 +439,157 @@ class MessageHandler:
                 for key, value in datos.items():
                     if value:
                         self._datos_cliente[numero][key] = value
-                logger.info(f"Datos extraídos y guardados: {datos}")
+                logger.info(f"Datos extraídos: {datos}")
         except Exception as e:
             logger.error(f'Error extrayendo datos: {e}')
     
-    def _cliente_confirmo(self, texto: str) -> bool:
-        """Detecta si el cliente confirmó el pedido o realizó un pago"""
-        confirmaciones = [
-            'si', 'sí', 'dale', 'ok', 'correcto', 'confirmo',
-            'confirmar', 'proceder', 'adelante', 'esta bien',
-            'está bien', 'confirmo pedido', 'si confirmo', 'reservar',
-            'apartar', 'separar', 'confirmar reserva'
-        ]
-        
-        # Palabras clave para pago
-        palabras_pago = [
-            'pague', 'pago', 'pagado', 'transferí', 'consigné', 
-            'pagué', 'ya pague', 'listo el pago', 'transferencia',
-            'consignacion', 'ya transferí', 'ya consigné'
-        ]
-        
-        texto_lower = texto.lower().strip()
-        
-        # Verificar si es confirmación
-        if texto_lower in confirmaciones or any(c in texto_lower for c in confirmaciones if len(c) > 2):
-            return True
-        
-        # Verificar si es pago
-        if any(palabra in texto_lower for palabra in palabras_pago):
-            return True
-        
-        return False
-    
-    def _mostrar_resumen_carrito(self, tenant: dict, numero: str, carrito: dict) -> str:
-        """Muestra el resumen del carrito"""
-        if not carrito.get('items'):
-            return "No tienes productos/servicios en tu carrito aún. ¿Qué te gustaría ordenar o reservar?"
-        
-        items_texto = ""
-        for item in carrito['items']:
-            subtotal = item.get('precio', 0) * item.get('cantidad', 1)
-            items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${subtotal:,.0f}\n"
-        
-        datos_pendientes = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
-        
-        mensaje = f"""📋 **Tu pedido actual:**
-
-{items_texto}
-**Total:** ${carrito.get('total', 0):,.0f}"""
-        
-        if datos_pendientes:
-            mensaje += f"""
-
-📋 **Datos registrados:**
-{datos_pendientes}"""
-        
-        mensaje += """
-
-¿Algo más que deseas agregar o confirmamos el pedido? (responde "confirmo" para finalizar)"""
-        
-        return mensaje
-    
-    def _detectar_productos_con_ia(self, texto: str, menu: list) -> list:
-        """Usa IA para detectar productos/servicios y cantidades"""
-        if not ai_client.client or not menu:
-            return []
-        
-        prompt = f"""
-        El cliente quiere reservar un servicio o comprar un producto. Extrae el ítem del siguiente mensaje y relaciónalo con el catálogo.
-        
-        CATÁLOGO DISPONIBLE:
-        {json.dumps([{'nombre': p.get('nombre'), 'precio': p.get('precio')} for p in menu[:30]], indent=2, ensure_ascii=False)}
-        
-        MENSAJE DEL CLIENTE: "{texto}"
-        
-        IMPORTANTE:
-        - El cliente puede mencionar el servicio/producto de forma natural
-        - Extrae la cantidad si la menciona (ej: "para 2 personas" → cantidad: 2, "2 tortas" → cantidad: 2)
-        - Si no menciona cantidad, asume 1
-        - Relaciona con el nombre más cercano en el catálogo
-        
-        Devuelve SOLO un JSON:
-        {{
-            "productos": [
-                {{"nombre": "nombre exacto del catálogo", "cantidad": 1}}
-            ]
-        }}
-        """
-        
-        try:
-            response = ai_client.client.chat.completions.create(
-                model=ai_client.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=300
-            )
-            contenido = response.choices[0].message.content
-            contenido = contenido.replace('```json', '').replace('```', '').strip()
-            resultado = json.loads(contenido)
-            
-            productos_encontrados = []
-            for p in resultado.get('productos', []):
-                nombre = p.get('nombre', '')
-                cantidad = p.get('cantidad', 1)
-                
-                # Buscar en el catálogo
-                for producto in menu:
-                    if producto['nombre'].lower() == nombre.lower() or nombre.lower() in producto['nombre'].lower():
-                        productos_encontrados.append({
-                            'nombre': producto['nombre'],
-                            'precio': producto.get('precio', 0),
-                            'cantidad': cantidad
-                        })
-                        break
-            
-            if productos_encontrados:
-                logger.info(f"Servicios/Productos detectados: {productos_encontrados}")
-            return productos_encontrados
-        except Exception as e:
-            logger.error(f'Error detectando servicios: {e}')
-            return []
-    
     def _detectar_productos_simples(self, texto: str, menu: list) -> list:
-        """Detecta productos por coincidencia simple en el texto (sin IA)"""
         if not menu:
             return []
-        
         texto_lower = texto.lower()
-        productos_encontrados = []
-        
+        productos = []
         for producto in menu:
             nombre = producto.get('nombre', '').lower()
-            # Buscar si el nombre del producto está en el texto
             if nombre in texto_lower:
                 cantidad = 1
-                # Buscar cantidad antes del producto (ej: "2 tortas", "3 empanadas")
-                # Patrón: número + espacio + nombre del producto
-                patron = rf'(\d+)\s*{re.escape(nombre)}'
-                match = re.search(patron, texto_lower)
+                match = re.search(rf'(\d+)\s*{re.escape(nombre)}', texto_lower)
                 if match:
                     cantidad = int(match.group(1))
-                else:
-                    # También buscar "una", "un"
-                    if re.search(r'\buna?\s+' + re.escape(nombre), texto_lower):
-                        cantidad = 1
-                
-                productos_encontrados.append({
+                productos.append({
                     'nombre': producto['nombre'],
                     'precio': producto.get('precio', 0),
                     'cantidad': cantidad
                 })
-                logger.info(f"Producto detectado por coincidencia simple: {producto['nombre']} x{cantidad}")
-        
-        return productos_encontrados
+        return productos
+    
+    def _cliente_confirmo(self, texto: str) -> bool:
+        confirmaciones = ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'confirmar', 'proceder', 'adelante', 'esta bien', 'está bien', 'confirmo pedido']
+        palabras_pago = ['pague', 'pago', 'pagado', 'transferí', 'consigné', 'pagué', 'ya pague', 'listo el pago']
+        texto_lower = texto.lower().strip()
+        return texto_lower in confirmaciones or any(c in texto_lower for c in confirmaciones if len(c) > 2) or any(p in texto_lower for p in palabras_pago)
+    
+    def _mostrar_resumen_carrito(self, tenant: dict, numero: str, carrito: dict) -> str:
+        if not carrito.get('items'):
+            return "No tienes productos en tu carrito. ¿Qué te gustaría ordenar?"
+        items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in carrito['items']])
+        return f"""📋 **Tu pedido actual:**
+{items_texto}
+**Total:** ${carrito.get('total', 0):,.0f}
 
+¿Algo más o confirmamos el pedido? (responde "confirmo")"""
+    
     def _procesar_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
-        """Procesa el mensaje usando IA para entender lenguaje natural"""
+        """Procesa el mensaje usando IA para lenguaje natural"""
         
         if not ai_client.client:
             return self._respuesta_fallback(tenant, menu)
         
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
         resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
-        
-        # Obtener historial
-        historial = self._get_historial_conversacion(tenant['id'], numero, 10)
+        historial = self._get_historial_conversacion(tenant['id'], numero, 8)
         historial_texto = self._formatear_historial_para_prompt(historial)
-        if historial:
-            logger.info(f"Incluyendo {len(historial)} mensajes del historial")
         
-        # Extraer y guardar datos del cliente
         self._extraer_y_guardar_datos(texto, numero)
-        
-        # Guardar datos en BD si hay información completa
         if numero in self._datos_cliente and self._datos_cliente[numero].get('nombre'):
             self._guardar_datos_cliente_en_bd(tenant['id'], numero)
         
         texto_lower = texto.lower()
         
-        # ========== 0. VERIFICAR PAGO (MÁS IMPORTANTE) ==========
-        palabras_pago = ['pague', 'pago', 'pagado', 'transferí', 'consigné', 'pagué', 'ya pague', 'listo el pago']
-        if any(palabra in texto_lower for palabra in palabras_pago):
+        # 1. Verificar pago
+        if any(p in texto_lower for p in ['pague', 'pago', 'pagado', 'transferí', 'consigné', 'pagué', 'ya pague', 'listo el pago']):
             try:
-                # Marcar pedido como pagado
                 resultado = order_repo.marcar_pagado(tenant['id'], numero)
                 if resultado > 0:
-                    return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido.\n\n📦 Recibirás una notificación cuando esté listo para entrega."
+                    return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
                 else:
-                    # Buscar el último pedido del cliente para marcarlo como pagado directamente
                     schema_name = self._get_schema_name(tenant['id'])
                     with db_manager.get_connection(tenant['id']) as conn:
                         with conn.cursor() as cur:
-                            cur.execute(f"""
-                                UPDATE "{schema_name}".pedidos 
-                                SET estado = 'pagado', pagado_at = NOW()
-                                WHERE cliente_numero = %s AND estado = 'nuevo'
-                                ORDER BY created_at DESC LIMIT 1
-                            """, (numero,))
-                            updated = cur.rowcount
-                            conn.commit()
-                    
-                    if updated > 0:
-                        return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
-                    else:
-                        return "✅ ¡Gracias por confirmar el pago! Procesaremos tu pedido lo antes posible."
+                            cur.execute(f'UPDATE "{schema_name}".pedidos SET estado = "pagado", pagado_at = NOW() WHERE cliente_numero = %s AND estado = "nuevo" ORDER BY created_at DESC LIMIT 1', (numero,))
+                            if cur.rowcount > 0:
+                                return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
+                    return "✅ ¡Gracias por confirmar el pago! Procesaremos tu pedido."
             except Exception as e:
                 logger.error(f"Error procesando pago: {e}")
                 return "✅ Gracias por confirmar. Procesaremos tu pedido."
         
-        # ========== 1. VERIFICAR CONFIRMACIÓN ==========
+        # 2. Verificar confirmación
         if self._cliente_confirmo(texto):
             if carrito_actual.get('items'):
                 self._guardar_datos_cliente_en_bd(tenant['id'], numero)
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
             else:
-                return "❌ No hay productos en tu carrito. Por favor, vuelve a indicarme qué deseas ordenar.\n\nEjemplo: 'quiero una torta de chocolate'"
+                return "❌ No hay productos en tu carrito. ¿Qué te gustaría ordenar? (ej: 'quiero una torta de chocolate')"
         
-        # ========== 2. VERIFICAR CONSULTA DE CARRITO ==========
-        if any(palabra in texto_lower for palabra in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo', 'mi reserva']):
+        # 3. Verificar consulta de carrito
+        if any(p in texto_lower for p in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # ========== 3. DETECTAR PRODUCTOS ==========
-        productos_detectados = self._detectar_productos_simples(texto, menu)
-        if not productos_detectados:
-            productos_detectados = self._detectar_productos_con_ia(texto, menu)
-        
-        # ========== 4. AGREGAR PRODUCTOS AL CARRITO ==========
-        if productos_detectados:
-            self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
+        # 4. Detectar productos automáticamente
+        productos = self._detectar_productos_simples(texto, menu)
+        if productos:
+            self._agregar_al_carrito(tenant['id'], numero, productos)
             nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
-            
-            items_texto = ""
-            for item in nuevo_carrito['items']:
-                subtotal = item.get('precio', 0) * item.get('cantidad', 1)
-                items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${subtotal:,.0f}\n"
-            
-            return f"""✅ **Productos agregados a tu pedido:**
-
-    {items_texto}
-    **Total:** ${nuevo_carrito.get('total', 0):,.0f}
-
-    ¿Algo más o confirmamos el pedido? (responde "confirmo" para finalizar)"""
+            items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in nuevo_carrito['items']])
+            return f"""✅ **Agregado a tu pedido:**
+{items_texto}
+**Total:** ${nuevo_carrito.get('total', 0):,.0f}
+¿Algo más o confirmamos el pedido? (responde "confirmo")"""
         
-        # ========== 5. SI HAY CARRITO PERO NO SE DETECTARON PRODUCTOS ==========
+        # 5. Si hay carrito, mostrar resumen
         if carrito_actual.get('items'):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # ========== 6. MOSTRAR MENÚ SI ESTÁ VACÍO ==========
-        if menu:
-            primeros = menu[:5]
-            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in primeros])
-            return f"""🌟 **{tenant.get('nombre', 'Bienvenido')}**
-
-    Estos son nuestros productos:
-
-    {sugerencias}
-
-    ¿Qué te gustaría ordenar? Escríbeme el nombre del producto."""
+        # 6. Si no hay carrito ni productos detectados, usar IA para conversación natural
+        menu_simplificado = [{'nombre': p.get('nombre'), 'precio': p.get('precio')} for p in menu[:30]]
         
-        # ========== 7. FALLBACK CON IA ==========
-        menu_simplificado = []
-        for p in menu[:30]:
-            menu_simplificado.append({
-                'nombre': p.get('nombre'),
-                'precio': p.get('precio'),
-                'descripcion': p.get('descripcion', '')[:100]
-            })
-        
-        datos_pendientes = self._formatear_datos_cliente(self._datos_cliente.get(numero, {}))
-        
-        system_prompt = f"""Eres un asistente de ventas para {tenant.get('nombre', 'Mi negocio')}.
+        system_prompt = f"""Eres un asistente de ventas conversacional y amable para {tenant.get('nombre', 'Mi negocio')}.
 
-    🏪 INFORMACIÓN:
-    - Horario: {contexto.get('horario', 'No especificado')}
-    - Ubicación: {contexto.get('ubicacion', 'No especificada')}
+🏪 INFORMACIÓN:
+- Horario: {contexto.get('horario', 'No especificado')}
+- Ubicación: {contexto.get('ubicacion', 'No especificada')}
+- Políticas: {contexto.get('politicas', 'No especificadas')}
 
-    📋 PRODUCTOS:
-    {json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
+📋 PRODUCTOS DISPONIBLES:
+{json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
 
-    {resumen_cliente}
+{resumen_cliente}
+{historial_texto}
+{self._get_carrito_info_para_prompt(tenant['id'], numero)}
 
-    {historial_texto}
+INSTRUCCIONES IMPORTANTES:
+1. Responde de forma natural, cálida y conversacional en español.
+2. Ayuda al cliente a elegir productos del catálogo.
+3. Si el cliente pregunta por algo que no está disponible, indícalo amablemente.
+4. NO inventes productos que no están en el catálogo.
+5. Sé breve pero amable.
+6. Cuando el cliente quiera comprar algo, confirma los detalles.
+7. Usa emojis con moderación.
 
-    INSTRUCCIONES:
-    1. Responde de forma amable y natural en español.
-    2. Ayuda al cliente a elegir un producto.
-    3. No inventes productos que no están en el catálogo.
-    """
-        
-        user_message = f"Cliente: {texto}\n\nAsistente:"
+RESPONDE como un vendedor amable y profesional."""
         
         try:
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": f"Cliente: {texto}\n\nAsistente:"}
                 ],
                 temperature=0.7,
                 max_tokens=500
             )
             return response.choices[0].message.content
-            
         except Exception as e:
             logger.error(f'Error en IA: {e}')
             return self._respuesta_fallback(tenant, menu)
     
-    def _parece_pedido(self, texto: str) -> bool:
-        """Detecta si el mensaje parece un pedido de producto o servicio"""
-        palabras_pedido = [
-            'quiero', 'deseo', 'necesito', 'me gustaría', 'comprar', 
-            'ordenar', 'pedir', 'reservar', 'agendar', 'tomar'
-        ]
-        
-        # Palabras específicas de productos (para evitar confusiones)
-        palabras_producto = [
-            'torta', 'pastel', 'galleta', 'cheesecake', 'red velvet',
-            'chocolate', 'vainilla', 'pizza', 'hamburguesa'
-        ]
-        
-        # Palabras específicas de viajes/servicios
-        palabras_servicio = [
-            'tour', 'viaje', 'islas', 'rosario', 'barú', 'cartagena',
-            'playa', 'vuelo', 'hotel', 'traslado', 'avión', 'reserva'
-        ]
-        
-        texto_lower = texto.lower()
-        
-        # Si menciona palabras de servicio, es un pedido de servicio
-        if any(palabra in texto_lower for palabra in palabras_servicio):
-            return True
-        
-        # Si menciona palabras de producto, es pedido de producto
-        if any(palabra in texto_lower for palabra in palabras_producto):
-            return True
-        
-        # Si solo tiene palabras genéricas
-        return any(palabra in texto_lower for palabra in palabras_pedido)
-    
-    def _intentar_agregar_producto(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
-        """Intenta agregar un producto/servicio al carrito basado en el mensaje del cliente"""
-        if not menu:
-            return """📭 No hay servicios/productos cargados en el sistema.
-
-Por favor, el administrador debe entrenar la IA con los servicios disponibles.
-
-Mientras tanto, puedes contactarnos directamente al WhatsApp del negocio."""
-        
-        # Usar IA para identificar el producto/servicio
-        prompt = f"""
-        El cliente dice: "{texto}"
-        
-        Catálogo disponible:
-        {json.dumps([{'nombre': p['nombre'], 'precio': p['precio']} for p in menu[:20]], indent=2, ensure_ascii=False)}
-        
-        ¿Qué producto o servicio quiere el cliente? Devuelve SOLO el nombre exacto del catálogo.
-        Si no está seguro, devuelve "no_seguro".
-        """
-        
-        try:
-            response = ai_client.client.chat.completions.create(
-                model=ai_client.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=50
-            )
-            producto_nombre = response.choices[0].message.content.strip().strip('"')
-            
-            if producto_nombre == "no_seguro":
-                sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
-                return f"Lo siento, no entendí qué deseas. Nuestros servicios/productos más populares:\n{sugerencias}\n¿Cuál te gustaría?"
-            
-            # Buscar el producto en el menú
-            producto = None
-            for p in menu:
-                if p['nombre'].lower() == producto_nombre.lower():
-                    producto = p
-                    break
-            
-            if producto:
-                self._agregar_al_carrito(tenant['id'], numero, [{'nombre': producto['nombre'], 'precio': producto['precio'], 'cantidad': 1}])
-                nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
-                return f"✅ Agregado: {producto['nombre']} - ${producto['precio']:,.0f}\n\n{self._mostrar_resumen_carrito(tenant, numero, nuevo_carrito)}"
-            else:
-                sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
-                return f"No encontré '{producto_nombre}' en el catálogo. Estos son nuestros servicios:\n{sugerencias}\n¿Cuál te gustaría?"
-            
-        except Exception as e:
-            logger.error(f'Error identificando producto/servicio: {e}')
-            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in menu[:5]])
-            return f"¿Qué te gustaría ordenar o reservar? Estos son algunos servicios:\n{sugerencias}"
-    
     def _respuesta_fallback(self, tenant: dict, menu: list) -> str:
-        """Respuesta de fallback cuando la IA no está disponible"""
-        productos_sugeridos = menu[:5]
-        if productos_sugeridos:
-            sugerencias = "\n".join([f"• {p['nombre']} - ${p['precio']:,.0f}" for p in productos_sugeridos])
-            return f"""Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}.
+        if menu:
+            primeros = menu[:3]
+            sugerencias = ", ".join([p['nombre'] for p in primeros])
+            return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿Te gustaría ordenar {sugerencias}? Escríbeme lo que deseas."
+        return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte?"
 
-**Servicios/Productos sugeridos:**
-{sugerencias}
-
-¿Qué te gustaría ordenar o reservar? Puedes escribir "MENÚ" para ver el catálogo completo o decirme directamente lo que deseas."""
-        else:
-            return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte hoy?"
 
 # Instancia global
 message_handler = MessageHandler()
