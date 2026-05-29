@@ -515,29 +515,59 @@ class MessageHandler:
         return list(resumen.values())
     
     def _buscar_productos_en_conversacion(self, historial: list, menu: list) -> list:
-        """Busca productos en toda la conversación (mensajes del cliente)"""
-        if not historial or not menu:
+        """Usa IA para extraer productos del historial de conversación"""
+        if not historial or not menu or not ai_client.client:
             return []
         
-        productos = []
-        for h in historial:
-            mensaje = h[0]  # mensaje del cliente
-            encontrados = self._detectar_productos_simples(mensaje, menu)
-            if encontrados:
-                for p in encontrados:
-                    logger.info(f"🔍 [CONVERSACION] Producto encontrado: {p}")
-                productos.extend(encontrados)
+        # Construir el historial como texto
+        texto_historial = "\n".join([f"Cliente: {h[0]}\nAsistente: {h[1]}" for h in historial[-10:]])
         
-        # Si hay múltiples productos iguales, sumar cantidades
-        resumen = {}
-        for p in productos:
-            nombre = p['nombre']
-            if nombre in resumen:
-                resumen[nombre]['cantidad'] += p['cantidad']
-            else:
-                resumen[nombre] = p.copy()
+        # Lista de productos del menú para referencia
+        productos_menu = [{'nombre': p['nombre'], 'precio': p['precio']} for p in menu]
         
-        return list(resumen.values())
+        prompt = f"""
+        Historial de conversación:
+        {texto_historial}
+        
+        Catálogo de productos:
+        {json.dumps(productos_menu, indent=2, ensure_ascii=False)}
+        
+        El cliente acaba de confirmar el pedido (dijo "confirmo" o "si").
+        
+        Extrae SOLO los productos que el cliente pidió en la conversación.
+        Devuelve SOLO un JSON:
+        {{"productos": [{{"nombre": "nombre exacto del catálogo", "cantidad": 1}}]}}
+        
+        Si no hay productos, devuelve {{"productos": []}}
+        """
+        
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=300
+            )
+            contenido = response.choices[0].message.content
+            contenido = contenido.replace('```json', '').replace('```', '').strip()
+            resultado = json.loads(contenido)
+            
+            productos = []
+            for p in resultado.get('productos', []):
+                nombre = p.get('nombre', '')
+                cantidad = p.get('cantidad', 1)
+                for producto in menu:
+                    if producto['nombre'].lower() == nombre.lower():
+                        productos.append({
+                            'nombre': producto['nombre'],
+                            'precio': producto.get('precio', 0),
+                            'cantidad': cantidad
+                        })
+                        break
+            return productos
+        except Exception as e:
+            logger.error(f"Error IA extrayendo productos del historial: {e}")
+            return []
     
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
