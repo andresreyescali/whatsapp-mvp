@@ -80,6 +80,9 @@
     .btn-historial { background: #9C27B0; color: white; }
     .btn-pagar { background: #4CAF50; color: white; }
     .btn-enviar { background: #FF9800; color: white; }
+    .btn-responder { background: #075E54; color: white; }
+    .btn-success { background: #10B981; color: white; }
+    .btn-secondary { background: #6B7280; color: white; }
     .filtros {
         display: flex;
         gap: 10px;
@@ -149,6 +152,24 @@
     }
     .mensaje-cliente { background: #e3f2fd; border-left: 3px solid #2196F3; padding: 10px; margin: 10px 0; border-radius: 8px; }
     .mensaje-bot { background: #e8f5e9; border-left: 3px solid #4CAF50; padding: 10px; margin: 10px 0; border-radius: 8px; }
+    
+    /* Animaciones para notificaciones */
+    @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes fadeOut {
+        from { opacity: 1; }
+        to { opacity: 0; }
+    }
+    .alert-notificacion {
+        background: linear-gradient(135deg, #075E54, #128C7E);
+        color: white;
+        border: none;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        animation: slideIn 0.3s ease-out;
+    }
+    
     @media (max-width: 768px) {
         .pedido-header { flex-direction: column; align-items: flex-start; }
         .stats { grid-template-columns: repeat(2, 1fr); }
@@ -208,6 +229,16 @@
         <input type="text" id="filtroCliente" class="filtro-input" placeholder="🔍 Buscar por cliente..." onkeyup="cargarPedidos()" style="min-width: 200px;">
         
         <button class="btn-sm" style="background:#25D366; color:white; padding:8px 16px;" onclick="cargarPedidos()">🔄 Actualizar</button>
+        
+        <!-- Botones de control -->
+        <div style="display: flex; gap: 8px; margin-left: auto;">
+            <button id="btnAutoActualizar" class="btn-sm btn-success" onclick="toggleAutoActualizar()">
+                🔄 Auto ON
+            </button>
+            <button id="btnSonido" class="btn-sm btn-success" onclick="toggleSonido()">
+                🔔 Sonido ON
+            </button>
+        </div>
     </div>
 
     <div id="pedidosContainer" class="loading">Cargando pedidos...</div>
@@ -257,10 +288,72 @@
     </div>
 </div>
 
+<!-- Modal para responder manualmente -->
+<div id="responderModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3>💬 Responder a cliente</h3>
+            <button class="modal-close" onclick="cerrarResponderModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">Cliente</label>
+                <input type="text" id="responderClienteNumero" class="form-control" readonly>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Mensaje</label>
+                <textarea id="responderMensaje" class="form-control" rows="4" placeholder="Escribe tu respuesta aquí..."></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="cerrarResponderModal()">Cancelar</button>
+            <button type="button" class="btn btn-primary" onclick="enviarRespuestaManual()">📤 Enviar mensaje</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const tenantId = '{{ tenant.id }}';
     const API_BASE = window.location.origin;
     let pedidosCache = [];
+    let autoActualizarActivo = true;
+    let sonidoActivado = true;
+    let ultimosPedidos = [];
+    let intervalActualizacion = null;
+    let clienteActivo = null;
+
+    // ==================== FUNCIONES EXISTENTES (MODIFICADAS) ====================
+
+    function toggleAutoActualizar() {
+        autoActualizarActivo = !autoActualizarActivo;
+        const btn = document.getElementById('btnAutoActualizar');
+        
+        if (autoActualizarActivo) {
+            iniciarActualizacionAutomatica();
+            btn.innerHTML = '🔄 Auto ON';
+            btn.className = 'btn-sm btn-success';
+            showAlert('✅ Actualización automática activada', 'success');
+        } else {
+            detenerActualizacionAutomatica();
+            btn.innerHTML = '⏹️ Auto OFF';
+            btn.className = 'btn-sm btn-secondary';
+            showAlert('⏹️ Actualización automática desactivada', 'info');
+        }
+    }
+
+    function toggleSonido() {
+        sonidoActivado = !sonidoActivado;
+        const btn = document.getElementById('btnSonido');
+        
+        if (sonidoActivado) {
+            btn.innerHTML = '🔔 Sonido ON';
+            btn.className = 'btn-sm btn-success';
+            reproducirAlerta();
+        } else {
+            btn.innerHTML = '🔕 Sonido OFF';
+            btn.className = 'btn-sm btn-secondary';
+        }
+    }
 
     function mostrarTab(tab, event) {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -320,21 +413,18 @@
             const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}`, {
                 credentials: 'include'
             });
-            console.log('Response status:', response.status);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
             
             let pedidos = await response.json();
-            console.log('Pedidos recibidos:', pedidos);
             
             if (!pedidos || pedidos.length === 0) {
                 container.innerHTML = '<div class="empty">📭 No hay pedidos</div>';
                 return;
             }
             
-            // Aplicar filtros
             let pedidosFiltrados = filtrarPorFecha(pedidos, fecha);
             if (cliente) {
                 pedidosFiltrados = pedidosFiltrados.filter(p => 
@@ -370,7 +460,6 @@
             else if (estadoTexto === 'enviado') estadoClass = 'estado-enviado';
             else estadoClass = 'estado-cancelado';
             
-            // Procesar items
             let items = [];
             if (pedido.items) {
                 if (Array.isArray(pedido.items)) {
@@ -436,7 +525,7 @@
         if (!confirm(`¿Marcar este pedido como ${nuevoEstado}?`)) return;
         
         try {
-            const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/estado`, {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedido/${pedidoId}/estado`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ estado: nuevoEstado }),
@@ -542,7 +631,8 @@
                         </div>
                         <div class="pedido-actions">
                             <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${conv.cliente_numero}')">💬 WhatsApp</button>
-                            <button class="btn-sm btn-historial" onclick="verHistorialCliente('${conv.cliente_numero}', '${escapeHtml(nombreCliente)}')">📜 Ver historial</button>
+                            <button class="btn-sm btn-responder" onclick="abrirResponderModal('${conv.cliente_numero}', '${escapeHtml(nombreCliente)}')">✏️ Responder</button>
+                            <button class="btn-sm btn-historial" onclick="verHistorialCliente('${conv.cliente_numero}', '${escapeHtml(nombreCliente)}')">📜 Historial</button>
                         </div>
                     </div>
                 `;
@@ -583,7 +673,7 @@
             
             document.getElementById('detalleTitulo').innerHTML = 'Historial de Conversación';
             document.getElementById('detalleContent').innerHTML = html;
-            document.getElementById('detalleActions').innerHTML = '<button class="btn-sm btn-chat" onclick="abrirWhatsApp(\'' + clienteNumero + '\')">💬 WhatsApp</button><button class="btn-sm" onclick="cerrarModal()">Cerrar</button>';
+            document.getElementById('detalleActions').innerHTML = '<button class="btn-sm btn-chat" onclick="abrirWhatsApp(\'' + clienteNumero + '\')">💬 WhatsApp</button><button class="btn-sm btn-responder" onclick="abrirResponderModal(\'' + clienteNumero + '\', \'' + escapeHtml(clienteNombre) + '\')">✏️ Responder</button><button class="btn-sm" onclick="cerrarModal()">Cerrar</button>';
             document.getElementById('detalleModal').style.display = 'flex';
         } catch (error) {
             console.error('Error:', error);
@@ -659,13 +749,203 @@
         return div.innerHTML;
     }
 
-    // Cargar datos iniciales
+    // ==================== FUNCIONES DE RESPUESTA MANUAL ====================
+
+    function abrirResponderModal(clienteNumero, clienteNombre) {
+        clienteActivo = clienteNumero;
+        document.getElementById('responderClienteNumero').value = clienteNombre || clienteNumero;
+        document.getElementById('responderMensaje').value = '';
+        document.getElementById('responderModal').classList.add('active');
+    }
+
+    function cerrarResponderModal() {
+        document.getElementById('responderModal').classList.remove('active');
+        clienteActivo = null;
+    }
+
+    async function enviarRespuestaManual() {
+        const mensaje = document.getElementById('responderMensaje').value.trim();
+        if (!mensaje) {
+            showAlert('❌ Escribe un mensaje', 'error');
+            return;
+        }
+        
+        if (!clienteActivo) {
+            showAlert('❌ Cliente no identificado', 'error');
+            return;
+        }
+        
+        const btn = document.querySelector('#responderModal .btn-primary');
+        btn.disabled = true;
+        btn.textContent = 'Enviando...';
+        
+        try {
+            const response = await fetch('/api/responder-manual', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tenant_id: tenantId,
+                    numero: clienteActivo,
+                    mensaje: mensaje
+                }),
+                credentials: 'include'
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showAlert('✅ Mensaje enviado correctamente', 'success');
+                cerrarResponderModal();
+                cargarConversaciones();
+            } else {
+                showAlert('❌ Error: ' + (result.error || 'No se pudo enviar'), 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('❌ Error de conexión', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '📤 Enviar mensaje';
+        }
+    }
+
+    // ==================== ACTUALIZACIÓN AUTOMÁTICA ====================
+
+    function iniciarActualizacionAutomatica() {
+        if (intervalActualizacion) clearInterval(intervalActualizacion);
+        
+        intervalActualizacion = setInterval(() => {
+            if (autoActualizarActivo) {
+                actualizarDatosEnSegundoPlano();
+            }
+        }, 10000);
+        
+        console.log("🔄 Actualización automática iniciada (cada 10 segundos)");
+    }
+
+    function detenerActualizacionAutomatica() {
+        if (intervalActualizacion) {
+            clearInterval(intervalActualizacion);
+            intervalActualizacion = null;
+            console.log("⏹️ Actualización automática detenida");
+        }
+    }
+
+    async function solicitarPermisoNotificaciones() {
+        if ('Notification' in window) {
+            const permiso = await Notification.requestPermission();
+            if (permiso === 'granted') {
+                console.log("🔔 Notificaciones de escritorio activadas");
+            }
+        }
+    }
+
+    function reproducirAlerta() {
+        if (!sonidoActivado) return;
+        try {
+            const audio = new Audio('/static/sounds/notification.mp3');
+            audio.volume = 0.5;
+            audio.play().catch(e => console.log("No se pudo reproducir sonido"));
+        } catch(e) { console.log("Error reproduciendo sonido"); }
+    }
+
+    function mostrarNotificacion(titulo, mensaje, pedidoId = null) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            const notification = new Notification(titulo, {
+                body: mensaje,
+                icon: '/static/favicon.png',
+                silent: false
+            });
+            
+            notification.onclick = function() {
+                window.focus();
+                if (pedidoId) verDetalle(pedidoId);
+                notification.close();
+            };
+            
+            setTimeout(() => notification.close(), 5000);
+        }
+        
+        mostrarAlertaVisual(titulo, mensaje);
+    }
+
+    function mostrarAlertaVisual(titulo, mensaje) {
+        const alertContainer = document.getElementById('alertContainer');
+        const alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-info alert-notificacion';
+        alertDiv.style.cssText = 'position:fixed;top:20px;right:20px;z-index:1000;min-width:250px;animation:slideIn 0.3s ease-out;';
+        alertDiv.innerHTML = `
+            <strong>🔔 ${titulo}</strong><br>
+            <small>${mensaje}</small>
+            <button onclick="this.parentElement.remove()" style="float:right;background:none;border:none;cursor:pointer;font-size:1.25rem;">×</button>
+        `;
+        document.body.appendChild(alertDiv);
+        
+        setTimeout(() => {
+            if (alertDiv.parentElement) alertDiv.remove();
+        }, 8000);
+    }
+
+    async function verificarNuevosPedidos() {
+        try {
+            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=todos`, {
+                credentials: 'include'
+            });
+            const pedidos = await response.json();
+            
+            if (!pedidos || pedidos.length === 0) return;
+            
+            const nuevos = pedidos.filter(p => 
+                !ultimosPedidos.some(up => up.id === p.id)
+            );
+            
+            if (nuevos.length > 0) {
+                console.log(`📦 ${nuevos.length} pedido(s) nuevo(s) detectado(s)`);
+                
+                for (const pedido of nuevos) {
+                    const nombreCliente = pedido.cliente_nombre || pedido.cliente_numero;
+                    const total = (pedido.total || 0).toLocaleString();
+                    
+                    reproducirAlerta();
+                    mostrarNotificacion('🆕 Nuevo Pedido', `${nombreCliente} - $${total}`, pedido.id);
+                }
+            }
+            
+            ultimosPedidos = pedidos;
+            
+        } catch (error) {
+            console.log("Error verificando nuevos pedidos:", error);
+        }
+    }
+
+    async function actualizarDatosEnSegundoPlano() {
+        const tabActiva = document.querySelector('.tab.active')?.innerText || 'Pedidos';
+        
+        if (tabActiva.includes('Pedidos')) {
+            await cargarPedidos();
+            await verificarNuevosPedidos();
+        } else if (tabActiva.includes('Conversaciones')) {
+            await cargarConversaciones();
+        }
+    }
+
+    // ==================== INICIALIZACIÓN ====================
+    
     cargarPedidos();
+    iniciarActualizacionAutomatica();
+    solicitarPermisoNotificaciones();
     
     window.onclick = function(event) {
         if (event.target == document.getElementById('detalleModal')) {
             cerrarModal();
         }
+        if (event.target == document.getElementById('responderModal')) {
+            cerrarResponderModal();
+        }
     }
+    
+    window.addEventListener('beforeunload', function() {
+        detenerActualizacionAutomatica();
+    });
 </script>
 {% endblock %}

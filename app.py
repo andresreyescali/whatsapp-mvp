@@ -1279,7 +1279,36 @@ def get_pedidos_tenant(tenant_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-        
+
+# ========= PERMITE RESPUESTAS MANUALES AL CLIENTE ========
+
+@app.route('/api/responder-manual', methods=['POST'])
+@login_required
+def responder_manual():
+    """Envía una respuesta manual a un cliente desde el panel"""
+    from whatsapp.client import whatsapp_client
+    from whatsapp.message_handler import message_handler
+    
+    data = request.json
+    tenant_id = data.get('tenant_id')
+    numero = data.get('numero')
+    mensaje = data.get('mensaje')
+    
+    if not tenant_id or not numero or not mensaje:
+        return jsonify({'error': 'Faltan datos'}), 400
+    
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Negocio no encontrado'}), 404
+    
+    enviado = whatsapp_client.send_message(tenant, numero, mensaje)
+    
+    if enviado:
+        message_handler._guardar_conversacion(tenant_id, numero, f"📝 Respuesta manual: {mensaje}", "Mensaje enviado manualmente")
+        return jsonify({'success': True, 'respuesta': 'Mensaje enviado'})
+    
+    return jsonify({'error': 'No se pudo enviar el mensaje'}), 500
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
