@@ -691,6 +691,7 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
             else:
                 logger.info(f"✅ [CONFIRMACION] Carrito vacío, buscando productos en historial")
                 productos_encontrados = self._buscar_productos_en_conversacion(historial, menu)
+                logger.info(f"Encontré lo siguiente:{productos_encontrados}")
                 if productos_encontrados:
                     logger.info(f"✅ [CONFIRMACION] Productos encontrados en historial: {productos_encontrados}")
                     self._agregar_al_carrito(tenant['id'], numero, productos_encontrados)
