@@ -1293,18 +1293,33 @@ def get_pedidos_light(tenant_id):
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
+                # Verificar qué columnas existen
+                cur.execute(f"""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_schema = %s AND table_name = 'pedidos'
+                """, (schema_name,))
+                columnas = [row[0] for row in cur.fetchall()]
+                
+                # Construir SELECT según columnas existentes
+                select_cols = ['id', 'cliente_numero', 'total', 'estado', 'created_at']
+                if 'numero_pedido' in columnas:
+                    select_cols.append('numero_pedido')
+                if 'cliente_nombre' in columnas:
+                    select_cols.append('cliente_nombre')
+                
+                select_str = ', '.join([f'"{col}"' for col in select_cols])
+                
                 if estado == 'todos':
                     cur.execute(f"""
-                        SELECT id, cliente_numero, cliente_nombre, total, estado, 
-                               created_at, numero_pedido 
+                        SELECT {select_str} 
                         FROM "{schema_name}".pedidos 
                         ORDER BY created_at DESC 
                         LIMIT 50
                     """)
                 else:
                     cur.execute(f"""
-                        SELECT id, cliente_numero, cliente_nombre, total, estado, 
-                               created_at, numero_pedido 
+                        SELECT {select_str} 
                         FROM "{schema_name}".pedidos 
                         WHERE estado = %s 
                         ORDER BY created_at DESC 
@@ -1312,22 +1327,21 @@ def get_pedidos_light(tenant_id):
                     """, (estado,))
                 
                 rows = cur.fetchall()
+                col_names = [desc[0] for desc in cur.description]
+                
                 pedidos = []
                 for row in rows:
-                    pedidos.append({
-                        'id': row[0],
-                        'cliente_numero': row[1],
-                        'cliente_nombre': row[2] or row[1],
-                        'total': row[3],
-                        'estado': row[4],
-                        'created_at': row[5],
-                        'numero_pedido': row[6]
-                    })
+                    pedido = dict(zip(col_names, row))
+                    # Si no hay cliente_nombre, usar cliente_numero como nombre
+                    if not pedido.get('cliente_nombre'):
+                        pedido['cliente_nombre'] = pedido.get('cliente_numero', 'Cliente')
+                    pedidos.append(pedido)
+                
                 return jsonify(pedidos)
     except Exception as e:
         logger.error(f"Error en pedidos light: {e}")
         return jsonify([])
-
+    
 # ========= PERMITE RESPUESTAS MANUALES AL CLIENTE ========
 
 @app.route('/api/responder-manual', methods=['POST'])
