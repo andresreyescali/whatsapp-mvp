@@ -134,7 +134,6 @@ class MessageHandler:
                         logger.info(f'💾 [CARRITO] Creado nuevo carrito para {cliente_numero}')
                     conn.commit()
                     
-                    # Verificar guardado
                     cur.execute(f"SELECT items, total FROM \"{schema_name}\".carritos WHERE cliente_numero = %s", (cliente_numero,))
                     verif = cur.fetchone()
                     logger.info(f'💾 [CARRITO] Verificación post-guardado - Items: {verif[0]}, Total: {verif[1]}')
@@ -192,7 +191,6 @@ class MessageHandler:
         self._log_carrito(tenant_id, cliente_numero, "DESPUÉS DE AGREGAR")
     
     def _log_carrito(self, tenant_id: str, cliente_numero: str, accion: str):
-        """Registra el estado actual del carrito en los logs"""
         try:
             carrito = self._cargar_carrito(tenant_id, cliente_numero)
             logger.info(f"📊 [CARRITO] {accion} - Cliente: {cliente_numero}")
@@ -203,7 +201,6 @@ class MessageHandler:
             logger.error(f"Error logging carrito: {e}")
 
     def _log_pedido(self, tenant_id: str, pedido: dict, accion: str):
-        """Registra el estado de un pedido en los logs"""
         try:
             logger.info(f"📦 [PEDIDO] {accion}")
             logger.info(f"📦 [PEDIDO] ID: {pedido.get('id')}")
@@ -364,7 +361,6 @@ class MessageHandler:
         try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
-                    # Verificar columnas
                     cur.execute(f"""
                         DO $$ 
                         BEGIN
@@ -387,7 +383,6 @@ class MessageHandler:
                     cur.execute(f'INSERT INTO "{schema_name}".pedidos (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)', (pedido_id, cliente_id, numero, numero_pedido, secuencial, json.dumps(items), total, 'nuevo', direccion_entrega, f"Fecha: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()))
                 conn.commit()
                 
-                # Verificar guardado
                 cur.execute(f'SELECT * FROM "{schema_name}".pedidos WHERE id = %s', (pedido_id,))
                 pedido_guardado = cur.fetchone()
                 if pedido_guardado:
@@ -488,57 +483,28 @@ class MessageHandler:
             texto += f"Cliente: {h[0]}\nAsistente: {h[1]}\n"
         return texto
     
-    # ==================== EXTRACCIÓN DE PRODUCTOS ====================
+    # ==================== DETECCIÓN DE PRODUCTOS CON IA ====================
     
-    def _extraer_productos_del_historial(self, historial: list, menu: list) -> list:
-        """Extrae productos mencionados en el historial de conversación"""
-        if not historial or not menu:
+    def _extraer_productos_con_ia(self, texto: str, menu: list) -> list:
+        """Usa IA para extraer productos del mensaje del cliente"""
+        if not ai_client.client or not menu:
             return []
-        
-        productos = []
-        for h in historial[-8:]:  # Revisar últimos 8 mensajes
-            mensaje = h[0]  # mensaje del cliente
-            encontrados = self._detectar_productos_simples(mensaje, menu)
-            if encontrados:
-                productos.extend(encontrados)
-                logger.info(f"🔍 [HISTORIAL] Productos encontrados: {encontrados}")
-        
-        # Eliminar duplicados y sumar cantidades para el mismo producto
-        resumen = {}
-        for p in productos:
-            nombre = p['nombre']
-            if nombre in resumen:
-                resumen[nombre]['cantidad'] += p['cantidad']
-            else:
-                resumen[nombre] = p.copy()
-        
-        return list(resumen.values())
-    
-    def _buscar_productos_en_conversacion(self, historial: list, menu: list) -> list:
-        """Usa IA para extraer productos del historial de conversación"""
-        if not historial or not menu or not ai_client.client:
-            return []
-        
-        # Construir el historial como texto
-        texto_historial = "\n".join([f"Cliente: {h[0]}\nAsistente: {h[1]}" for h in historial[-10:]])
-        
-        # Lista de productos del menú para referencia
-        productos_menu = [{'nombre': p['nombre'], 'precio': p['precio']} for p in menu]
         
         prompt = f"""
-        Historial de conversación:
-        {texto_historial}
+        Extrae los productos que el cliente quiere comprar del siguiente mensaje.
         
-        Catálogo de productos:
-        {json.dumps(productos_menu, indent=2, ensure_ascii=False)}
+        MENSAJE: "{texto}"
         
-        El cliente acaba de confirmar el pedido (dijo "confirmo" o "si").
+        CATÁLOGO DE PRODUCTOS:
+        {json.dumps([{'nombre': p['nombre'], 'precio': p['precio']} for p in menu], indent=2, ensure_ascii=False)}
         
-        Extrae SOLO los productos que el cliente pidió en la conversación.
-        Devuelve SOLO un JSON:
+        IMPORTANTE:
+        - El cliente puede escribir en lenguaje natural
+        - Relaciona lo que pide con el nombre más cercano del catálogo
+        - Extrae la cantidad (si no se especifica, es 1)
+        
+        Devuelve SOLO un JSON válido:
         {{"productos": [{{"nombre": "nombre exacto del catálogo", "cantidad": 1}}]}}
-        
-        Si no hay productos, devuelve {{"productos": []}}
         """
         
         try:
@@ -564,6 +530,64 @@ class MessageHandler:
                             'cantidad': cantidad
                         })
                         break
+            if productos:
+                logger.info(f"🤖 [IA] Productos detectados: {productos}")
+            return productos
+        except Exception as e:
+            logger.error(f"Error IA extrayendo productos: {e}")
+            return []
+
+    def _extraer_productos_del_historial_con_ia(self, historial: list, menu: list) -> list:
+        """Usa IA para extraer productos de toda la conversación"""
+        if not ai_client.client or not menu or not historial:
+            return []
+        
+        texto_historial = "\n".join([f"Cliente: {h[0]}" for h in historial[-15:]])
+        
+        prompt = f"""
+        Analiza la siguiente conversación y extrae los productos que el cliente quiere comprar.
+        
+        CONVERSACIÓN:
+        {texto_historial}
+        
+        CATÁLOGO DE PRODUCTOS:
+        {json.dumps([{'nombre': p['nombre'], 'precio': p['precio']} for p in menu], indent=2, ensure_ascii=False)}
+        
+        IMPORTANTE:
+        - El cliente acaba de confirmar el pedido (dijo "confirmo" o "si")
+        - Busca en la conversación qué productos pidió anteriormente
+        - Relaciona con el nombre más cercano del catálogo
+        - Extrae la cantidad
+        
+        Devuelve SOLO un JSON:
+        {{"productos": [{{"nombre": "nombre exacto del catálogo", "cantidad": 1}}]}}
+        """
+        
+        try:
+            response = ai_client.client.chat.completions.create(
+                model=ai_client.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=500
+            )
+            contenido = response.choices[0].message.content
+            contenido = contenido.replace('```json', '').replace('```', '').strip()
+            resultado = json.loads(contenido)
+            
+            productos = []
+            for p in resultado.get('productos', []):
+                nombre = p.get('nombre', '')
+                cantidad = p.get('cantidad', 1)
+                for producto in menu:
+                    if producto['nombre'].lower() == nombre.lower():
+                        productos.append({
+                            'nombre': producto['nombre'],
+                            'precio': producto.get('precio', 0),
+                            'cantidad': cantidad
+                        })
+                        break
+            if productos:
+                logger.info(f"🤖 [IA] Productos encontrados en historial: {productos}")
             return productos
         except Exception as e:
             logger.error(f"Error IA extrayendo productos del historial: {e}")
@@ -599,26 +623,6 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
                 logger.info(f"📝 [DATOS] Extraídos: {datos}")
         except Exception as e:
             logger.error(f'Error extrayendo datos: {e}')
-    
-    def _detectar_productos_simples(self, texto: str, menu: list) -> list:
-        if not menu:
-            return []
-        texto_lower = texto.lower()
-        productos = []
-        for producto in menu:
-            nombre = producto.get('nombre', '').lower()
-            if nombre in texto_lower:
-                cantidad = 1
-                match = re.search(rf'(\d+)\s*{re.escape(nombre)}', texto_lower)
-                if match:
-                    cantidad = int(match.group(1))
-                productos.append({
-                    'nombre': producto['nombre'],
-                    'precio': producto.get('precio', 0),
-                    'cantidad': cantidad
-                })
-                logger.info(f"🔍 [DETECCION] Producto encontrado: {producto['nombre']} x{cantidad}")
-        return productos
     
     def _cliente_confirmo(self, texto: str) -> bool:
         confirmaciones = ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'confirmar', 'proceder', 'adelante', 'esta bien', 'está bien', 'confirmo pedido']
@@ -681,7 +685,7 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
                 logger.error(f"Error procesando pago: {e}")
                 return "✅ Gracias por confirmar. Procesaremos tu pedido."
         
-        # 2. Verificar confirmación
+        # 2. Verificar confirmación - USANDO IA
         if self._cliente_confirmo(texto):
             logger.info(f"✅ [CONFIRMACION] Cliente confirmó: {texto}")
             if carrito_actual.get('items'):
@@ -689,11 +693,10 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
                 self._guardar_datos_cliente_en_bd(tenant['id'], numero)
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
             else:
-                logger.info(f"✅ [CONFIRMACION] Carrito vacío, buscando productos en historial")
-                productos_encontrados = self._buscar_productos_en_conversacion(historial, menu)
-                logger.info(f"Encontré lo siguiente:{productos_encontrados}")
+                logger.info(f"✅ [CONFIRMACION] Carrito vacío, usando IA para buscar productos en historial")
+                productos_encontrados = self._extraer_productos_del_historial_con_ia(historial, menu)
+                logger.info(f"🤖 [IA] Productos encontrados en historial: {productos_encontrados}")
                 if productos_encontrados:
-                    logger.info(f"✅ [CONFIRMACION] Productos encontrados en historial: {productos_encontrados}")
                     self._agregar_al_carrito(tenant['id'], numero, productos_encontrados)
                     carrito_actual = self._cargar_carrito(tenant['id'], numero)
                     if carrito_actual.get('items'):
@@ -705,12 +708,12 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
             logger.info(f"📋 [CONSULTA] Cliente consultó carrito")
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # 4. Detectar productos en el mensaje actual
-        productos_detectados = self._detectar_productos_simples(texto, menu)
+        # 4. Detectar productos en el mensaje actual - USANDO IA
+        productos_detectados = self._extraer_productos_con_ia(texto, menu)
         
         # 5. Si hay productos, agregar al carrito
         if productos_detectados:
-            logger.info(f"🛒 [PRODUCTOS] Detectados en mensaje: {productos_detectados}")
+            logger.info(f"🛒 [PRODUCTOS] Detectados por IA: {productos_detectados}")
             self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
             nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
             items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in nuevo_carrito['items']])
