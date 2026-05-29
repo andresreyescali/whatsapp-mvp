@@ -1280,6 +1280,54 @@ def get_pedidos_tenant(tenant_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ================ Traer pedidos Light ====================
+
+@app.route('/api/tenant/<tenant_id>/pedidos/light', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_pedidos_light(tenant_id):
+    """Versión ligera de pedidos (solo datos esenciales)"""
+    schema_name = _get_schema_name(tenant_id)
+    estado = request.args.get('estado', 'todos')
+    
+    try:
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                if estado == 'todos':
+                    cur.execute(f"""
+                        SELECT id, cliente_numero, cliente_nombre, total, estado, 
+                               created_at, numero_pedido 
+                        FROM "{schema_name}".pedidos 
+                        ORDER BY created_at DESC 
+                        LIMIT 50
+                    """)
+                else:
+                    cur.execute(f"""
+                        SELECT id, cliente_numero, cliente_nombre, total, estado, 
+                               created_at, numero_pedido 
+                        FROM "{schema_name}".pedidos 
+                        WHERE estado = %s 
+                        ORDER BY created_at DESC 
+                        LIMIT 50
+                    """, (estado,))
+                
+                rows = cur.fetchall()
+                pedidos = []
+                for row in rows:
+                    pedidos.append({
+                        'id': row[0],
+                        'cliente_numero': row[1],
+                        'cliente_nombre': row[2] or row[1],
+                        'total': row[3],
+                        'estado': row[4],
+                        'created_at': row[5],
+                        'numero_pedido': row[6]
+                    })
+                return jsonify(pedidos)
+    except Exception as e:
+        logger.error(f"Error en pedidos light: {e}")
+        return jsonify([])
+
 # ========= PERMITE RESPUESTAS MANUALES AL CLIENTE ========
 
 @app.route('/api/responder-manual', methods=['POST'])

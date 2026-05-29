@@ -410,13 +410,15 @@
         container.innerHTML = '<div class="loading">Cargando pedidos...</div>';
         
         try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}`, {
-                credentials: 'include'
-            });
+            // Usar endpoint ligero para la actualización automática
+            const esAutoActualizacion = !document.getElementById('btnAutoActualizar').innerText.includes('OFF');
+            const url = esAutoActualizacion 
+                ? `${API_BASE}/api/tenant/${tenantId}/pedidos/light?estado=${estado}`
+                : `${API_BASE}/api/tenant/${tenantId}/pedidos?estado=${estado}`;
             
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
+            const response = await fetch(url, { credentials: 'include' });
+            
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             
             let pedidos = await response.json();
             
@@ -435,14 +437,53 @@
             
             pedidosCache = pedidosFiltrados;
             actualizarStats(pedidos);
-            renderPedidos(pedidosFiltrados);
+            renderPedidosLigero(pedidosFiltrados);
             
         } catch (error) {
             console.error('Error cargando pedidos:', error);
-            container.innerHTML = '<div class="empty">❌ Error al cargar pedidos: ' + error.message + '</div>';
+            container.innerHTML = '<div class="empty">❌ Error al cargar pedidos</div>';
         }
     }
-    
+
+    function renderPedidosLigero(pedidos) {
+        const container = document.getElementById('pedidosContainer');
+        
+        if (!pedidos || pedidos.length === 0) {
+            container.innerHTML = '<div class="empty">📭 No hay pedidos con los filtros seleccionados</div>';
+            return;
+        }
+        
+        let html = '';
+        for (const pedido of pedidos) {
+            let estadoClass = '';
+            let estadoTexto = pedido.estado || 'nuevo';
+            if (estadoTexto === 'nuevo') estadoClass = 'estado-nuevo';
+            else if (estadoTexto === 'pagado') estadoClass = 'estado-pagado';
+            else if (estadoTexto === 'enviado') estadoClass = 'estado-enviado';
+            else estadoClass = 'estado-cancelado';
+            
+            const nombreCliente = pedido.cliente_nombre || pedido.cliente_numero || 'Cliente';
+            const numeroPedido = pedido.numero_pedido || pedido.id?.substring(0, 8) || 'N/A';
+            
+            html += `
+                <div class="pedido-card">
+                    <div class="pedido-header">
+                        <span><strong>📱 ${escapeHtml(nombreCliente)}</strong></span>
+                        <span><strong>📄 ${escapeHtml(numeroPedido)}</strong></span>
+                        <span class="estado-badge ${estadoClass}">${estadoTexto.toUpperCase()}</span>
+                    </div>
+                    <p><strong>💰 Total:</strong> $${(pedido.total || 0).toLocaleString()}</p>
+                    <p><strong>🕒 Fecha:</strong> ${new Date(pedido.created_at).toLocaleString()}</p>
+                    <div class="pedido-actions">
+                        <button class="btn-sm btn-detalle" onclick="verDetalle('${pedido.id}')">🔍 Ver detalle</button>
+                        <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${pedido.cliente_numero}')">💬 WhatsApp</button>
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+    }
+        
     function renderPedidos(pedidos) {
         const container = document.getElementById('pedidosContainer');
         
@@ -818,7 +859,7 @@
             if (autoActualizarActivo) {
                 actualizarDatosEnSegundoPlano();
             }
-        }, 10000);
+        }, 60000);
         
         console.log("🔄 Actualización automática iniciada (cada 10 segundos)");
     }
