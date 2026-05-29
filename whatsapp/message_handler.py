@@ -361,6 +361,7 @@ class MessageHandler:
         try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
+                    # Verificar columnas
                     cur.execute(f"""
                         DO $$ 
                         BEGIN
@@ -378,17 +379,19 @@ class MessageHandler:
                             END IF;
                         END $$;
                     """)
-                    conn.commit()
                     
+                    # Insertar pedido
                     cur.execute(f'INSERT INTO "{schema_name}".pedidos (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)', (pedido_id, cliente_id, numero, numero_pedido, secuencial, json.dumps(items), total, 'nuevo', direccion_entrega, f"Fecha: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()))
-                conn.commit()
+                    
+                    # Verificar guardado (usar el mismo cursor, no cerrar la conexión)
+                    cur.execute(f'SELECT * FROM "{schema_name}".pedidos WHERE id = %s', (pedido_id,))
+                    pedido_guardado = cur.fetchone()
+                    if pedido_guardado:
+                        logger.info(f"🎯 [FINALIZAR] Pedido guardado exitosamente en BD")
+                    else:
+                        logger.error(f"🎯 [FINALIZAR] ERROR: Pedido no encontrado después de insertar")
                 
-                cur.execute(f'SELECT * FROM "{schema_name}".pedidos WHERE id = %s', (pedido_id,))
-                pedido_guardado = cur.fetchone()
-                if pedido_guardado:
-                    logger.info(f"🎯 [FINALIZAR] Pedido guardado exitosamente en BD")
-                else:
-                    logger.error(f"🎯 [FINALIZAR] ERROR: Pedido no encontrado después de insertar")
+                conn.commit()
             
             self._guardar_carrito(tenant['id'], numero, [], 0)
             if numero in self._datos_cliente:
@@ -401,23 +404,24 @@ class MessageHandler:
             
             return f"""✅ **¡PEDIDO CONFIRMADO!**
 
-📌 **Número de pedido:** *{numero_pedido}*
-📝 *Guarda este número para hacer seguimiento*
-{datos_texto}
+    📌 **Número de pedido:** *{numero_pedido}*
+    📝 *Guarda este número para hacer seguimiento*
+    {datos_texto}
 
-📋 **Productos:**
-{items_texto}
-💰 **Total:** ${total:,.0f}
+    📋 **Productos:**
+    {items_texto}
+    💰 **Total:** ${total:,.0f}
 
-📦 **Entrega:** {direccion_entrega}
+    📦 **Entrega:** {direccion_entrega}
 
-📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
-📞 *Para consultar tu pedido, envía "estado {numero_pedido}"*"""
+    📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
+    📞 *Para consultar tu pedido, envía "estado {numero_pedido}"*"""
         except Exception as e:
             logger.error(f'Error creando pedido: {e}')
             import traceback
             traceback.print_exc()
             return "❌ Hubo un error procesando tu solicitud. Por favor intenta de nuevo."
+        
     
     def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
         try:
