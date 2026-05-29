@@ -512,7 +512,7 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
         
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
         resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
-        historial = self._get_historial_conversacion(tenant['id'], numero, 10)
+        historial = self._get_historial_conversacion(tenant['id'], numero, 15)
         historial_texto = self._formatear_historial_para_prompt(historial)
         
         self._extraer_y_guardar_datos(texto, numero)
@@ -539,38 +539,30 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
                 logger.error(f"Error procesando pago: {e}")
                 return "✅ Gracias por confirmar. Procesaremos tu pedido."
         
-        # 2. Verificar confirmación
+        # 2. Verificar confirmación - CLAVE: Buscar productos en TODO el historial
         if self._cliente_confirmo(texto):
             if carrito_actual.get('items'):
                 self._guardar_datos_cliente_en_bd(tenant['id'], numero)
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
             else:
-                # Intentar recuperar productos del historial
-                productos_del_historial = self._extraer_productos_del_historial(historial, menu)
-                if productos_del_historial:
-                    self._agregar_al_carrito(tenant['id'], numero, productos_del_historial)
+                # Buscar productos en TODO el historial de la conversación
+                productos_encontrados = self._buscar_productos_en_conversacion(historial, menu)
+                if productos_encontrados:
+                    logger.info(f"Productos encontrados en conversación: {productos_encontrados}")
+                    self._agregar_al_carrito(tenant['id'], numero, productos_encontrados)
                     carrito_actual = self._cargar_carrito(tenant['id'], numero)
                     if carrito_actual.get('items'):
                         return self._finalizar_pedido(tenant, numero, carrito_actual)
-                return "❌ No hay productos en tu carrito. Por favor, primero dime qué deseas ordenar y luego confirma.\n\nEjemplo: 'quiero 25 empanadas hawaianas'"
+                return "❌ No pude identificar los productos que deseas. Por favor, escríbelos nuevamente.\n\nEjemplo: 'quiero 25 empanadas hawaianas'"
         
         # 3. Verificar consulta de carrito
         if any(p in texto_lower for p in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # 4. DETECTAR PRODUCTOS - CRÍTICO: También detectar en el historial si el cliente está confirmando algo que la IA dijo
+        # 4. Detectar productos en el mensaje actual
         productos_detectados = self._detectar_productos_simples(texto, menu)
         
-        # Si no hay productos en el mensaje actual, buscar en el historial reciente
-        if not productos_detectados:
-            # Buscar productos en los últimos mensajes del cliente
-            for h in historial[-4:]:
-                productos_detectados = self._detectar_productos_simples(h[0], menu)
-                if productos_detectados:
-                    logger.info(f"Productos encontrados en historial: {productos_detectados}")
-                    break
-        
-        # 5. Si hay productos, agregar al carrito INMEDIATAMENTE
+        # 5. Si hay productos, agregar al carrito
         if productos_detectados:
             self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
             nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
@@ -589,7 +581,6 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
         # 7. Si no hay carrito, usar IA para responder
         menu_simplificado = [{'nombre': p.get('nombre'), 'precio': p.get('precio')} for p in menu[:30]]
         
-        # Agregar instrucción específica para que la IA use el formato correcto
         system_prompt = f"""Eres un asistente de ventas conversacional para {tenant.get('nombre', 'Mi negocio')}.
 
     🏪 INFORMACIÓN:
@@ -604,9 +595,9 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
 
     INSTRUCCIONES IMPORTANTES:
     1. Responde de forma natural, cálida y conversacional en español.
-    2. Cuando el cliente pida un producto, confirma y pregunta si desea agregar algo más.
-    3. NO digas "Agregaré X a tu pedido" sin que el sistema lo haya hecho realmente.
-    4. En su lugar, confirma los detalles y luego pregunta "¿Confirmas este pedido?".
+    2. Cuando el cliente pida un producto, confirma los detalles.
+    3. Luego pregunta "¿Confirmas este pedido?".
+    4. NO generes números de pedido ni confirmes reservas.
     5. Para finalizar, el cliente debe decir "confirmo".
     6. Sé breve y cálido.
 
@@ -627,6 +618,31 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
             logger.error(f'Error en IA: {e}')
             return self._respuesta_fallback(tenant, menu)
     
+    def _buscar_productos_en_conversacion(self, historial: list, menu: list) -> list:
+        """Busca productos en toda la conversación (mensajes del cliente)"""
+        if not historial or not menu:
+            return []
+        
+        productos = []
+        for h in historial:
+            mensaje = h[0]  # mensaje del cliente
+            encontrados = self._detectar_productos_simples(mensaje, menu)
+            if encontrados:
+                for p in encontrados:
+                    logger.info(f"Producto encontrado en historial: {p}")
+                productos.extend(encontrados)
+        
+        # Si hay múltiples productos iguales, sumar cantidades
+        resumen = {}
+        for p in productos:
+            nombre = p['nombre']
+            if nombre in resumen:
+                resumen[nombre]['cantidad'] += p['cantidad']
+            else:
+                resumen[nombre] = p.copy()
+        
+        return list(resumen.values())
+
     def _respuesta_fallback(self, tenant: dict, menu: list) -> str:
         if menu:
             primeros = menu[:3]
