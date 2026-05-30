@@ -1,6 +1,7 @@
 from core.database import db_manager
 from core.logger import logger
 import uuid
+import json
 
 class SchemaManager:
     """Gestiona esquemas y tablas de tenants"""
@@ -42,7 +43,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 2. Tabla de productos/servicios (ACTUALIZADA con nuevos campos)
+                # 2. Tabla de productos/servicios (ACTUALIZADA con metadata)
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".productos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -54,11 +55,13 @@ class SchemaManager:
                     imagen_url TEXT,
                     tiempo_preparacion INTEGER,
                     destacado BOOLEAN DEFAULT false,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    metadata JSONB DEFAULT '{{"personalizaciones": [], "adicionales": []}}'::jsonb,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
                 )
                 ''')
                 
-                # 3. Tabla de pedidos (CORREGIDA - con secuencial)
+                # 3. Tabla de pedidos
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -92,7 +95,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 5. Tabla de carritos (CORREGIDA - con UNIQUE constraint)
+                # 5. Tabla de carritos
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
                     id SERIAL PRIMARY KEY,
@@ -133,12 +136,13 @@ class SchemaManager:
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON "{schema_name}".conversaciones(cliente_numero)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_destacado ON "{schema_name}".productos(destacado) WHERE destacado = true')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_metadata ON "{schema_name}".productos USING gin(metadata)')
                 
                 if tipo_negocio in ['hotel', 'agencia_viajes']:
                     cur.execute(f'CREATE INDEX IF NOT EXISTS idx_reservas_cliente ON "{schema_name}".reservas(cliente_id)')
                     cur.execute(f'CREATE INDEX IF NOT EXISTS idx_reservas_fechas ON "{schema_name}".reservas(fecha_inicio, fecha_fin)')
                 
-                # Insertar productos/servicios de ejemplo según el tipo de negocio
+                # Insertar productos de ejemplo
                 self._insert_default_products(cur, schema_name, tipo_negocio)
                 
             conn.commit()
@@ -190,7 +194,26 @@ class SchemaManager:
             logger.info(f"Agregando columna destacado a {schema_name}.productos")
             cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN destacado BOOLEAN DEFAULT false')
             cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_destacado ON "{schema_name}".productos(destacado) WHERE destacado = true')
-            
+        
+        # Verificar y agregar columna metadata (JSONB para personalizaciones y adicionales)
+        cur.execute(f"""
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'metadata'
+        """, (schema_name,))
+        if not cur.fetchone():
+            logger.info(f"Agregando columna metadata a {schema_name}.productos")
+            cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN metadata JSONB DEFAULT \'{{"personalizaciones": [], "adicionales": []}}\'::jsonb')
+            cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_metadata ON "{schema_name}".productos USING gin(metadata)')
+        
+        # Verificar y agregar columna updated_at
+        cur.execute(f"""
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'updated_at'
+        """, (schema_name,))
+        if not cur.fetchone():
+            logger.info(f"Agregando columna updated_at a {schema_name}.productos")
+            cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN updated_at TIMESTAMP DEFAULT NOW()')
+    
     def _ensure_tables_exist(self, schema_name: str, cur):
         """Verifica y crea las tablas necesarias si no existen"""
         
@@ -220,7 +243,9 @@ class SchemaManager:
             imagen_url TEXT,
             tiempo_preparacion INTEGER,
             destacado BOOLEAN DEFAULT false,
-            created_at TIMESTAMP DEFAULT NOW()
+            metadata JSONB DEFAULT '{{"personalizaciones": [], "adicionales": []}}'::jsonb,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
         )
         ''')
         
@@ -274,6 +299,7 @@ class SchemaManager:
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_conversaciones_cliente ON "{schema_name}".conversaciones(cliente_numero)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_carritos_cliente ON "{schema_name}".carritos(cliente_numero)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_destacado ON "{schema_name}".productos(destacado) WHERE destacado = true')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_metadata ON "{schema_name}".productos USING gin(metadata)')
     
     def _insert_default_products(self, cursor, schema_name: str, tipo_negocio: str):
         """Inserta productos/servicios de ejemplo según el tipo de negocio"""
@@ -284,103 +310,26 @@ class SchemaManager:
             logger.info(f"Ya existen {count} productos en {schema_name}, omitiendo inserción de productos de ejemplo")
             return
         
+        # Productos por defecto con metadata de ejemplo
         if tipo_negocio == "restaurante":
             cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion, metadata)
             VALUES 
-                ('Pizza Margarita', 'Salsa de tomate, mozzarella, albahaca fresca', 25000, 'pizzas', true, 15),
-                ('Pizza Pepperoni', 'Pepperoni italiano, queso mozzarella', 32000, 'pizzas', false, 15),
-                ('Hamburguesa Clásica', 'Carne de res, lechuga, tomate', 18000, 'hamburguesas', true, 10),
-                ('Gaseosa', 'Bebida 500ml', 5000, 'bebidas', false, 2)
+                ('Pizza Margarita', 'Salsa de tomate, mozzarella, albahaca fresca', 25000, 'pizzas', true, 15, '{{"personalizaciones": [{{"nombre": "Tamaño", "opciones": ["Pequeño", "Mediano", "Grande"], "requerido": true, "multiple": false}}], "adicionales": [{{"nombre": "Queso extra", "precio_extra": 3000, "multiple": false}}, {{"nombre": "Pepperoni", "precio_extra": 4000, "multiple": false}}]}}'),
+                ('Pizza Pepperoni', 'Pepperoni italiano, queso mozzarella', 32000, 'pizzas', false, 15, '{{"personalizaciones": [{{"nombre": "Tamaño", "opciones": ["Pequeño", "Mediano", "Grande"], "requerido": true, "multiple": false}}], "adicionales": [{{"nombre": "Queso extra", "precio_extra": 3000, "multiple": false}}]}}'),
+                ('Hamburguesa Clásica', 'Carne de res, lechuga, tomate', 18000, 'hamburguesas', true, 10, '{{"personalizaciones": [{{"nombre": "Tipo de carne", "opciones": ["Res", "Pollo", "Vegetariana"], "requerido": true, "multiple": false}}, {{"nombre": "Salsa", "opciones": ["Mayonesa", "Ketchup", "Mostaza", "BBQ"], "requerido": false, "multiple": true}}], "adicionales": [{{"nombre": "Tocineta", "precio_extra": 2500, "multiple": false}}, {{"nombre": "Huevo", "precio_extra": 2000, "multiple": false}}]}}'),
+                ('Gaseosa', 'Bebida 500ml', 5000, 'bebidas', false, 2, '{{"personalizaciones": [{{"nombre": "Sabor", "opciones": ["Cola", "Naranja", "Lima"], "requerido": true, "multiple": false}}], "adicionales": []}}')
             ''')
-        
-        elif tipo_negocio == "panaderia":
-            cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
-            VALUES 
-                ('Pan Francés', 'Pan crujiente recién horneado', 800, 'panes', true, 0),
-                ('Croissant', 'Hojaldre de mantequilla', 2500, 'pastelería', true, 0),
-                ('Pan de Queso', 'Bocadito de queso y almidón', 1500, 'panes', false, 0)
-            ''')
-        
-        elif tipo_negocio == "pasteleria":
-            cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
-            VALUES 
-                ('Torta de Chocolate', '3 capas de chocolate belga', 45000, 'tortas', true, 0),
-                ('Cheesecake', 'Queso crema con frutos rojos', 12000, 'postres', true, 0),
-                ('Galletas Artesanales', 'Surtido de 12 galletas', 8000, 'galletas', false, 0)
-            ''')
-        
-        elif tipo_negocio == "inmobiliaria":
-            cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
-            VALUES 
-                ('Apartamento 2 hab', 'Apartamento de 65m², 2 habitaciones, 1 baño, sala-comedor', 250000000, 'apartamentos', true, NULL),
-                ('Apartamento 3 hab', 'Apartamento de 85m², 3 habitaciones, 2 baños, balcón', 320000000, 'apartamentos', false, NULL),
-                ('Casa 4 hab', 'Casa de 150m², 4 habitaciones, 3 baños, jardín', 450000000, 'casas', true, NULL),
-                ('Oficina', 'Oficina de 40m² en zona comercial', 120000000, 'comercial', false, NULL),
-                ('Local Comercial', 'Local de 80m², excelente ubicación', 280000000, 'comercial', false, NULL)
-            ''')
-        
-        elif tipo_negocio == "venta_autos":
-            cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
-            VALUES 
-                ('Sedán Económico', 'Auto nuevo, 4 puertas, aire acondicionado, dirección asistida', 45000000, 'sedanes', true, NULL),
-                ('SUV Familiar', 'SUV 5 puertas, 7 asientos, cámara reversa, sensor de parqueo', 85000000, 'suvs', true, NULL),
-                ('Camioneta 4x4', 'Camioneta doble cabina, 4x4, diesel', 120000000, 'camionetas', false, NULL),
-                ('Hatchback', 'Auto compacto, económico en combustible', 38000000, 'hatchbacks', false, NULL),
-                ('Deportivo', 'Auto deportivo, motor 2.0 turbo', 150000000, 'deportivos', false, NULL)
-            ''')
-        
-        elif tipo_negocio == "venta_motos":
-            cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
-            VALUES 
-                ('Scooter 125cc', 'Moto automática, ideal para ciudad', 6500000, 'scooters', true, NULL),
-                ('Naked 200cc', 'Moto naked, diseño moderno, frenos ABS', 9500000, 'naked', true, NULL),
-                ('Enduro 250cc', 'Moto doble propósito, para ciudad y carretera', 12500000, 'enduro', false, NULL),
-                ('Deportiva 300cc', 'Moto deportiva, alta velocidad', 18000000, 'deportivas', false, NULL),
-                ('Scooter Eléctrica', 'Moto eléctrica, cero emisiones', 8500000, 'electricas', false, NULL)
-            ''')
-        
-        elif tipo_negocio == "hotel":
-            cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
-            VALUES 
-                ('Habitación Simple', 'Habitación individual, baño privado, WiFi', 150000, 'habitaciones', false, NULL),
-                ('Habitación Doble', 'Habitación para 2 personas, cama queen, baño privado', 200000, 'habitaciones', true, NULL),
-                ('Habitación Suite', 'Suite de lujo, jacuzzi, vista panorámica', 350000, 'habitaciones', true, NULL),
-                ('Desayuno Buffet', 'Desayuno americano incluido', 25000, 'servicios', false, 20),
-                ('Lavandería', 'Servicio de lavandería por kilo', 15000, 'servicios', false, 60),
-                ('Traslado Aeropuerto', 'Transporte ida y vuelta', 80000, 'servicios', false, NULL),
-                ('Spa y Masajes', 'Acceso a spa y masaje relajante', 120000, 'servicios', true, 50)
-            ''')
-        
-        elif tipo_negocio == "agencia_viajes":
-            cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
-            VALUES 
-                ('Paquete Cartagena', '3 noches en Cartagena, hotel playa, desayuno incluido', 850000, 'paquetes', true, NULL),
-                ('Paquete Santa Marta', '4 noches en Santa Marta, visita Tayrona', 950000, 'paquetes', true, NULL),
-                ('Paquete Medellín', '3 noches en Medellín, tour ciudad', 650000, 'paquetes', false, NULL),
-                ('Paquete San Andrés', '5 noches en San Andrés, todo incluido', 1500000, 'paquetes', true, NULL),
-                ('Seguro de Viaje', 'Asistencia médica y cancelación', 120000, 'servicios', false, NULL),
-                ('Alquiler de Auto', 'Auto compacto por día', 180000, 'servicios', false, NULL),
-                ('Tour Ciudad', 'Tour guiado por la ciudad', 80000, 'tours', false, 120)
-            ''')
-        
         else:
             cursor.execute(f'''
-            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion)
+            INSERT INTO "{schema_name}".productos (nombre, descripcion, precio, categoria, destacado, tiempo_preparacion, metadata)
             VALUES 
-                ('Producto 1', 'Descripción del producto 1', 10000, 'general', true, 10),
-                ('Producto 2', 'Descripción del producto 2', 20000, 'general', false, 15)
+                ('Producto 1', 'Descripción del producto 1', 10000, 'general', true, 10, '{{"personalizaciones": [], "adicionales": []}}'),
+                ('Producto 2', 'Descripción del producto 2', 20000, 'general', false, 15, '{{"personalizaciones": [], "adicionales": []}}')
             ''')
     
     def get_menu(self, tenant_id: str):
-        """Obtiene el menú completo del tenant con todos los campos"""
+        """Obtiene el menú completo del tenant con todos los campos incluyendo metadata"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             
@@ -388,13 +337,24 @@ class SchemaManager:
                 with conn.cursor() as cur:
                     cur.execute(f"""
                         SELECT id, nombre, descripcion, precio, categoria, disponible,
-                               imagen_url, tiempo_preparacion, destacado
+                               imagen_url, tiempo_preparacion, destacado, metadata, created_at
                         FROM "{schema_name}".productos 
                         ORDER BY destacado DESC, disponible DESC, categoria, nombre
                     """)
                     rows = cur.fetchall()
                     productos = []
                     for row in rows:
+                        metadata = row[9] if row[9] else {}
+                        if isinstance(metadata, str):
+                            try:
+                                metadata = json.loads(metadata)
+                            except:
+                                metadata = {}
+                        if not metadata.get('personalizaciones'):
+                            metadata['personalizaciones'] = []
+                        if not metadata.get('adicionales'):
+                            metadata['adicionales'] = []
+                        
                         productos.append({
                             'id': str(row[0]),
                             'nombre': row[1],
@@ -404,7 +364,9 @@ class SchemaManager:
                             'disponible': row[5],
                             'imagen_url': row[6],
                             'tiempo_preparacion': row[7],
-                            'destacado': row[8] if row[8] is not None else False
+                            'destacado': row[8] if row[8] is not None else False,
+                            'personalizaciones': metadata.get('personalizaciones', []),
+                            'adicionales': metadata.get('adicionales', [])
                         })
                     return productos
         except Exception as e:
@@ -412,7 +374,7 @@ class SchemaManager:
             return []
     
     def get_product(self, tenant_id: str, product_id: str):
-        """Obtiene un producto específico por ID con todos los campos"""
+        """Obtiene un producto específico por ID con todos los campos incluyendo metadata"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -420,6 +382,17 @@ class SchemaManager:
                     cur.execute(f'SELECT * FROM "{schema_name}".productos WHERE id = %s', (product_id,))
                     row = cur.fetchone()
                     if row:
+                        metadata = row[9] if len(row) > 9 and row[9] else {}
+                        if isinstance(metadata, str):
+                            try:
+                                metadata = json.loads(metadata)
+                            except:
+                                metadata = {}
+                        if not metadata.get('personalizaciones'):
+                            metadata['personalizaciones'] = []
+                        if not metadata.get('adicionales'):
+                            metadata['adicionales'] = []
+                        
                         return {
                             'id': str(row[0]),
                             'nombre': row[1],
@@ -429,7 +402,9 @@ class SchemaManager:
                             'disponible': row[5],
                             'imagen_url': row[6],
                             'tiempo_preparacion': row[7],
-                            'destacado': row[8] if row[8] is not None else False
+                            'destacado': row[8] if row[8] is not None else False,
+                            'personalizaciones': metadata.get('personalizaciones', []),
+                            'adicionales': metadata.get('adicionales', [])
                         }
                     return None
         except Exception as e:
@@ -438,11 +413,18 @@ class SchemaManager:
     
     def add_product(self, tenant_id: str, nombre: str, precio: int, descripcion: str = "", 
                     categoria: str = "general", imagen_url: str = None, 
-                    tiempo_preparacion: int = None, destacado: bool = False):
-        """Agrega un producto al menú (evita duplicados usando UNIQUE constraint)"""
+                    tiempo_preparacion: int = None, destacado: bool = False,
+                    personalizaciones: list = None, adicionales: list = None):
+        """Agrega un producto al menú con personalizaciones y adicionales"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             product_id = str(uuid.uuid4())
+            
+            metadata = {
+                'personalizaciones': personalizaciones or [],
+                'adicionales': adicionales or []
+            }
+            metadata_json = json.dumps(metadata)
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
@@ -454,22 +436,23 @@ class SchemaManager:
                         # Actualizar producto existente
                         cur.execute(f"""
                             UPDATE "{schema_name}".productos 
-                            SET precio = %s, descripcion = %s, categoria = %s, 
+                            SET nombre = %s, descripcion = %s, precio = %s, categoria = %s, 
                                 imagen_url = %s, tiempo_preparacion = %s, destacado = %s,
-                                disponible = true, updated_at = NOW()
+                                disponible = true, metadata = %s, updated_at = NOW()
                             WHERE nombre ILIKE %s
                             RETURNING id
-                        """, (precio, descripcion, categoria, imagen_url, tiempo_preparacion, destacado, nombre))
+                        """, (nombre, descripcion, precio, categoria, imagen_url, tiempo_preparacion, destacado, metadata_json, nombre))
                         result_id = cur.fetchone()[0]
                         logger.info(f'Producto actualizado: {nombre}')
                     else:
                         # Insertar nuevo producto
                         cur.execute(f"""
                             INSERT INTO "{schema_name}".productos 
-                            (id, nombre, descripcion, precio, categoria, disponible, imagen_url, tiempo_preparacion, destacado)
-                            VALUES (%s, %s, %s, %s, %s, true, %s, %s, %s)
+                            (id, nombre, descripcion, precio, categoria, disponible, 
+                             imagen_url, tiempo_preparacion, destacado, metadata)
+                            VALUES (%s, %s, %s, %s, %s, true, %s, %s, %s, %s)
                             RETURNING id
-                        """, (product_id, nombre, descripcion, precio, categoria, imagen_url, tiempo_preparacion, destacado))
+                        """, (product_id, nombre, descripcion, precio, categoria, imagen_url, tiempo_preparacion, destacado, metadata_json))
                         result_id = cur.fetchone()[0]
                         logger.info(f'Producto agregado: {nombre}')
                     
@@ -481,8 +464,9 @@ class SchemaManager:
         
     def update_product(self, tenant_id: str, product_id: str, nombre: str = None, descripcion: str = None, 
                       precio: int = None, categoria: str = None, disponible: bool = None,
-                      imagen_url: str = None, tiempo_preparacion: int = None, destacado: bool = None):
-        """Actualiza un producto existente con todos los campos"""
+                      imagen_url: str = None, tiempo_preparacion: int = None, destacado: bool = None,
+                      personalizaciones: list = None, adicionales: list = None):
+        """Actualiza un producto existente con todos los campos incluyendo metadata"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             updates = []
@@ -513,9 +497,30 @@ class SchemaManager:
                 updates.append("destacado = %s")
                 params.append(destacado)
             
+            # Manejar metadata (personalizaciones y adicionales)
+            if personalizaciones is not None or adicionales is not None:
+                # Obtener metadata actual para preservar lo que no se está actualizando
+                cur.execute(f'SELECT metadata FROM "{schema_name}".productos WHERE id = %s', (product_id,))
+                row = cur.fetchone()
+                current_metadata = row[0] if row and row[0] else {}
+                if isinstance(current_metadata, str):
+                    try:
+                        current_metadata = json.loads(current_metadata)
+                    except:
+                        current_metadata = {}
+                
+                if personalizaciones is not None:
+                    current_metadata['personalizaciones'] = personalizaciones
+                if adicionales is not None:
+                    current_metadata['adicionales'] = adicionales
+                
+                updates.append("metadata = %s")
+                params.append(json.dumps(current_metadata))
+            
             if not updates:
                 return False
             
+            updates.append("updated_at = NOW()")
             params.append(product_id)
             query = f'UPDATE "{schema_name}".productos SET {", ".join(updates)} WHERE id = %s'
             
@@ -556,7 +561,8 @@ class SchemaManager:
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        SELECT id, nombre, descripcion, precio, categoria, imagen_url, tiempo_preparacion
+                        SELECT id, nombre, descripcion, precio, categoria, imagen_url, 
+                               tiempo_preparacion, destacado, metadata
                         FROM "{schema_name}".productos 
                         WHERE destacado = true AND disponible = true
                         ORDER BY created_at DESC
@@ -565,6 +571,13 @@ class SchemaManager:
                     rows = cur.fetchall()
                     productos = []
                     for row in rows:
+                        metadata = row[8] if row[8] else {}
+                        if isinstance(metadata, str):
+                            try:
+                                metadata = json.loads(metadata)
+                            except:
+                                metadata = {}
+                        
                         productos.append({
                             'id': str(row[0]),
                             'nombre': row[1],
@@ -572,7 +585,10 @@ class SchemaManager:
                             'precio': row[3],
                             'categoria': row[4] or 'general',
                             'imagen_url': row[5],
-                            'tiempo_preparacion': row[6]
+                            'tiempo_preparacion': row[6],
+                            'destacado': row[7],
+                            'personalizaciones': metadata.get('personalizaciones', []),
+                            'adicionales': metadata.get('adicionales', [])
                         })
                     return productos
         except Exception as e:

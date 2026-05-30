@@ -99,7 +99,7 @@
 
 <!-- Modal Producto -->
 <div id="productoModal" class="modal">
-    <div class="modal-content" style="max-width: 700px;">
+    <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
         <div class="modal-header">
             <h3 id="modalTitle">➕ Agregar Producto</h3>
             <button class="modal-close" onclick="cerrarModalProducto()">&times;</button>
@@ -107,74 +107,101 @@
         <form id="formProducto">
             <input type="hidden" id="productoId">
             <div class="modal-body">
-                <div class="form-row">
-                    <div class="form-group" style="flex: 2;">
-                        <label class="form-label">Nombre del producto *</label>
-                        <input type="text" id="productoNombre" class="form-control" required>
+                <!-- Información básica -->
+                <fieldset class="form-section">
+                    <legend>📝 Información básica</legend>
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label class="form-label">Nombre del producto *</label>
+                            <input type="text" id="productoNombre" class="form-control" required>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label class="form-label">Precio base ($) *</label>
+                            <input type="number" id="productoPrecio" class="form-control" required min="0">
+                        </div>
                     </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label">Precio ($) *</label>
-                        <input type="number" id="productoPrecio" class="form-control" required min="0">
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Descripción</label>
-                    <textarea id="productoDescripcion" class="form-control" rows="3" placeholder="Describe el producto..."></textarea>
-                </div>
-                
-                <div class="form-row">
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label">Categoría</label>
-                        <select id="productoCategoria" class="form-control">
-                            <option value="general">📦 General</option>
-                            <option value="pizzas">🍕 Pizzas</option>
-                            <option value="hamburguesas">🍔 Hamburguesas</option>
-                            <option value="tortas">🍰 Tortas</option>
-                            <option value="postres">🍨 Postres</option>
-                            <option value="panes">🥖 Panes</option>
-                            <option value="bebidas">🥤 Bebidas</option>
-                            <option value="apartamentos">🏢 Apartamentos</option>
-                            <option value="casas">🏠 Casas</option>
-                            <option value="sedanes">🚗 Sedanes</option>
-                            <option value="suvs">🚙 SUVs</option>
-                            <option value="habitaciones">🛏️ Habitaciones</option>
-                            <option value="paquetes">✈️ Paquetes</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label">Tiempo de preparación (min)</label>
-                        <input type="number" id="productoTiempo" class="form-control" placeholder="Ej: 15" min="0">
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">URL de imagen</label>
-                    <input type="url" id="productoImagen" class="form-control" placeholder="https://ejemplo.com/imagen.jpg">
-                    <small class="text-muted">Deja vacío para no mostrar imagen</small>
-                </div>
-                
-                <div class="form-group">
-                    <div id="imagenPreview" style="display: none; margin-top: 10px;">
-                        <img id="previewImg" src="" style="max-width: 100px; max-height: 100px; border-radius: 8px;">
-                    </div>
-                </div>
-                
-                <div class="form-row">
+                    
                     <div class="form-group">
-                        <label class="d-flex align-center gap-2">
-                            <input type="checkbox" id="productoDisponible" checked>
-                            <span>✅ Producto disponible para venta</span>
-                        </label>
+                        <label class="form-label">Descripción</label>
+                        <textarea id="productoDescripcion" class="form-control" rows="2" placeholder="Describe el producto..."></textarea>
                     </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 1;">
+                            <label class="form-label">Categoría</label>
+                            <select id="productoCategoria" class="form-control">
+                                <option value="general">📦 General</option>
+                                <option value="pizzas">🍕 Pizzas</option>
+                                <option value="hamburguesas">🍔 Hamburguesas</option>
+                                <option value="tortas">🍰 Tortas</option>
+                                <option value="postres">🍨 Postres</option>
+                                <option value="panes">🥖 Panes</option>
+                                <option value="bebidas">🥤 Bebidas</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label class="form-label">Tiempo preparación (min)</label>
+                            <input type="number" id="productoTiempo" class="form-control" placeholder="Ej: 15" min="0">
+                        </div>
+                    </div>
+                    
                     <div class="form-group">
-                        <label class="d-flex align-center gap-2">
-                            <input type="checkbox" id="productoDestacado">
-                            <span>⭐ Marcar como producto destacado</span>
-                        </label>
+                        <label class="form-label">URL de imagen</label>
+                        <input type="url" id="productoImagen" class="form-control" placeholder="https://ejemplo.com/imagen.jpg">
+                        <div id="imagenPreview" style="display: none; margin-top: 10px;">
+                            <img id="previewImg" src="" style="max-width: 100px; max-height: 100px; border-radius: 8px;">
+                        </div>
                     </div>
-                </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="d-flex align-center gap-2">
+                                <input type="checkbox" id="productoDisponible" checked>
+                                <span>✅ Disponible para venta</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="d-flex align-center gap-2">
+                                <input type="checkbox" id="productoDestacado">
+                                <span>⭐ Destacado</span>
+                            </label>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <!-- Personalizaciones / Opciones -->
+                <fieldset class="form-section">
+                    <legend>🎨 Personalizaciones (Opciones que puede elegir el cliente)</legend>
+                    <p class="text-muted small mb-3">Ej: Talla, Sabor, Color, Ingredientes extra, etc.</p>
+                    
+                    <div id="personalizaciones-container">
+                        <div class="personalizacion-item empty-message" id="no-personalizaciones-msg">
+                            No hay personalizaciones configuradas. Agrega opciones como talla, sabor o extras.
+                        </div>
+                    </div>
+                    
+                    <button type="button" class="btn btn-outline btn-sm mt-2" onclick="agregarPersonalizacion()">
+                        ➕ Agregar opción de personalización
+                    </button>
+                </fieldset>
+
+                <!-- Adicionales / Extras -->
+                <fieldset class="form-section">
+                    <legend>➕ Adicionales (Complementos con costo extra)</legend>
+                    <p class="text-muted small mb-3">Ej: Queso extra, Tocineta, Salsa adicional, etc.</p>
+                    
+                    <div id="adicionales-container">
+                        <div class="adicional-item empty-message" id="no-adicionales-msg">
+                            No hay adicionales configurados. Agrega complementos con costo extra.
+                        </div>
+                    </div>
+                    
+                    <button type="button" class="btn btn-outline btn-sm mt-2" onclick="agregarAdicional()">
+                        ➕ Agregar adicional
+                    </button>
+                </fieldset>
             </div>
+            
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline" onclick="cerrarModalProducto()">Cancelar</button>
                 <button type="submit" class="btn btn-primary">Guardar</button>
@@ -183,12 +210,148 @@
     </div>
 </div>
 
+<!-- Template para personalización -->
+<template id="personalizacion-template">
+    <div class="personalizacion-card">
+        <div class="personalizacion-header">
+            <span class="personalizacion-title">🎨 Opción de personalización</span>
+            <button type="button" class="btn-icon" onclick="eliminarPersonalizacion(this)">🗑️</button>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Nombre de la personalización</label>
+            <input type="text" class="form-control perso-nombre" placeholder="Ej: Tamaño, Sabor, Color, Masa" required>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Opciones (separadas por comas)</label>
+            <input type="text" class="form-control perso-opciones" placeholder="Ej: Pequeño,Mediano,Grande | o: Normal,Integral" required>
+            <small class="text-muted">El cliente podrá elegir una de estas opciones</small>
+        </div>
+        <div class="form-check">
+            <label class="d-flex align-center gap-2">
+                <input type="checkbox" class="perso-requerido">
+                <span>⚠️ Requerido (el cliente debe seleccionar una opción)</span>
+            </label>
+        </div>
+        <div class="form-check">
+            <label class="d-flex align-center gap-2">
+                <input type="checkbox" class="perso-multiple">
+                <span>📌 Permitir múltiples selecciones</span>
+            </label>
+        </div>
+        <hr class="separator">
+    </div>
+</template>
+
+<!-- Template para adicional -->
+<template id="adicional-template">
+    <div class="adicional-card">
+        <div class="adicional-header">
+            <span class="adicional-title">➕ Adicional</span>
+            <button type="button" class="btn-icon" onclick="eliminarAdicional(this)">🗑️</button>
+        </div>
+        <div class="form-row">
+            <div class="form-group" style="flex: 2;">
+                <label class="form-label">Nombre del adicional</label>
+                <input type="text" class="form-control adicional-nombre" placeholder="Ej: Queso extra, Tocineta" required>
+            </div>
+            <div class="form-group" style="flex: 1;">
+                <label class="form-label">Precio extra ($)</label>
+                <input type="number" class="form-control adicional-precio" placeholder="0" min="0" value="0">
+            </div>
+        </div>
+        <div class="form-check">
+            <label class="d-flex align-center gap-2">
+                <input type="checkbox" class="adicional-multiple">
+                <span>📌 Permitir múltiples cantidades</span>
+            </label>
+        </div>
+        <hr class="separator">
+    </div>
+</template>
+
+<style>
+    .form-section {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 16px 20px;
+        margin-bottom: 20px;
+    }
+    .form-section legend {
+        padding: 0 12px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        width: auto;
+        border: none;
+    }
+    .personalizacion-card, .adicional-card {
+        background: #f9fafb;
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+    }
+    .personalizacion-header, .adicional-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    .personalizacion-title, .adicional-title {
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: #6b7280;
+    }
+    .btn-icon {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.2rem;
+        color: #ef4444;
+        padding: 4px 8px;
+        border-radius: 6px;
+    }
+    .btn-icon:hover {
+        background: #fee2e2;
+    }
+    .btn-sm {
+        padding: 6px 12px;
+        font-size: 0.8rem;
+    }
+    .separator {
+        margin: 12px 0 0 0;
+        border-color: #e5e7eb;
+    }
+    .form-check {
+        margin-top: 8px;
+    }
+    .empty-message {
+        color: #9ca3af;
+        text-align: center;
+        padding: 20px;
+        font-style: italic;
+    }
+    .small {
+        font-size: 0.75rem;
+    }
+    .mt-2 {
+        margin-top: 0.5rem;
+    }
+    .mb-3 {
+        margin-bottom: 0.75rem;
+    }
+</style>
+
 <script>
     var tenantId = '{{ tenant.id }}';
     var todosProductos = [];
     var productosMostrados = [];
     var currentEditId = null;
     var filtroActual = 'todos';
+
+    // Almacenar personalizaciones y adicionales temporalmente
+    var currentPersonalizaciones = [];
+    var currentAdicionales = [];
 
     async function verificarSesion() {
         try {
@@ -202,9 +365,7 @@
                 setTimeout(function() { window.location.href = '/'; }, 2000);
                 return false;
             }
-            
             if (!response.ok) return false;
-            
             var data = await response.json();
             return data.authenticated === true;
         } catch (error) {
@@ -222,8 +383,6 @@
             }
         }
         
-        console.log('Aplicando filtro:', filtroActual);
-        
         if (filtroActual === 'disponibles') {
             productosMostrados = todosProductos.filter(function(p) { return p.disponible === true; });
         } else if (filtroActual === 'no_disponibles') {
@@ -234,7 +393,6 @@
             productosMostrados = todosProductos.slice();
         }
         
-        console.log('Productos mostrados:', productosMostrados.length, 'de', todosProductos.length);
         renderProductos();
     }
 
@@ -242,15 +400,11 @@
         var sessionOk = await verificarSesion();
         if (!sessionOk) return;
         
-        console.log('Cargando productos...');
         var container = document.getElementById('productosContainer');
         container.innerHTML = '<div class="loading">Cargando productos...</div>';
         
         try {
-            var url = '/api/tenant/' + tenantId + '/menu';
-            console.log('Fetching:', url);
-            
-            var response = await fetch(url, { 
+            var response = await fetch('/api/tenant/' + tenantId + '/menu', { 
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -260,12 +414,9 @@
                 return;
             }
             
-            if (!response.ok) {
-                throw new Error('Error ' + response.status);
-            }
+            if (!response.ok) throw new Error('Error ' + response.status);
             
             todosProductos = await response.json();
-            console.log('Total productos en BD:', todosProductos.length);
             
             var disponibles = todosProductos.filter(function(p) { return p.disponible === true; }).length;
             var noDisponibles = todosProductos.filter(function(p) { return p.disponible === false; }).length;
@@ -283,34 +434,18 @@
     function renderProductos() {
         var container = document.getElementById('productosContainer');
         
-        console.log('Renderizando productos. Filtro:', filtroActual, 'Mostrando:', productosMostrados.length);
-        
         if (!productosMostrados || productosMostrados.length === 0) {
             var mensaje = '';
-            if (filtroActual === 'disponibles') {
-                mensaje = '📭 No hay productos disponibles. Todos los productos están deshabilitados.';
-            } else if (filtroActual === 'no_disponibles') {
-                mensaje = '📭 No hay productos deshabilitados. Todos los productos están disponibles.';
-            } else if (filtroActual === 'destacados') {
-                mensaje = '⭐ No hay productos destacados. Marca algunos productos como destacados.';
-            } else {
-                mensaje = '📭 No hay productos en el menú. Agrega tu primer producto.';
-            }
+            if (filtroActual === 'disponibles') mensaje = '📭 No hay productos disponibles.';
+            else if (filtroActual === 'no_disponibles') mensaje = '📭 No hay productos deshabilitados.';
+            else if (filtroActual === 'destacados') mensaje = '⭐ No hay productos destacados.';
+            else mensaje = '📭 No hay productos en el menú. Agrega tu primer producto.';
             
-            container.innerHTML = 
-                '<div class="text-center p-5">' +
-                    '<p>' + mensaje + '</p>' +
-                    (filtroActual === 'todos' ? '<button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>' : '') +
-                '</div>';
+            container.innerHTML = '<div class="text-center p-5"><p>' + mensaje + '</p>' + (filtroActual === 'todos' ? '<button class="btn btn-primary" onclick="abrirModalProducto()">➕ Agregar primer producto</button>' : '') + '</div>';
             return;
         }
         
-        var html = '<div class="table-container">' +
-            '<table class="productos-table">' +
-                '<thead>' +
-                    '<tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Categoría</th><th>Tiempo</th><th>Estado</th><th>Destacado</th><th>Disponible</th><th>Acciones</th></tr>' +
-                '</thead>' +
-                '<tbody>';
+        var html = '<div class="table-container"><table class="productos-table"><thead><tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Categoría</th><th>Estado</th><th>Destacado</th><th>Disponible</th><th>Acciones</th></tr></thead><tbody>';
         
         for (var i = 0; i < productosMostrados.length; i++) {
             var p = productosMostrados[i];
@@ -319,31 +454,13 @@
             var rowClass = isAvailable ? '' : 'producto-no-disponible';
             
             html += '<tr id="row-' + p.id + '" class="' + rowClass + '">' +
-                '<td>' +
-                    (p.imagen_url ? '<img src="' + escapeHtml(p.imagen_url) + '" style="width: 40px; height: 40px; object-fit: cover; border-radius: 8px; margin-right: 8px; vertical-align: middle;">' : '') +
-                    '<strong>' + escapeHtml(p.nombre) + '</strong>' +
-                '</td>' +
-                '<td>' + escapeHtml((p.descripcion || '-').substring(0, 60)) + (p.descripcion && p.descripcion.length > 60 ? '...' : '') + '</td>' +
+                '<td>' + (p.imagen_url ? '<img src="' + escapeHtml(p.imagen_url) + '" style="width: 32px; height: 32px; object-fit: cover; border-radius: 6px; margin-right: 8px; vertical-align: middle;">' : '📦 ') + '<strong>' + escapeHtml(p.nombre) + '</strong>' + '</td>' +
+                '<td>' + escapeHtml((p.descripcion || '-').substring(0, 50)) + (p.descripcion && p.descripcion.length > 50 ? '...' : '') + '</td>' +
                 '<td>$' + (p.precio || 0).toLocaleString() + '</td>' +
                 '<td>' + (p.categoria ? '🏷️ ' + escapeHtml(p.categoria) : '-') + '</td>' +
-                '<td>' + (p.tiempo_preparacion ? '⏱️ ' + p.tiempo_preparacion + ' min' : '-') + '</td>' +
-                '<td>' +
-                    '<span class="badge ' + (isAvailable ? 'badge-success' : 'badge-warning') + '">' +
-                        (isAvailable ? 'Disponible' : 'No disponible') +
-                    '</span>' +
-                '</td>' +
-                '<td>' +
-                    (isDestacado ? 
-                        '<span class="badge badge-star">⭐ Destacado</span>' : 
-                        '<span class="badge badge-muted">Normal</span>'
-                    ) +
-                '</td>' +
-                '<td>' +
-                    '<div class="toggle-switch ' + (isAvailable ? 'active' : '') + '" ' +
-                        'data-product-id="' + p.id + '" ' +
-                        'data-new-state="' + !isAvailable + '" ' +
-                        'onclick="toggleProducto(this, \'' + p.id + '\', ' + !isAvailable + ', event)"></div>' +
-                '</td>' +
+                '<td><span class="badge ' + (isAvailable ? 'badge-success' : 'badge-warning') + '">' + (isAvailable ? 'Disponible' : 'No disponible') + '</span>' + '</td>' +
+                '<td>' + (isDestacado ? '<span class="badge badge-star">⭐ Destacado</span>' : '<span class="badge badge-muted">Normal</span>') + '</td>' +
+                '<td><div class="toggle-switch ' + (isAvailable ? 'active' : '') + '" onclick="toggleProducto(this, \'' + p.id + '\', ' + !isAvailable + ', event)"></div>' + '</td>' +
                 '<td>' +
                     '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')" title="Editar">✏️</button>' +
                     '<button class="btn btn-sm btn-outline" onclick="toggleDestacado(\'' + p.id + '\', ' + !isDestacado + ')" title="' + (isDestacado ? 'Quitar destacado' : 'Destacar') + '" style="margin-left:4px;">' + (isDestacado ? '⭐' : '☆') + '</button>' +
@@ -352,33 +469,153 @@
             '</tr>';
         }
         
-        html += '</tbody>' +
-            '</table>' +
-            '</div>';
+        html += '</tbody></table></div>';
         container.innerHTML = html;
     }
 
-    async function toggleDestacado(productId, destacado) {
-        try {
-            var response = await fetch('/admin/toggle_featured/' + tenantId + '/' + productId, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ destacado: destacado }),
-                credentials: 'include'
-            });
+    // Funciones para personalizaciones
+    function agregarPersonalizacion() {
+        var template = document.getElementById('personalizacion-template');
+        var clone = template.content.cloneNode(true);
+        var container = document.getElementById('personalizaciones-container');
+        
+        // Ocultar mensaje vacío
+        var emptyMsg = document.getElementById('no-personalizaciones-msg');
+        if (emptyMsg) emptyMsg.style.display = 'none';
+        
+        container.appendChild(clone);
+    }
+    
+    function eliminarPersonalizacion(btn) {
+        var card = btn.closest('.personalizacion-card');
+        if (card) card.remove();
+        
+        var container = document.getElementById('personalizaciones-container');
+        var remaining = container.querySelectorAll('.personalizacion-card').length;
+        if (remaining === 0) {
+            var emptyMsg = document.getElementById('no-personalizaciones-msg');
+            if (emptyMsg) emptyMsg.style.display = 'block';
+        }
+    }
+    
+    function agregarAdicional() {
+        var template = document.getElementById('adicional-template');
+        var clone = template.content.cloneNode(true);
+        var container = document.getElementById('adicionales-container');
+        
+        var emptyMsg = document.getElementById('no-adicionales-msg');
+        if (emptyMsg) emptyMsg.style.display = 'none';
+        
+        container.appendChild(clone);
+    }
+    
+    function eliminarAdicional(btn) {
+        var card = btn.closest('.adicional-card');
+        if (card) card.remove();
+        
+        var container = document.getElementById('adicionales-container');
+        var remaining = container.querySelectorAll('.adicional-card').length;
+        if (remaining === 0) {
+            var emptyMsg = document.getElementById('no-adicionales-msg');
+            if (emptyMsg) emptyMsg.style.display = 'block';
+        }
+    }
+    
+    function recogerPersonalizaciones() {
+        var personalizaciones = [];
+        var cards = document.querySelectorAll('#personalizaciones-container .personalizacion-card');
+        
+        for (var i = 0; i < cards.length; i++) {
+            var card = cards[i];
+            var nombre = card.querySelector('.perso-nombre').value.trim();
+            var opcionesStr = card.querySelector('.perso-opciones').value.trim();
+            var requerido = card.querySelector('.perso-requerido').checked;
+            var multiple = card.querySelector('.perso-multiple').checked;
             
-            if (response.ok) {
-                showAlertLocal(destacado ? '⭐ Producto destacado' : '⭐ Producto ya no es destacado', 'success');
-                await cargarProductos();
-            } else if (response.status === 401) {
-                showAlertLocal('❌ Sesión expirada', 'error');
-                setTimeout(function() { window.location.href = '/'; }, 2000);
-            } else {
-                showAlertLocal('Error al cambiar destacado', 'error');
+            if (nombre && opcionesStr) {
+                var opciones = opcionesStr.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o; });
+                personalizaciones.push({
+                    nombre: nombre,
+                    opciones: opciones,
+                    requerido: requerido,
+                    multiple: multiple
+                });
             }
-        } catch (error) {
-            console.error('Error:', error);
-            showAlertLocal('Error de conexión', 'error');
+        }
+        return personalizaciones;
+    }
+    
+    function recogerAdicionales() {
+        var adicionales = [];
+        var cards = document.querySelectorAll('#adicionales-container .adicional-card');
+        
+        for (var i = 0; i < cards.length; i++) {
+            var card = cards[i];
+            var nombre = card.querySelector('.adicional-nombre').value.trim();
+            var precio = parseInt(card.querySelector('.adicional-precio').value) || 0;
+            var multiple = card.querySelector('.adicional-multiple').checked;
+            
+            if (nombre) {
+                adicionales.push({
+                    nombre: nombre,
+                    precio_extra: precio,
+                    multiple: multiple
+                });
+            }
+        }
+        return adicionales;
+    }
+    
+    function cargarPersonalizacionesEnForm(personalizaciones) {
+        var container = document.getElementById('personalizaciones-container');
+        container.innerHTML = '';
+        
+        var emptyMsg = document.createElement('div');
+        emptyMsg.id = 'no-personalizaciones-msg';
+        emptyMsg.className = 'empty-message';
+        emptyMsg.textContent = 'No hay personalizaciones configuradas. Agrega opciones como talla, sabor o extras.';
+        container.appendChild(emptyMsg);
+        
+        if (personalizaciones && personalizaciones.length > 0) {
+            emptyMsg.style.display = 'none';
+            for (var i = 0; i < personalizaciones.length; i++) {
+                var p = personalizaciones[i];
+                agregarPersonalizacion();
+                var cards = container.querySelectorAll('.personalizacion-card');
+                var lastCard = cards[cards.length - 1];
+                if (lastCard) {
+                    lastCard.querySelector('.perso-nombre').value = p.nombre || '';
+                    lastCard.querySelector('.perso-opciones').value = (p.opciones || []).join(', ');
+                    if (p.requerido) lastCard.querySelector('.perso-requerido').checked = true;
+                    if (p.multiple) lastCard.querySelector('.perso-multiple').checked = true;
+                }
+            }
+        }
+    }
+    
+    function cargarAdicionalesEnForm(adicionales) {
+        var container = document.getElementById('adicionales-container');
+        container.innerHTML = '';
+        
+        var emptyMsg = document.createElement('div');
+        emptyMsg.id = 'no-adicionales-msg';
+        emptyMsg.className = 'empty-message';
+        emptyMsg.textContent = 'No hay adicionales configurados. Agrega complementos con costo extra.';
+        container.appendChild(emptyMsg);
+        
+        if (adicionales && adicionales.length > 0) {
+            emptyMsg.style.display = 'none';
+            for (var i = 0; i < adicionales.length; i++) {
+                var a = adicionales[i];
+                agregarAdicional();
+                var cards = container.querySelectorAll('.adicional-card');
+                var lastCard = cards[cards.length - 1];
+                if (lastCard) {
+                    lastCard.querySelector('.adicional-nombre').value = a.nombre || '';
+                    lastCard.querySelector('.adicional-precio').value = a.precio_extra || 0;
+                    if (a.multiple) lastCard.querySelector('.adicional-multiple').checked = true;
+                }
+            }
         }
     }
 
@@ -445,6 +682,12 @@
             } else {
                 document.getElementById('imagenPreview').style.display = 'none';
             }
+            
+            // Cargar personalizaciones y adicionales guardadas
+            var personalizaciones = producto.personalizaciones || [];
+            var adicionales = producto.adicionales || [];
+            cargarPersonalizacionesEnForm(personalizaciones);
+            cargarAdicionalesEnForm(adicionales);
         } else {
             title.textContent = '➕ Agregar Producto';
             document.getElementById('formProducto').reset();
@@ -454,6 +697,10 @@
             document.getElementById('productoTiempo').value = '';
             document.getElementById('productoImagen').value = '';
             document.getElementById('imagenPreview').style.display = 'none';
+            
+            // Limpiar personalizaciones y adicionales
+            cargarPersonalizacionesEnForm([]);
+            cargarAdicionalesEnForm([]);
         }
         modal.classList.add('active');
     }
@@ -499,23 +746,16 @@
             event.stopPropagation();
         }
         
-        console.log('Toggle producto:', productId, 'nuevo estado:', nuevoEstado);
-        
-        var url = '/admin/toggle_product/' + tenantId + '/' + productId;
-        console.log('URL:', url);
-        
         var originalClass = element.className;
         element.style.opacity = '0.5';
         
         try {
-            var response = await fetch(url, {
+            var response = await fetch('/admin/toggle_product/' + tenantId + '/' + productId, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ disponible: nuevoEstado }),
                 credentials: 'include'
             });
-            
-            console.log('Response status:', response.status);
             
             if (response.ok) {
                 showAlertLocal(nuevoEstado ? '✅ Producto habilitado' : '⚠️ Producto deshabilitado', 'success');
@@ -524,17 +764,39 @@
                 showAlertLocal('❌ Sesión expirada', 'error');
                 setTimeout(function() { window.location.href = '/'; }, 2000);
             } else {
-                var errorText = await response.text();
-                console.error('Error response:', errorText);
-                showAlertLocal('Error al cambiar estado: ' + response.status, 'error');
+                showAlertLocal('Error al cambiar estado', 'error');
                 element.className = originalClass;
                 element.style.opacity = '';
             }
         } catch (error) {
-            console.error('Error en fetch:', error);
-            showAlertLocal('Error de conexión: ' + error.message, 'error');
+            console.error('Error:', error);
+            showAlertLocal('Error de conexión', 'error');
             element.className = originalClass;
             element.style.opacity = '';
+        }
+    }
+
+    async function toggleDestacado(productId, destacado) {
+        try {
+            var response = await fetch('/admin/toggle_featured/' + tenantId + '/' + productId, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ destacado: destacado }),
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                showAlertLocal(destacado ? '⭐ Producto destacado' : '⭐ Producto ya no es destacado', 'success');
+                await cargarProductos();
+            } else if (response.status === 401) {
+                showAlertLocal('❌ Sesión expirada', 'error');
+                setTimeout(function() { window.location.href = '/'; }, 2000);
+            } else {
+                showAlertLocal('Error al cambiar destacado', 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlertLocal('Error de conexión', 'error');
         }
     }
 
@@ -577,7 +839,9 @@
             disponible: document.getElementById('productoDisponible').checked,
             destacado: document.getElementById('productoDestacado').checked,
             tiempo_preparacion: document.getElementById('productoTiempo').value ? parseInt(document.getElementById('productoTiempo').value) : null,
-            imagen_url: document.getElementById('productoImagen').value || null
+            imagen_url: document.getElementById('productoImagen').value || null,
+            personalizaciones: recogerPersonalizaciones(),
+            adicionales: recogerAdicionales()
         };
         
         var submitBtn = e.target.querySelector('button[type="submit"]');
@@ -593,8 +857,6 @@
                 url = '/admin/add_product/' + tenantId;
                 method = 'POST';
             }
-            
-            console.log('Guardando producto:', url, producto);
             
             var response = await fetch(url, {
                 method: method,
@@ -621,6 +883,7 @@
         }
     });
 
+    // Exponer funciones globales
     window.abrirModalProducto = abrirModalProducto;
     window.cerrarModalProducto = cerrarModalProducto;
     window.editarProducto = editarProducto;
@@ -630,191 +893,52 @@
     window.guardarConfig = guardarConfig;
     window.cargarProductos = cargarProductos;
     window.aplicarFiltro = aplicarFiltro;
+    window.agregarPersonalizacion = agregarPersonalizacion;
+    window.eliminarPersonalizacion = eliminarPersonalizacion;
+    window.agregarAdicional = agregarAdicional;
+    window.eliminarAdicional = eliminarAdicional;
 
     cargarProductos();
     cargarConfig();
 </script>
 
 <style>
-    .producto-no-disponible {
-        opacity: 0.6;
-        background-color: #f9f9f9;
-    }
-    .producto-no-disponible:hover {
-        opacity: 0.8;
-    }
-    .toggle-switch {
-        width: 44px;
-        height: 24px;
-        background: #ccc;
-        border-radius: 24px;
-        position: relative;
-        cursor: pointer;
-        transition: background 0.3s;
-    }
-    .toggle-switch.active {
-        background: #25D366;
-    }
-    .toggle-switch::after {
-        content: '';
-        position: absolute;
-        width: 20px;
-        height: 20px;
-        background: white;
-        border-radius: 50%;
-        top: 2px;
-        left: 2px;
-        transition: left 0.3s;
-    }
-    .toggle-switch.active::after {
-        left: 22px;
-    }
-    .badge-success {
-        background: #d1fae5;
-        color: #065f46;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.75rem;
-    }
-    .badge-warning {
-        background: #fed7aa;
-        color: #92400e;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.75rem;
-    }
-    .badge-info {
-        background: #dbeafe;
-        color: #1e40af;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.75rem;
-    }
-    .badge-star {
-        background: #fef3c7;
-        color: #d97706;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.75rem;
-    }
-    .badge-muted {
-        background: #f3f4f6;
-        color: #6b7280;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.75rem;
-    }
-    .alert-success {
-        background: #d1fae5;
-        color: #065f46;
-        padding: 12px;
-        border-radius: 8px;
-        margin-bottom: 16px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .alert-error {
-        background: #fee2e2;
-        color: #991b1b;
-        padding: 12px;
-        border-radius: 8px;
-        margin-bottom: 16px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .productos-table {
-        width: 100%;
-        border-collapse: collapse;
-    }
-    .productos-table th,
-    .productos-table td {
-        padding: 12px;
-        text-align: left;
-        border-bottom: 1px solid #e5e7eb;
-    }
-    .productos-table th {
-        background: #f9fafb;
-        font-weight: 600;
-    }
-    .table-container {
-        overflow-x: auto;
-    }
-    .gap-4 {
-        gap: 1rem;
-    }
-    .flex-wrap {
-        flex-wrap: wrap;
-    }
-    .form-row {
-        display: flex;
-        gap: 1rem;
-        margin-bottom: 1rem;
-    }
-    .form-row .form-group {
-        margin-bottom: 0;
-    }
-    .modal-content {
-        max-width: 700px;
-        width: 90%;
-    }
-    .btn-sm {
-        padding: 6px 12px;
-        font-size: 0.875rem;
-    }
-    .btn-outline {
-        background: transparent;
-        border: 1px solid #d1d5db;
-        color: #374151;
-    }
-    .btn-outline:hover {
-        background: #f9fafb;
-    }
-    .btn-danger {
-        background: #ef4444;
-        color: white;
-        border: none;
-    }
-    .btn-danger:hover {
-        background: #dc2626;
-    }
-    .text-muted {
-        color: #6b7280;
-        font-size: 0.875rem;
-    }
-    .text-center {
-        text-align: center;
-    }
-    .p-5 {
-        padding: 2rem;
-    }
-    .mt-2 {
-        margin-top: 0.5rem;
-    }
-    .mt-3 {
-        margin-top: 1rem;
-    }
-    .mt-4 {
-        margin-top: 1.5rem;
-    }
-    .mb-4 {
-        margin-bottom: 1.5rem;
-    }
-    .d-flex {
-        display: flex;
-    }
-    .align-center {
-        align-items: center;
-    }
-    .justify-between {
-        justify-content: space-between;
-    }
-    .gap-2 {
-        gap: 0.5rem;
-    }
-    .gap-4 {
-        gap: 1rem;
-    }
+    .producto-no-disponible { opacity: 0.6; background-color: #f9f9f9; }
+    .producto-no-disponible:hover { opacity: 0.8; }
+    .toggle-switch { width: 44px; height: 24px; background: #ccc; border-radius: 24px; position: relative; cursor: pointer; transition: background 0.3s; }
+    .toggle-switch.active { background: #25D366; }
+    .toggle-switch::after { content: ''; position: absolute; width: 20px; height: 20px; background: white; border-radius: 50%; top: 2px; left: 2px; transition: left 0.3s; }
+    .toggle-switch.active::after { left: 22px; }
+    .badge-success { background: #d1fae5; color: #065f46; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; }
+    .badge-warning { background: #fed7aa; color: #92400e; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; }
+    .badge-info { background: #dbeafe; color: #1e40af; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; }
+    .badge-star { background: #fef3c7; color: #d97706; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; }
+    .badge-muted { background: #f3f4f6; color: #6b7280; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; }
+    .alert-success { background: #d1fae5; color: #065f46; padding: 12px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .alert-error { background: #fee2e2; color: #991b1b; padding: 12px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .productos-table { width: 100%; border-collapse: collapse; }
+    .productos-table th, .productos-table td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    .productos-table th { background: #f9fafb; font-weight: 600; }
+    .table-container { overflow-x: auto; }
+    .gap-4 { gap: 1rem; }
+    .flex-wrap { flex-wrap: wrap; }
+    .form-row { display: flex; gap: 1rem; margin-bottom: 1rem; }
+    .form-row .form-group { margin-bottom: 0; }
+    .modal-content { max-width: 900px; width: 90%; max-height: 90vh; overflow-y: auto; }
+    .btn-sm { padding: 6px 12px; font-size: 0.875rem; }
+    .btn-outline { background: transparent; border: 1px solid #d1d5db; color: #374151; }
+    .btn-outline:hover { background: #f9fafb; }
+    .btn-danger { background: #ef4444; color: white; border: none; }
+    .btn-danger:hover { background: #dc2626; }
+    .text-muted { color: #6b7280; font-size: 0.875rem; }
+    .text-center { text-align: center; }
+    .p-5 { padding: 2rem; }
+    .mt-2 { margin-top: 0.5rem; }
+    .mt-3 { margin-top: 1rem; }
+    .mb-4 { margin-bottom: 1.5rem; }
+    .d-flex { display: flex; }
+    .align-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .gap-2 { gap: 0.5rem; }
 </style>
 {% endblock %}

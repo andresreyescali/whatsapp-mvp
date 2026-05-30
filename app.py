@@ -321,7 +321,7 @@ def api_auth_login():
         session['email'] = result['email']
         session['nombre'] = result.get('nombre')
         session['rol_sistema'] = result.get('rol_sistema', 'admin_cliente')
-        session.permanent = True  # Hacer la sesión permanente
+        session.permanent = True
     return jsonify(result)
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -607,11 +607,14 @@ def train_ia_page():
     
     return render_template('train.html', tenant_id=tenant_id)
 
-# ==================== PRODUCTOS (CRUD) ====================
+# ========== PRODUCTOS CON PERSONALIZACIONES (CRUD COMPLETO) ==========
+# ========== ACTUALIZADO: soporta imagen_url, tiempo_preparacion, destacado, personalizaciones, adicionales ==========
+
 @app.route('/api/tenant/<tenant_id>/menu', methods=['GET'])
 @login_required
 @tenant_owner_required
 def get_tenant_menu(tenant_id):
+    """Obtiene el menú completo del tenant con todos los campos"""
     try:
         menu = schema_manager.get_menu(tenant_id)
         return jsonify(menu)
@@ -619,10 +622,12 @@ def get_tenant_menu(tenant_id):
         logger.error(f"Error obteniendo menú: {e}")
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/tenant/<tenant_id>/config', methods=['GET'])
 @login_required
 @tenant_owner_required
 def get_tenant_config(tenant_id):
+    """Obtiene la configuración del tenant"""
     try:
         tenant = tenant_repo.find_by_id(tenant_id)
         if not tenant:
@@ -631,10 +636,12 @@ def get_tenant_config(tenant_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/tenant/<tenant_id>/config/ia', methods=['PUT', 'OPTIONS'])
 @login_required
 @tenant_owner_required
 def update_tenant_ia(tenant_id):
+    """Actualiza la configuración de IA del tenant"""
     if request.method == 'OPTIONS':
         return '', 200
     try:
@@ -645,89 +652,109 @@ def update_tenant_ia(tenant_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/admin/add_product/<tenant_id>', methods=['POST', 'OPTIONS'])
 @login_required
 @tenant_owner_required
 def add_product(tenant_id):
+    """Agrega un nuevo producto con todos los campos"""
     if request.method == 'OPTIONS':
         return '', 200
     try:
         data = request.get_json()
         nombre = data.get('nombre')
-        precio = data.get('precio')
-        if not nombre or not precio:
-            return jsonify({'error': 'Faltan nombre o precio'}), 400
+        if not nombre:
+            return jsonify({'error': 'El nombre es requerido'}), 400
         
-        schema_name = _get_schema_name(tenant_id)
-        product_id = str(uuid.uuid4())
+        producto = {
+            'tenant_id': tenant_id,
+            'nombre': nombre,
+            'descripcion': data.get('descripcion', ''),
+            'precio': data.get('precio', 0),
+            'categoria': data.get('categoria', 'general'),
+            'disponible': data.get('disponible', True),
+            'imagen_url': data.get('imagen_url'),
+            'tiempo_preparacion': data.get('tiempo_preparacion'),
+            'destacado': data.get('destacado', False),
+            'personalizaciones': data.get('personalizaciones', []),
+            'adicionales': data.get('adicionales', [])
+        }
         
-        with db_manager.get_connection(tenant_id) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"""
-                    INSERT INTO "{schema_name}".productos (id, nombre, descripcion, precio, categoria)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (product_id, nombre, data.get('descripcion', ''), int(precio), data.get('categoria', 'general')))
-            conn.commit()
+        product_id = schema_manager.add_product(**producto)
         
-        return jsonify({'status': 'ok', 'product_id': product_id}), 201
+        return jsonify({
+            'success': True,
+            'message': 'Producto agregado exitosamente',
+            'product_id': product_id
+        }), 201
     except Exception as e:
         logger.error(f'Error agregando producto: {e}')
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/delete_product/<tenant_id>/<product_id>', methods=['DELETE', 'OPTIONS'])
-@login_required
-@tenant_owner_required
-def delete_product(tenant_id, product_id):
-    if request.method == 'OPTIONS':
-        return '', 200
-    try:
-        schema_name = _get_schema_name(tenant_id)
-        
-        with db_manager.get_connection(tenant_id) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f'DELETE FROM "{schema_name}".productos WHERE id = %s', (product_id,))
-                deleted = cur.rowcount
-            conn.commit()
-        
-        if deleted > 0:
-            return jsonify({'status': 'ok', 'message': 'Producto eliminado'}), 200
-        return jsonify({'error': 'Producto no encontrado'}), 404
-    except Exception as e:
-        logger.error(f'Error eliminando producto: {e}')
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/update_product/<tenant_id>/<product_id>', methods=['PUT', 'OPTIONS'])
 @login_required
 @tenant_owner_required
 def update_product(tenant_id, product_id):
+    """Actualiza un producto existente con todos los campos"""
     if request.method == 'OPTIONS':
         return '', 200
     try:
-        data = request.json
-        schema_name = _get_schema_name(tenant_id)
+        data = request.get_json()
         
-        with db_manager.get_connection(tenant_id) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"""
-                    UPDATE "{schema_name}".productos 
-                    SET nombre = %s, descripcion = %s, precio = %s, categoria = %s, disponible = %s
-                    WHERE id = %s
-                """, (data.get('nombre'), data.get('descripcion'), data.get('precio'), 
-                      data.get('categoria', 'general'), data.get('disponible', True), product_id))
-                updated = cur.rowcount
-            conn.commit()
+        producto = {
+            'tenant_id': tenant_id,
+            'product_id': product_id,
+            'nombre': data.get('nombre'),
+            'descripcion': data.get('descripcion'),
+            'precio': data.get('precio'),
+            'categoria': data.get('categoria'),
+            'disponible': data.get('disponible'),
+            'imagen_url': data.get('imagen_url'),
+            'tiempo_preparacion': data.get('tiempo_preparacion'),
+            'destacado': data.get('destacado'),
+            'personalizaciones': data.get('personalizaciones'),
+            'adicionales': data.get('adicionales')
+        }
         
-        if updated > 0:
-            return jsonify({'status': 'ok', 'message': 'Producto actualizado'}), 200
-        return jsonify({'error': 'Producto no encontrado'}), 404
+        # Filtrar None values
+        producto = {k: v for k, v in producto.items() if v is not None}
+        
+        success = schema_manager.update_product(**producto)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Producto actualizado'})
+        else:
+            return jsonify({'error': 'No se pudo actualizar el producto'}), 400
     except Exception as e:
         logger.error(f'Error actualizando producto: {e}')
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/delete_product/<tenant_id>/<product_id>', methods=['DELETE', 'OPTIONS'])
+@login_required
+@tenant_owner_required
+def delete_product(tenant_id, product_id):
+    """Elimina un producto"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        success = schema_manager.delete_product(tenant_id, product_id)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Producto eliminado'})
+        else:
+            return jsonify({'error': 'No se pudo eliminar el producto'}), 400
+    except Exception as e:
+        logger.error(f'Error eliminando producto: {e}')
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/admin/toggle_product/<tenant_id>/<product_id>', methods=['PUT', 'POST', 'OPTIONS'])
 @login_required
 @tenant_owner_required
 def toggle_product(tenant_id, product_id):
+    """Cambia el estado disponible/no disponible de un producto"""
     if request.method == 'OPTIONS':
         response = jsonify({'status': 'ok'})
         response.headers.add('Access-Control-Allow-Methods', 'PUT, POST, OPTIONS')
@@ -738,67 +765,62 @@ def toggle_product(tenant_id, product_id):
         data = request.get_json(silent=True) or {}
         disponible = data.get('disponible', True)
         
-        logger.info(f"Toggle producto: tenant={tenant_id}, product={product_id}, disponible={disponible}")
+        success = schema_manager.update_product(
+            tenant_id=tenant_id,
+            product_id=product_id,
+            disponible=disponible
+        )
         
-        # Obtener schema_name
-        tenant = tenant_repo.find_by_id(tenant_id)
-        if not tenant:
-            logger.error(f"Tenant no encontrado: {tenant_id}")
-            return jsonify({'error': 'Tenant no encontrado'}), 404
-        
-        schema_name = tenant.get('schema_name')
-        if not schema_name:
-            schema_name = f"tenant_{tenant_id.replace('-', '_')}"
-        
-        logger.info(f"Usando schema: {schema_name}")
-        
-        with db_manager.get_connection(tenant_id) as conn:
-            with conn.cursor() as cur:
-                # Verificar si el producto existe
-                cur.execute(f'SELECT id FROM "{schema_name}".productos WHERE id = %s', (product_id,))
-                if not cur.fetchone():
-                    logger.error(f"Producto no encontrado: {product_id}")
-                    return jsonify({'error': 'Producto no encontrado'}), 404
-                
-                # Actualizar
-                cur.execute(f'UPDATE "{schema_name}".productos SET disponible = %s WHERE id = %s', (disponible, product_id))
-                conn.commit()
-        
-        logger.info(f"Producto {product_id} actualizado a disponible={disponible}")
-        return jsonify({'status': 'ok', 'message': 'Producto actualizado'}), 200
-        
+        if success:
+            estado = 'disponible' if disponible else 'no disponible'
+            return jsonify({'success': True, 'message': f'Producto {estado}'})
+        else:
+            return jsonify({'error': 'No se pudo cambiar el estado'}), 400
     except Exception as e:
         logger.error(f'Error toggling producto: {e}')
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/update_tenant/<tenant_id>', methods=['PUT', 'OPTIONS'])
+
+@app.route('/admin/toggle_featured/<tenant_id>/<product_id>', methods=['PUT', 'OPTIONS'])
 @login_required
 @tenant_owner_required
-def update_tenant(tenant_id):
+def toggle_featured(tenant_id, product_id):
+    """Cambia el estado destacado de un producto"""
     if request.method == 'OPTIONS':
         return '', 200
     try:
-        data = request.json
-        tenant_repo.update_tenant(tenant_id, data.get('nombre'), data.get('phone_id'), data.get('token'), data.get('usar_ia', False))
-        return jsonify({'status': 'ok', 'message': 'Tenant actualizado'}), 200
+        data = request.get_json()
+        destacado = data.get('destacado', False)
+        
+        success = schema_manager.update_product(
+            tenant_id=tenant_id,
+            product_id=product_id,
+            destacado=destacado
+        )
+        
+        if success:
+            estado = 'destacado' if destacado else 'no destacado'
+            return jsonify({'success': True, 'message': f'Producto {estado}'})
+        else:
+            return jsonify({'error': 'No se pudo cambiar el estado'}), 400
     except Exception as e:
+        logger.error(f'Error en toggle_featured: {e}')
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/delete_tenant/<tenant_id>', methods=['DELETE', 'OPTIONS'])
+
+@app.route('/api/tenant/<tenant_id>/product/<product_id>', methods=['GET'])
 @login_required
 @tenant_owner_required
-def delete_tenant(tenant_id):
-    if request.method == 'OPTIONS':
-        return '', 200
+def get_product_detail(tenant_id, product_id):
+    """Obtiene detalles completos de un producto incluyendo personalizaciones"""
     try:
-        tenant = tenant_repo.find_by_id(tenant_id)
-        if not tenant:
-            return jsonify({'error': 'Tenant no encontrado'}), 404
-        tenant_repo.delete(tenant_id)
-        return jsonify({'status': 'ok', 'message': 'Tenant eliminado'}), 200
+        product = schema_manager.get_product(tenant_id, product_id)
+        if product:
+            return jsonify(product)
+        else:
+            return jsonify({'error': 'Producto no encontrado'}), 404
     except Exception as e:
+        logger.error(f'Error en get_product_detail: {e}')
         return jsonify({'error': str(e)}), 500
 
 # ==================== AI TRAINING ====================
@@ -843,7 +865,6 @@ def train_ia(tenant_id):
                 }
                 
                 if row:
-                    # Manejar menu_estructurado (puede ser string JSON o lista)
                     menu_raw = row[0]
                     if menu_raw:
                         if isinstance(menu_raw, str):
@@ -871,21 +892,17 @@ def train_ia(tenant_id):
         if not isinstance(productos_nuevos, list):
             productos_nuevos = []
         
-        # Crear diccionario con productos actuales (nombre como clave)
         productos_combinados = {}
         for p in productos_actuales:
             if isinstance(p, dict) and p.get('nombre'):
                 productos_combinados[p.get('nombre')] = p
         
-        # Agregar o actualizar con productos nuevos
         for p in productos_nuevos:
             if isinstance(p, dict) and p.get('nombre'):
                 nombre = p.get('nombre')
                 if nombre in productos_combinados:
-                    # Actualizar precio si cambió
                     if p.get('precio'):
                         productos_combinados[nombre]['precio'] = p.get('precio')
-                    # Actualizar descripción si la nueva no está vacía
                     if p.get('descripcion'):
                         productos_combinados[nombre]['descripcion'] = p.get('descripcion')
                 else:
@@ -893,7 +910,7 @@ def train_ia(tenant_id):
         
         productos_finales = list(productos_combinados.values())
         
-        # ========== COMBINAR INSTRUCCIONES (acumulativo) ==========
+        # ========== COMBINAR INSTRUCCIONES ==========
         instrucciones_actuales = contexto_actual.get('instrucciones', '')
         instrucciones_nuevas = resultado.get('instrucciones_adicionales', '')
         
@@ -904,7 +921,7 @@ def train_ia(tenant_id):
         else:
             instrucciones_finales = instrucciones_actuales
         
-        # ========== COMBINAR POLÍTICAS (acumulativo) ==========
+        # ========== COMBINAR POLÍTICAS ==========
         politicas_actuales = contexto_actual.get('politicas', '')
         politicas_nuevas = resultado.get('politicas', '')
         
@@ -915,7 +932,7 @@ def train_ia(tenant_id):
         else:
             politicas_finales = politicas_actuales
         
-        # ========== HORARIO y UBICACIÓN (el nuevo tiene prioridad) ==========
+        # ========== HORARIO y UBICACIÓN ==========
         horario_final = resultado.get('horario', '') or contexto_actual.get('horario', '')
         ubicacion_final = resultado.get('ubicacion', '') or contexto_actual.get('ubicacion', '')
         
@@ -964,12 +981,10 @@ def train_ia(tenant_id):
                     
                     with db_manager.get_connection(tenant_id) as conn:
                         with conn.cursor() as cur:
-                            # Verificar si ya existe
                             cur.execute(f'SELECT id, precio FROM "{schema_name}".productos WHERE nombre ILIKE %s', (nombre,))
                             existing = cur.fetchone()
                             
                             if existing:
-                                # Actualizar si el precio cambió
                                 cur.execute(f'''
                                     UPDATE "{schema_name}".productos 
                                     SET precio = %s, descripcion = %s, categoria = %s, 
@@ -978,7 +993,6 @@ def train_ia(tenant_id):
                                 ''', (precio, descripcion, categoria, nombre))
                                 productos_actualizados += 1
                             else:
-                                # Insertar nuevo producto
                                 product_id = str(uuid.uuid4())
                                 cur.execute(f'''
                                     INSERT INTO "{schema_name}".productos 
@@ -1082,7 +1096,6 @@ def cambiar_estado_pedido(pedido_id):
     data = request.json
     nuevo_estado = data.get('estado')
     
-    # Obtener todos los tenants y buscar el pedido
     tenants = tenant_repo.get_all()
     tenant_encontrado = None
     schema_name_encontrado = None
@@ -1095,7 +1108,6 @@ def cambiar_estado_pedido(pedido_id):
         try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
-                    # Verificar si el pedido existe en este tenant
                     cur.execute(f"""
                         SELECT id, estado FROM "{schema_name}".pedidos 
                         WHERE id = %s
@@ -1113,7 +1125,6 @@ def cambiar_estado_pedido(pedido_id):
     if not tenant_encontrado:
         return jsonify({'error': 'Pedido no encontrado'}), 404
     
-    # Mapeo de estados a campos de fecha
     fecha_campo = {
         'pagado': 'pagado_at',
         'enviado': 'enviado_at',
@@ -1170,7 +1181,6 @@ def get_conversaciones(tenant_id):
         schema_name = _get_schema_name(tenant_id)
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                # Verificar si la tabla existe
                 cur.execute("""
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables 
@@ -1232,7 +1242,6 @@ def get_pedidos_stats(tenant_id):
         schema_name = _get_schema_name(tenant_id)
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                # Verificar si la tabla existe
                 cur.execute("""
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables 
@@ -1242,7 +1251,6 @@ def get_pedidos_stats(tenant_id):
                 if not cur.fetchone()[0]:
                     return jsonify({'nuevo': 0, 'pagado': 0, 'enviado': 0, 'cancelado': 0, 'total': 0})
                 
-                # IMPORTANTE: NO usar prefijo
                 cur.execute("""
                     SELECT estado, COUNT(*) as total 
                     FROM pedidos 
@@ -1275,7 +1283,6 @@ def get_pedidos_tenant(tenant_id):
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                # Verificar si la tabla existe
                 cur.execute("""
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables 
@@ -1288,7 +1295,6 @@ def get_pedidos_tenant(tenant_id):
                 if not tabla_existe:
                     return jsonify([])
                 
-                # IMPORTANTE: NO usar "{schema_name}".pedidos porque ya estamos en el schema
                 if estado == 'todos':
                     cur.execute("SELECT * FROM pedidos ORDER BY created_at DESC")
                 else:
@@ -1304,14 +1310,12 @@ def get_pedidos_tenant(tenant_id):
                 pedidos = []
                 for row in rows:
                     pedido = dict(zip(columns, row))
-                    # Procesar items (JSON)
                     if pedido.get('items') and isinstance(pedido['items'], str):
                         try:
                             pedido['items'] = json.loads(pedido['items'])
                         except:
                             pedido['items'] = []
                     
-                    # Asegurar cliente_nombre
                     if not pedido.get('cliente_nombre'):
                         pedido['cliente_nombre'] = pedido.get('cliente_numero', 'N/A')
                     
@@ -1339,7 +1343,6 @@ def get_pedidos_light(tenant_id):
     try:
         with db_manager.get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
-                # Verificar qué columnas existen
                 cur.execute(f"""
                     SELECT column_name 
                     FROM information_schema.columns 
@@ -1347,7 +1350,6 @@ def get_pedidos_light(tenant_id):
                 """, (schema_name,))
                 columnas = [row[0] for row in cur.fetchall()]
                 
-                # Construir SELECT según columnas existentes
                 select_cols = ['id', 'cliente_numero', 'total', 'estado', 'created_at']
                 if 'numero_pedido' in columnas:
                     select_cols.append('numero_pedido')
@@ -1378,7 +1380,6 @@ def get_pedidos_light(tenant_id):
                 pedidos = []
                 for row in rows:
                     pedido = dict(zip(col_names, row))
-                    # Si no hay cliente_nombre, usar cliente_numero como nombre
                     if not pedido.get('cliente_nombre'):
                         pedido['cliente_nombre'] = pedido.get('cliente_numero', 'Cliente')
                     pedidos.append(pedido)
@@ -1860,7 +1861,6 @@ def migrar_todos_tenants():
             resultados.append({'tenant': tenant_id, 'status': 'error', 'error': str(e)})
     return jsonify({'resultados': resultados, 'total': len(tenants)})
 
-# En app.py, agrega:
 @app.route('/test-css')
 def test_css():
     return '''
@@ -1879,6 +1879,7 @@ def test_css():
         </body>
     </html>
     '''
+
 @app.route('/api/check-session', methods=['GET'])
 def check_session():
     """Verifica si la sesión está activa"""
