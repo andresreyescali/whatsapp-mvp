@@ -820,24 +820,97 @@ def train_ia(tenant_id):
             resultado = trainer.procesar_texto(data.get('texto'))
         
         if not resultado:
-            return jsonify({'error': 'No se pudo procesar la imagen o texto'}), 500
+            return jsonify({'error': 'No se pudo procesar'}), 500
         
-        # Asegurar estructura del resultado
-        if 'productos' not in resultado:
-            resultado['productos'] = []
-        if 'horario' not in resultado:
-            resultado['horario'] = ''
-        if 'ubicacion' not in resultado:
-            resultado['ubicacion'] = ''
-        if 'politicas' not in resultado:
-            resultado['politicas'] = ''
-        if 'instrucciones_adicionales' not in resultado:
-            resultado['instrucciones_adicionales'] = ''
-        
-        # Guardar contexto en tenant_context
+        # ========== OBTENER CONTEXTO ACTUAL ==========
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                prompt_personalizado = trainer.generar_prompt_personalizado(resultado)
+                cur.execute('''
+                    SELECT menu_estructurado, instrucciones, horario, ubicacion, 
+                           politicas, prompt_personalizado 
+                    FROM public.tenant_context 
+                    WHERE tenant_id = %s
+                ''', (tenant_id,))
+                row = cur.fetchone()
+                
+                contexto_actual = {}
+                if row:
+                    contexto_actual = {
+                        'productos': json.loads(row[0]) if row[0] else [],
+                        'instrucciones': row[1] or '',
+                        'horario': row[2] or '',
+                        'ubicacion': row[3] or '',
+                        'politicas': row[4] or '',
+                        'prompt_personalizado': row[5] or ''
+                    }
+        
+        # ========== COMBINAR DATOS (ACUMULATIVO) ==========
+        
+        # 1. COMBINAR PRODUCTOS (evitar duplicados)
+        productos_actuales = contexto_actual.get('productos', [])
+        productos_nuevos = resultado.get('productos', [])
+        
+        # Crear diccionario con productos actuales (nombre como clave)
+        productos_combinados = {}
+        for p in productos_actuales:
+            productos_combinados[p.get('nombre')] = p
+        
+        # Agregar o actualizar con productos nuevos
+        for p in productos_nuevos:
+            nombre = p.get('nombre')
+            if nombre:
+                if nombre in productos_combinados:
+                    # Actualizar precio si cambió
+                    productos_combinados[nombre]['precio'] = p.get('precio', productos_combinados[nombre]['precio'])
+                    # Actualizar descripción si la nueva no está vacía
+                    if p.get('descripcion'):
+                        productos_combinados[nombre]['descripcion'] = p.get('descripcion')
+                else:
+                    productos_combinados[nombre] = p
+        
+        productos_finales = list(productos_combinados.values())
+        
+        # 2. COMBINAR INSTRUCCIONES (acumular con separador)
+        instrucciones_actuales = contexto_actual.get('instrucciones', '')
+        instrucciones_nuevas = resultado.get('instrucciones_adicionales', '')
+        
+        if instrucciones_actuales and instrucciones_nuevas:
+            instrucciones_finales = f"{instrucciones_actuales}\n\n--- NUEVAS INSTRUCCIONES ---\n{instrucciones_nuevas}"
+        elif instrucciones_nuevas:
+            instrucciones_finales = instrucciones_nuevas
+        else:
+            instrucciones_finales = instrucciones_actuales
+        
+        # 3. COMBINAR HORARIO (el nuevo tiene prioridad si existe, si no se mantiene el actual)
+        horario_final = resultado.get('horario', '') or contexto_actual.get('horario', '')
+        
+        # 4. COMBINAR UBICACIÓN (el nuevo tiene prioridad)
+        ubicacion_final = resultado.get('ubicacion', '') or contexto_actual.get('ubicacion', '')
+        
+        # 5. COMBINAR POLÍTICAS (acumular con separador)
+        politicas_actuales = contexto_actual.get('politicas', '')
+        politicas_nuevas = resultado.get('politicas', '')
+        
+        if politicas_actuales and politicas_nuevas:
+            politicas_finales = f"{politicas_actuales}\n\n--- NUEVAS POLÍTICAS ---\n{politicas_nuevas}"
+        elif politicas_nuevas:
+            politicas_finales = politicas_nuevas
+        else:
+            politicas_finales = politicas_actuales
+        
+        # 6. GENERAR PROMPT PERSONALIZADO (con toda la información combinada)
+        contexto_combinado = {
+            'productos': productos_finales,
+            'horario': horario_final,
+            'ubicacion': ubicacion_final,
+            'politicas': politicas_finales,
+            'instrucciones_adicionales': instrucciones_finales
+        }
+        prompt_personalizado = trainer.generar_prompt_personalizado(contexto_combinado)
+        
+        # ========== GUARDAR EN BD ==========
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
                 cur.execute('''
                     INSERT INTO public.tenant_context (tenant_id, menu_estructurado, instrucciones, 
                                                        horario, ubicacion, politicas, prompt_personalizado,
@@ -851,107 +924,59 @@ def train_ia(tenant_id):
                         politicas = EXCLUDED.politicas,
                         prompt_personalizado = EXCLUDED.prompt_personalizado,
                         updated_at = NOW()
-                ''', (tenant_id, json.dumps(resultado.get('productos', [])), 
-                      resultado.get('instrucciones_adicionales', ''), 
-                      resultado.get('horario', ''), 
-                      resultado.get('ubicacion', ''), 
-                      resultado.get('politicas', ''), 
-                      prompt_personalizado))
+                ''', (tenant_id, json.dumps(productos_finales), instrucciones_finales, 
+                      horario_final, ubicacion_final, politicas_finales, prompt_personalizado))
             conn.commit()
         
-        # Obtener schema_name
+        # ========== GUARDAR PRODUCTOS EN EL ESQUEMA DEL TENANT ==========
         schema_name = _get_schema_name(tenant_id)
-        
-        # Guardar productos (evitando duplicados)
         productos_agregados = 0
         productos_actualizados = 0
-        errores = 0
         
-        for producto in resultado.get('productos', []):
-            if not producto.get('nombre'):
-                continue
-                
-            try:
-                nombre = producto.get('nombre').strip()
-                precio = producto.get('precio', 0)
-                
-                # Normalizar precio (puede venir como string con puntos o comas)
-                if isinstance(precio, str):
-                    # Limpiar caracteres no numéricos
-                    precio_limpio = re.sub(r'[^0-9]', '', precio)
-                    precio = int(precio_limpio) if precio_limpio else 0
-                elif isinstance(precio, float):
-                    precio = int(precio)
-                elif not isinstance(precio, int):
-                    precio = 0
-                
-                # Validar precio mínimo (evitar errores donde $ se lee como 5)
-                if precio < 100 and nombre and len(nombre) > 3:
-                    logger.warning(f"Precio sospechosamente bajo para '{nombre}': ${precio}. Verificar manualmente.")
-                    # No saltar, solo advertir
-                
-                descripcion = producto.get('descripcion', '')
-                categoria = producto.get('categoria', 'general')
-                
-                with db_manager.get_connection(tenant_id) as conn:
-                    with conn.cursor() as cur:
-                        # Verificar si ya existe un producto con el mismo nombre (insensible a mayúsculas)
-                        cur.execute(f'''
-                            SELECT id, precio FROM "{schema_name}".productos 
-                            WHERE nombre ILIKE %s
-                        ''', (nombre,))
-                        existing = cur.fetchone()
-                        
-                        if existing:
-                            # Actualizar producto existente
-                            cur.execute(f'''
-                                UPDATE "{schema_name}".productos 
-                                SET precio = %s, descripcion = %s, categoria = %s, 
-                                    disponible = true, updated_at = NOW()
-                                WHERE nombre ILIKE %s
-                            ''', (precio, descripcion, categoria, nombre))
-                            productos_actualizados += 1
-                            logger.info(f'Producto actualizado: {nombre} (precio: ${precio})')
-                        else:
-                            # Insertar nuevo producto
-                            product_id = str(uuid.uuid4())
-                            cur.execute(f'''
-                                INSERT INTO "{schema_name}".productos 
-                                (id, nombre, descripcion, precio, categoria, disponible)
-                                VALUES (%s, %s, %s, %s, %s, true)
-                            ''', (product_id, nombre, descripcion, precio, categoria))
-                            productos_agregados += 1
-                            logger.info(f'Producto agregado: {nombre} (precio: ${precio})')
-                        
-                        conn.commit()
-                        
-            except Exception as e:
-                logger.warning(f'Error guardando producto "{producto.get("nombre")}": {e}')
-                errores += 1
+        for producto in productos_nuevos:
+            if producto.get('nombre') and producto.get('precio'):
+                try:
+                    nombre = producto.get('nombre').strip()
+                    precio = int(producto.get('precio', 0))
+                    descripcion = producto.get('descripcion', '')
+                    categoria = producto.get('categoria', 'general')
+                    
+                    with db_manager.get_connection(tenant_id) as conn:
+                        with conn.cursor() as cur:
+                            # Verificar si ya existe
+                            cur.execute(f'SELECT id, precio FROM "{schema_name}".productos WHERE nombre ILIKE %s', (nombre,))
+                            existing = cur.fetchone()
+                            
+                            if existing:
+                                # Actualizar si el precio cambió
+                                cur.execute(f'''
+                                    UPDATE "{schema_name}".productos 
+                                    SET precio = %s, descripcion = %s, categoria = %s, 
+                                        disponible = true, updated_at = NOW()
+                                    WHERE nombre ILIKE %s
+                                ''', (precio, descripcion, categoria, nombre))
+                                productos_actualizados += 1
+                            else:
+                                # Insertar nuevo producto
+                                product_id = str(uuid.uuid4())
+                                cur.execute(f'''
+                                    INSERT INTO "{schema_name}".productos 
+                                    (id, nombre, descripcion, precio, categoria, disponible)
+                                    VALUES (%s, %s, %s, %s, %s, true)
+                                ''', (product_id, nombre, descripcion, precio, categoria))
+                                productos_agregados += 1
+                            conn.commit()
+                except Exception as e:
+                    logger.warning(f'Error guardando producto {producto.get("nombre")}: {e}')
         
-        # Mensaje de resumen
-        if productos_agregados > 0 or productos_actualizados > 0:
-            mensaje = f'Entrenamiento completado. '
-            if productos_agregados > 0:
-                mensaje += f'{productos_agregados} productos agregados, '
-            if productos_actualizados > 0:
-                mensaje += f'{productos_actualizados} productos actualizados, '
-            if errores > 0:
-                mensaje += f'{errores} errores.'
-            else:
-                mensaje = mensaje.rstrip(', ') + '.'
-        else:
-            mensaje = 'No se encontraron productos para guardar.'
-        
-        logger.info(f'Entrenamiento completado: +{productos_agregados} / ~{productos_actualizados} / !{errores}')
+        logger.info(f'Entrenamiento acumulativo completado: +{productos_agregados} / ~{productos_actualizados}')
         
         return jsonify({
             'status': 'ok',
-            'contexto': resultado,
+            'contexto': contexto_combinado,
             'productos_agregados': productos_agregados,
             'productos_actualizados': productos_actualizados,
-            'errores': errores,
-            'message': mensaje
+            'message': f'Entrenamiento acumulativo exitoso. {productos_agregados} productos agregados, {productos_actualizados} actualizados.'
         })
         
     except Exception as e:
@@ -959,7 +984,7 @@ def train_ia(tenant_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e), 'details': 'Error interno del servidor'}), 500
-    
+
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET', 'DELETE'])
 @login_required
 @tenant_owner_required
