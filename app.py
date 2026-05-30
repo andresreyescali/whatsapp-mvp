@@ -833,35 +833,58 @@ def train_ia(tenant_id):
                 ''', (tenant_id,))
                 row = cur.fetchone()
                 
-                contexto_actual = {}
+                contexto_actual = {
+                    'productos': [],
+                    'instrucciones': '',
+                    'horario': '',
+                    'ubicacion': '',
+                    'politicas': '',
+                    'prompt_personalizado': ''
+                }
+                
                 if row:
-                    contexto_actual = {
-                        'productos': json.loads(row[0]) if row[0] else [],
-                        'instrucciones': row[1] or '',
-                        'horario': row[2] or '',
-                        'ubicacion': row[3] or '',
-                        'politicas': row[4] or '',
-                        'prompt_personalizado': row[5] or ''
-                    }
+                    # Manejar menu_estructurado (puede ser string JSON o lista)
+                    menu_raw = row[0]
+                    if menu_raw:
+                        if isinstance(menu_raw, str):
+                            try:
+                                contexto_actual['productos'] = json.loads(menu_raw)
+                            except:
+                                contexto_actual['productos'] = []
+                        elif isinstance(menu_raw, list):
+                            contexto_actual['productos'] = menu_raw
+                        else:
+                            contexto_actual['productos'] = []
+                    
+                    contexto_actual['instrucciones'] = row[1] or ''
+                    contexto_actual['horario'] = row[2] or ''
+                    contexto_actual['ubicacion'] = row[3] or ''
+                    contexto_actual['politicas'] = row[4] or ''
+                    contexto_actual['prompt_personalizado'] = row[5] or ''
         
-        # ========== COMBINAR DATOS (ACUMULATIVO) ==========
-        
-        # 1. COMBINAR PRODUCTOS (evitar duplicados)
+        # ========== COMBINAR PRODUCTOS (evitar duplicados) ==========
         productos_actuales = contexto_actual.get('productos', [])
+        if not isinstance(productos_actuales, list):
+            productos_actuales = []
+        
         productos_nuevos = resultado.get('productos', [])
+        if not isinstance(productos_nuevos, list):
+            productos_nuevos = []
         
         # Crear diccionario con productos actuales (nombre como clave)
         productos_combinados = {}
         for p in productos_actuales:
-            productos_combinados[p.get('nombre')] = p
+            if isinstance(p, dict) and p.get('nombre'):
+                productos_combinados[p.get('nombre')] = p
         
         # Agregar o actualizar con productos nuevos
         for p in productos_nuevos:
-            nombre = p.get('nombre')
-            if nombre:
+            if isinstance(p, dict) and p.get('nombre'):
+                nombre = p.get('nombre')
                 if nombre in productos_combinados:
                     # Actualizar precio si cambió
-                    productos_combinados[nombre]['precio'] = p.get('precio', productos_combinados[nombre]['precio'])
+                    if p.get('precio'):
+                        productos_combinados[nombre]['precio'] = p.get('precio')
                     # Actualizar descripción si la nueva no está vacía
                     if p.get('descripcion'):
                         productos_combinados[nombre]['descripcion'] = p.get('descripcion')
@@ -870,35 +893,33 @@ def train_ia(tenant_id):
         
         productos_finales = list(productos_combinados.values())
         
-        # 2. COMBINAR INSTRUCCIONES (acumular con separador)
+        # ========== COMBINAR INSTRUCCIONES (acumulativo) ==========
         instrucciones_actuales = contexto_actual.get('instrucciones', '')
         instrucciones_nuevas = resultado.get('instrucciones_adicionales', '')
         
         if instrucciones_actuales and instrucciones_nuevas:
-            instrucciones_finales = f"{instrucciones_actuales}\n\n--- NUEVAS INSTRUCCIONES ---\n{instrucciones_nuevas}"
+            instrucciones_finales = f"{instrucciones_actuales}\n\n{instrucciones_nuevas}"
         elif instrucciones_nuevas:
             instrucciones_finales = instrucciones_nuevas
         else:
             instrucciones_finales = instrucciones_actuales
         
-        # 3. COMBINAR HORARIO (el nuevo tiene prioridad si existe, si no se mantiene el actual)
-        horario_final = resultado.get('horario', '') or contexto_actual.get('horario', '')
-        
-        # 4. COMBINAR UBICACIÓN (el nuevo tiene prioridad)
-        ubicacion_final = resultado.get('ubicacion', '') or contexto_actual.get('ubicacion', '')
-        
-        # 5. COMBINAR POLÍTICAS (acumular con separador)
+        # ========== COMBINAR POLÍTICAS (acumulativo) ==========
         politicas_actuales = contexto_actual.get('politicas', '')
         politicas_nuevas = resultado.get('politicas', '')
         
         if politicas_actuales and politicas_nuevas:
-            politicas_finales = f"{politicas_actuales}\n\n--- NUEVAS POLÍTICAS ---\n{politicas_nuevas}"
+            politicas_finales = f"{politicas_actuales}\n\n{politicas_nuevas}"
         elif politicas_nuevas:
             politicas_finales = politicas_nuevas
         else:
             politicas_finales = politicas_actuales
         
-        # 6. GENERAR PROMPT PERSONALIZADO (con toda la información combinada)
+        # ========== HORARIO y UBICACIÓN (el nuevo tiene prioridad) ==========
+        horario_final = resultado.get('horario', '') or contexto_actual.get('horario', '')
+        ubicacion_final = resultado.get('ubicacion', '') or contexto_actual.get('ubicacion', '')
+        
+        # ========== GENERAR PROMPT PERSONALIZADO ==========
         contexto_combinado = {
             'productos': productos_finales,
             'horario': horario_final,
@@ -934,7 +955,7 @@ def train_ia(tenant_id):
         productos_actualizados = 0
         
         for producto in productos_nuevos:
-            if producto.get('nombre') and producto.get('precio'):
+            if isinstance(producto, dict) and producto.get('nombre') and producto.get('precio'):
                 try:
                     nombre = producto.get('nombre').strip()
                     precio = int(producto.get('precio', 0))
@@ -984,7 +1005,7 @@ def train_ia(tenant_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e), 'details': 'Error interno del servidor'}), 500
-
+    
 @app.route('/api/tenant/<tenant_id>/context', methods=['GET', 'DELETE'])
 @login_required
 @tenant_owner_required
