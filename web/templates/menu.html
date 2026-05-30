@@ -231,7 +231,7 @@
         } else if (filtroActual === 'destacados') {
             productosMostrados = todosProductos.filter(function(p) { return p.destacado === true; });
         } else {
-            productosMostrados = todosProductos.slice(); // Copia de todos
+            productosMostrados = todosProductos.slice();
         }
         
         console.log('Productos mostrados:', productosMostrados.length, 'de', todosProductos.length);
@@ -252,7 +252,7 @@
             
             var response = await fetch(url, { 
                 credentials: 'include',
-                headers: { 'Content-Type': application/json' }
+                headers: { 'Content-Type': 'application/json' }
             });
             
             if (response.status === 401) {
@@ -504,7 +504,6 @@
         var url = '/admin/toggle_product/' + tenantId + '/' + productId;
         console.log('URL:', url);
         
-        // Deshabilitar el toggle visualmente mientras se procesa
         var originalClass = element.className;
         element.style.opacity = '0.5';
         
@@ -520,7 +519,7 @@
             
             if (response.ok) {
                 showAlertLocal(nuevoEstado ? '✅ Producto habilitado' : '⚠️ Producto deshabilitado', 'success');
-                await cargarProductos();  // Recargar todos los productos
+                await cargarProductos();
             } else if (response.status === 401) {
                 showAlertLocal('❌ Sesión expirada', 'error');
                 setTimeout(function() { window.location.href = '/'; }, 2000);
@@ -528,7 +527,6 @@
                 var errorText = await response.text();
                 console.error('Error response:', errorText);
                 showAlertLocal('Error al cambiar estado: ' + response.status, 'error');
-                // Restaurar el estado visual del toggle
                 element.className = originalClass;
                 element.style.opacity = '';
             }
@@ -558,7 +556,6 @@
         return div.innerHTML;
     }
 
-    // Previsualización de imagen
     document.getElementById('productoImagen').addEventListener('input', function() {
         var url = this.value;
         if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
@@ -624,7 +621,6 @@
         }
     });
 
-    // Exponer funciones globales
     window.abrirModalProducto = abrirModalProducto;
     window.cerrarModalProducto = cerrarModalProducto;
     window.editarProducto = editarProducto;
@@ -635,7 +631,6 @@
     window.cargarProductos = cargarProductos;
     window.aplicarFiltro = aplicarFiltro;
 
-    // Inicializar
     cargarProductos();
     cargarConfig();
 </script>
