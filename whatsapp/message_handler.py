@@ -324,6 +324,7 @@ class MessageHandler:
         return texto
     
     def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
+        """Finaliza el pedido y genera número de seguimiento"""
         logger.info(f"🎯 [FINALIZAR] Iniciando finalización para cliente {numero}")
         logger.info(f"🎯 [FINALIZAR] Carrito: {json.dumps(carrito, indent=2)}")
         
@@ -334,14 +335,28 @@ class MessageHandler:
         datos_cliente = self._datos_cliente.get(numero, {})
         schema_name = self._get_schema_name(tenant['id'])
         
+        # Obtener datos existentes del cliente desde la BD
+        cliente_existente = self._obtener_cliente(tenant['id'], numero)
+        
+        # ACTUALIZAR: Combinar datos nuevos con existentes (los nuevos tienen prioridad)
+        datos_completos = {}
+        if cliente_existente:
+            # Copiar datos existentes
+            datos_completos.update(cliente_existente)
+        # Sobrescribir con datos nuevos de la conversación
+        datos_completos.update(datos_cliente)
+        
+        logger.info(f"👤 [CLIENTE] Datos finales para {numero}: {json.dumps(datos_completos, indent=2)}")
+        
         contexto = self._obtener_contexto_tenant(tenant['id'])
-        direccion_entrega = datos_cliente.get('direccion', '')
-        if datos_cliente.get('recojo_en_tienda'):
+        direccion_entrega = datos_completos.get('direccion', '')
+        if datos_completos.get('recojo_en_tienda'):
             direccion_entrega = f"Recojo en tienda - {tenant.get('nombre')} - {contexto.get('ubicacion', '')}"
         
-        cliente_id = self._obtener_o_crear_cliente(tenant['id'], numero, datos_cliente)
+        # Guardar/Actualizar cliente en BD con todos los datos
+        cliente_id = self._obtener_o_crear_cliente(tenant['id'], numero, datos_completos)
         if not cliente_id:
-            logger.error(f"🎯 [FINALIZAR] Error creando cliente {numero}")
+            logger.error(f"🎯 [FINALIZAR] Error creando/actualizando cliente {numero}")
             return "❌ Hubo un error con tus datos. Por favor intenta de nuevo."
         
         pedido_id = str(uuid.uuid4())
@@ -377,20 +392,15 @@ class MessageHandler:
                                         WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'numero_pedido') THEN
                                 ALTER TABLE "{schema_name}".pedidos ADD COLUMN numero_pedido TEXT;
                             END IF;
+                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                        WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'cliente_nombre') THEN
+                                ALTER TABLE "{schema_name}".pedidos ADD COLUMN cliente_nombre TEXT;
+                            END IF;
                         END $$;
                     """)
+                    conn.commit()
                     
-                    # Insertar pedido
-                    cur.execute(f'INSERT INTO "{schema_name}".pedidos (id, cliente_id, cliente_numero, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)', (pedido_id, cliente_id, numero, numero_pedido, secuencial, json.dumps(items), total, 'nuevo', direccion_entrega, f"Fecha: {datos_cliente.get('fecha_entrega', '')} Hora: {datos_cliente.get('hora_entrega', '')}".strip()))
-                    
-                    # Verificar guardado (usar el mismo cursor, no cerrar la conexión)
-                    cur.execute(f'SELECT * FROM "{schema_name}".pedidos WHERE id = %s', (pedido_id,))
-                    pedido_guardado = cur.fetchone()
-                    if pedido_guardado:
-                        logger.info(f"🎯 [FINALIZAR] Pedido guardado exitosamente en BD")
-                    else:
-                        logger.error(f"🎯 [FINALIZAR] ERROR: Pedido no encontrado después de insertar")
-                
+                    cur.execute(f'INSERT INTO "{schema_name}".pedidos (id, cliente_id, cliente_numero, cliente_nombre, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)', (pedido_id, cliente_id, numero, datos_completos.get('nombre', numero), numero_pedido, secuencial, json.dumps(items), total, 'nuevo', direccion_entrega, f"Fecha: {datos_completos.get('fecha_entrega', '')} Hora: {datos_completos.get('hora_entrega', '')}".strip()))
                 conn.commit()
             
             self._guardar_carrito(tenant['id'], numero, [], 0)
@@ -398,7 +408,7 @@ class MessageHandler:
                 del self._datos_cliente[numero]
             
             items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in items])
-            datos_texto = self._formatear_datos_cliente(datos_cliente)
+            datos_texto = self._formatear_datos_cliente(datos_completos)
             
             logger.info(f"🎯 [FINALIZAR] Éxito! Pedido {numero_pedido} creado para {numero}")
             
@@ -421,9 +431,9 @@ class MessageHandler:
             import traceback
             traceback.print_exc()
             return "❌ Hubo un error procesando tu solicitud. Por favor intenta de nuevo."
-        
     
     def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
+        """Obtiene o crea un cliente en el esquema del tenant, actualizando datos si es necesario"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -433,34 +443,52 @@ class MessageHandler:
                     
                     if row:
                         cliente_id = row[0]
-                        if datos_cliente:
-                            updates, params = [], []
-                            if datos_cliente.get('nombre') and not row[1]:
-                                updates.append("nombre = %s")
-                                params.append(datos_cliente['nombre'])
-                            if datos_cliente.get('cc') and not row[2]:
-                                updates.append("cc = %s")
-                                params.append(datos_cliente['cc'])
-                            if datos_cliente.get('email') and not row[3]:
-                                updates.append("email = %s")
-                                params.append(datos_cliente['email'])
-                            if datos_cliente.get('direccion') and not row[4]:
-                                updates.append("direccion = %s")
-                                params.append(datos_cliente['direccion'])
-                            if updates:
-                                params.append(cliente_id)
-                                cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
-                                conn.commit()
+                        # ACTUALIZAR: Siempre actualizar con los datos más recientes
+                        updates = []
+                        params = []
+                        
+                        if datos_cliente and datos_cliente.get('nombre'):
+                            updates.append("nombre = %s")
+                            params.append(datos_cliente['nombre'])
+                        elif datos_cliente and datos_cliente.get('nombre') is None and not row[1]:
+                            pass  # No actualizar si no hay nombre
+                        
+                        if datos_cliente and datos_cliente.get('cc'):
+                            updates.append("cc = %s")
+                            params.append(datos_cliente['cc'])
+                        
+                        if datos_cliente and datos_cliente.get('email'):
+                            updates.append("email = %s")
+                            params.append(datos_cliente['email'])
+                        
+                        if datos_cliente and datos_cliente.get('direccion'):
+                            updates.append("direccion = %s")
+                            params.append(datos_cliente['direccion'])
+                        
+                        if updates:
+                            params.append(cliente_id)
+                            cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
+                            logger.info(f'👤 [CLIENTE] Actualizado: {numero} - Datos: {dict(zip([u.split("=")[0].strip() for u in updates], params[:-1]))}')
+                            conn.commit()
+                        
                         return cliente_id
                     else:
                         cliente_id = str(uuid.uuid4())
-                        cur.execute(f'INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion) VALUES (%s, %s, %s, %s, %s, %s)', (cliente_id, numero, datos_cliente.get('nombre') if datos_cliente else None, datos_cliente.get('cc') if datos_cliente else None, datos_cliente.get('email') if datos_cliente else None, datos_cliente.get('direccion') if datos_cliente else None))
+                        cur.execute(f"""
+                            INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        """, (cliente_id, numero, 
+                            datos_cliente.get('nombre') if datos_cliente else None,
+                            datos_cliente.get('cc') if datos_cliente else None,
+                            datos_cliente.get('email') if datos_cliente else None,
+                            datos_cliente.get('direccion') if datos_cliente else None))
                         conn.commit()
+                        logger.info(f'👤 [CLIENTE] Creado nuevo: {numero}')
                         return cliente_id
         except Exception as e:
             logger.error(f'Error gestionando cliente: {e}')
             return None
-    
+            
     # ==================== HISTORIAL ====================
     
     def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 10) -> list:
