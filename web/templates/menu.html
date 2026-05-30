@@ -78,6 +78,10 @@
                         <input type="radio" name="filtro" value="no_disponibles" onchange="aplicarFiltro()">
                         <span>Solo no disponibles</span>
                     </label>
+                    <label class="d-flex align-center gap-2">
+                        <input type="radio" name="filtro" value="destacados" onchange="aplicarFiltro()">
+                        <span>⭐ Productos destacados</span>
+                    </label>
                 </div>
             </div>
         </div>
@@ -95,7 +99,7 @@
 
 <!-- Modal Producto -->
 <div id="productoModal" class="modal">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width: 700px;">
         <div class="modal-header">
             <h3 id="modalTitle">➕ Agregar Producto</h3>
             <button class="modal-close" onclick="cerrarModalProducto()">&times;</button>
@@ -103,33 +107,72 @@
         <form id="formProducto">
             <input type="hidden" id="productoId">
             <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">Nombre del producto *</label>
-                    <input type="text" id="productoNombre" class="form-control" required>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2;">
+                        <label class="form-label">Nombre del producto *</label>
+                        <input type="text" id="productoNombre" class="form-control" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label class="form-label">Precio ($) *</label>
+                        <input type="number" id="productoPrecio" class="form-control" required min="0">
+                    </div>
                 </div>
+                
                 <div class="form-group">
                     <label class="form-label">Descripción</label>
-                    <textarea id="productoDescripcion" class="form-control" rows="3"></textarea>
+                    <textarea id="productoDescripcion" class="form-control" rows="3" placeholder="Describe el producto..."></textarea>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Precio ($) *</label>
-                    <input type="number" id="productoPrecio" class="form-control" required>
+                
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label class="form-label">Categoría</label>
+                        <select id="productoCategoria" class="form-control">
+                            <option value="general">📦 General</option>
+                            <option value="pizzas">🍕 Pizzas</option>
+                            <option value="hamburguesas">🍔 Hamburguesas</option>
+                            <option value="tortas">🍰 Tortas</option>
+                            <option value="postres">🍨 Postres</option>
+                            <option value="panes">🥖 Panes</option>
+                            <option value="bebidas">🥤 Bebidas</option>
+                            <option value="apartamentos">🏢 Apartamentos</option>
+                            <option value="casas">🏠 Casas</option>
+                            <option value="sedanes">🚗 Sedanes</option>
+                            <option value="suvs">🚙 SUVs</option>
+                            <option value="habitaciones">🛏️ Habitaciones</option>
+                            <option value="paquetes">✈️ Paquetes</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label class="form-label">Tiempo de preparación (min)</label>
+                        <input type="number" id="productoTiempo" class="form-control" placeholder="Ej: 15" min="0">
+                    </div>
                 </div>
+                
                 <div class="form-group">
-                    <label class="form-label">Categoría</label>
-                    <select id="productoCategoria" class="form-control">
-                        <option value="general">General</option>
-                        <option value="tortas">🍰 Tortas</option>
-                        <option value="postres">🍨 Postres</option>
-                        <option value="panes">🥖 Panes</option>
-                        <option value="bebidas">🥤 Bebidas</option>
-                    </select>
+                    <label class="form-label">URL de imagen</label>
+                    <input type="url" id="productoImagen" class="form-control" placeholder="https://ejemplo.com/imagen.jpg">
+                    <small class="text-muted">Deja vacío para no mostrar imagen</small>
                 </div>
+                
                 <div class="form-group">
-                    <label class="d-flex align-center gap-2">
-                        <input type="checkbox" id="productoDisponible" checked>
-                        <span>Producto disponible para venta</span>
-                    </label>
+                    <div id="imagenPreview" style="display: none; margin-top: 10px;">
+                        <img id="previewImg" src="" style="max-width: 100px; max-height: 100px; border-radius: 8px;">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="d-flex align-center gap-2">
+                            <input type="checkbox" id="productoDisponible" checked>
+                            <span>✅ Producto disponible para venta</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="d-flex align-center gap-2">
+                            <input type="checkbox" id="productoDestacado">
+                            <span>⭐ Marcar como producto destacado</span>
+                        </label>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -185,6 +228,8 @@
             productosMostrados = todosProductos.filter(function(p) { return p.disponible === true; });
         } else if (filtroActual === 'no_disponibles') {
             productosMostrados = todosProductos.filter(function(p) { return p.disponible === false; });
+        } else if (filtroActual === 'destacados') {
+            productosMostrados = todosProductos.filter(function(p) { return p.destacado === true; });
         } else {
             productosMostrados = todosProductos.slice(); // Copia de todos
         }
@@ -207,7 +252,7 @@
             
             var response = await fetch(url, { 
                 credentials: 'include',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': application/json' }
             });
             
             if (response.status === 401) {
@@ -224,8 +269,9 @@
             
             var disponibles = todosProductos.filter(function(p) { return p.disponible === true; }).length;
             var noDisponibles = todosProductos.filter(function(p) { return p.disponible === false; }).length;
+            var destacados = todosProductos.filter(function(p) { return p.destacado === true; }).length;
             
-            document.getElementById('productosCount').innerHTML = '✅ ' + disponibles + ' disponibles / ⚠️ ' + noDisponibles + ' no disponibles';
+            document.getElementById('productosCount').innerHTML = '✅ ' + disponibles + ' disponibles / ⚠️ ' + noDisponibles + ' no disponibles / ⭐ ' + destacados + ' destacados';
             
             aplicarFiltro();
         } catch (error) {
@@ -245,6 +291,8 @@
                 mensaje = '📭 No hay productos disponibles. Todos los productos están deshabilitados.';
             } else if (filtroActual === 'no_disponibles') {
                 mensaje = '📭 No hay productos deshabilitados. Todos los productos están disponibles.';
+            } else if (filtroActual === 'destacados') {
+                mensaje = '⭐ No hay productos destacados. Marca algunos productos como destacados.';
             } else {
                 mensaje = '📭 No hay productos en el menú. Agrega tu primer producto.';
             }
@@ -260,23 +308,35 @@
         var html = '<div class="table-container">' +
             '<table class="productos-table">' +
                 '<thead>' +
-                    '<tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Estado</th><th>Disponible</th><th>Acciones</th></tr>' +
+                    '<tr><th>Producto</th><th>Descripción</th><th>Precio</th><th>Categoría</th><th>Tiempo</th><th>Estado</th><th>Destacado</th><th>Disponible</th><th>Acciones</th></tr>' +
                 '</thead>' +
                 '<tbody>';
         
         for (var i = 0; i < productosMostrados.length; i++) {
             var p = productosMostrados[i];
             var isAvailable = (p.disponible === true);
+            var isDestacado = (p.destacado === true);
             var rowClass = isAvailable ? '' : 'producto-no-disponible';
             
             html += '<tr id="row-' + p.id + '" class="' + rowClass + '">' +
-                '<td><strong>' + escapeHtml(p.nombre) + '</strong></td>' +
-                '<td>' + escapeHtml(p.descripcion || '-') + '</td>' +
+                '<td>' +
+                    (p.imagen_url ? '<img src="' + escapeHtml(p.imagen_url) + '" style="width: 40px; height: 40px; object-fit: cover; border-radius: 8px; margin-right: 8px; vertical-align: middle;">' : '') +
+                    '<strong>' + escapeHtml(p.nombre) + '</strong>' +
+                '</td>' +
+                '<td>' + escapeHtml((p.descripcion || '-').substring(0, 60)) + (p.descripcion && p.descripcion.length > 60 ? '...' : '') + '</td>' +
                 '<td>$' + (p.precio || 0).toLocaleString() + '</td>' +
+                '<td>' + (p.categoria ? '🏷️ ' + escapeHtml(p.categoria) : '-') + '</td>' +
+                '<td>' + (p.tiempo_preparacion ? '⏱️ ' + p.tiempo_preparacion + ' min' : '-') + '</td>' +
                 '<td>' +
                     '<span class="badge ' + (isAvailable ? 'badge-success' : 'badge-warning') + '">' +
                         (isAvailable ? 'Disponible' : 'No disponible') +
                     '</span>' +
+                '</td>' +
+                '<td>' +
+                    (isDestacado ? 
+                        '<span class="badge badge-star">⭐ Destacado</span>' : 
+                        '<span class="badge badge-muted">Normal</span>'
+                    ) +
                 '</td>' +
                 '<td>' +
                     '<div class="toggle-switch ' + (isAvailable ? 'active' : '') + '" ' +
@@ -285,14 +345,41 @@
                         'onclick="toggleProducto(this, \'' + p.id + '\', ' + !isAvailable + ', event)"></div>' +
                 '</td>' +
                 '<td>' +
-                    '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')">✏️ Editar</button>' +
-                    '<button class="btn btn-sm btn-danger" onclick="eliminarProducto(\'' + p.id + '\')" style="margin-left:8px;">🗑️ Eliminar</button>' +
+                    '<button class="btn btn-sm btn-outline" onclick="editarProducto(\'' + p.id + '\')" title="Editar">✏️</button>' +
+                    '<button class="btn btn-sm btn-outline" onclick="toggleDestacado(\'' + p.id + '\', ' + !isDestacado + ')" title="' + (isDestacado ? 'Quitar destacado' : 'Destacar') + '" style="margin-left:4px;">' + (isDestacado ? '⭐' : '☆') + '</button>' +
+                    '<button class="btn btn-sm btn-danger" onclick="eliminarProducto(\'' + p.id + '\')" title="Eliminar" style="margin-left:4px;">🗑️</button>' +
                 '</td>' +
             '</tr>';
         }
         
-        html += '</tbody></table></div>';
+        html += '</tbody>' +
+            '</table>' +
+            '</div>';
         container.innerHTML = html;
+    }
+
+    async function toggleDestacado(productId, destacado) {
+        try {
+            var response = await fetch('/admin/toggle_featured/' + tenantId + '/' + productId, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ destacado: destacado }),
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                showAlertLocal(destacado ? '⭐ Producto destacado' : '⭐ Producto ya no es destacado', 'success');
+                await cargarProductos();
+            } else if (response.status === 401) {
+                showAlertLocal('❌ Sesión expirada', 'error');
+                setTimeout(function() { window.location.href = '/'; }, 2000);
+            } else {
+                showAlertLocal('Error al cambiar destacado', 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlertLocal('Error de conexión', 'error');
+        }
     }
 
     async function cargarConfig() {
@@ -347,12 +434,26 @@
             document.getElementById('productoDescripcion').value = producto.descripcion || '';
             document.getElementById('productoPrecio').value = producto.precio;
             document.getElementById('productoCategoria').value = producto.categoria || 'general';
+            document.getElementById('productoTiempo').value = producto.tiempo_preparacion || '';
+            document.getElementById('productoImagen').value = producto.imagen_url || '';
             document.getElementById('productoDisponible').checked = (producto.disponible === true);
+            document.getElementById('productoDestacado').checked = (producto.destacado === true);
+            
+            if (producto.imagen_url) {
+                document.getElementById('previewImg').src = producto.imagen_url;
+                document.getElementById('imagenPreview').style.display = 'block';
+            } else {
+                document.getElementById('imagenPreview').style.display = 'none';
+            }
         } else {
             title.textContent = '➕ Agregar Producto';
             document.getElementById('formProducto').reset();
             document.getElementById('productoId').value = '';
             document.getElementById('productoDisponible').checked = true;
+            document.getElementById('productoDestacado').checked = false;
+            document.getElementById('productoTiempo').value = '';
+            document.getElementById('productoImagen').value = '';
+            document.getElementById('imagenPreview').style.display = 'none';
         }
         modal.classList.add('active');
     }
@@ -457,6 +558,17 @@
         return div.innerHTML;
     }
 
+    // Previsualización de imagen
+    document.getElementById('productoImagen').addEventListener('input', function() {
+        var url = this.value;
+        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+            document.getElementById('previewImg').src = url;
+            document.getElementById('imagenPreview').style.display = 'block';
+        } else {
+            document.getElementById('imagenPreview').style.display = 'none';
+        }
+    });
+
     document.getElementById('formProducto').addEventListener('submit', async function(e) {
         e.preventDefault();
         
@@ -465,7 +577,10 @@
             descripcion: document.getElementById('productoDescripcion').value,
             precio: parseInt(document.getElementById('productoPrecio').value),
             categoria: document.getElementById('productoCategoria').value,
-            disponible: document.getElementById('productoDisponible').checked
+            disponible: document.getElementById('productoDisponible').checked,
+            destacado: document.getElementById('productoDestacado').checked,
+            tiempo_preparacion: document.getElementById('productoTiempo').value ? parseInt(document.getElementById('productoTiempo').value) : null,
+            imagen_url: document.getElementById('productoImagen').value || null
         };
         
         var submitBtn = e.target.querySelector('button[type="submit"]');
@@ -515,6 +630,7 @@
     window.editarProducto = editarProducto;
     window.eliminarProducto = eliminarProducto;
     window.toggleProducto = toggleProducto;
+    window.toggleDestacado = toggleDestacado;
     window.guardarConfig = guardarConfig;
     window.cargarProductos = cargarProductos;
     window.aplicarFiltro = aplicarFiltro;
@@ -579,6 +695,20 @@
         border-radius: 20px;
         font-size: 0.75rem;
     }
+    .badge-star {
+        background: #fef3c7;
+        color: #d97706;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+    }
+    .badge-muted {
+        background: #f3f4f6;
+        color: #6b7280;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+    }
     .alert-success {
         background: #d1fae5;
         color: #065f46;
@@ -621,6 +751,75 @@
     }
     .flex-wrap {
         flex-wrap: wrap;
+    }
+    .form-row {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+    .form-row .form-group {
+        margin-bottom: 0;
+    }
+    .modal-content {
+        max-width: 700px;
+        width: 90%;
+    }
+    .btn-sm {
+        padding: 6px 12px;
+        font-size: 0.875rem;
+    }
+    .btn-outline {
+        background: transparent;
+        border: 1px solid #d1d5db;
+        color: #374151;
+    }
+    .btn-outline:hover {
+        background: #f9fafb;
+    }
+    .btn-danger {
+        background: #ef4444;
+        color: white;
+        border: none;
+    }
+    .btn-danger:hover {
+        background: #dc2626;
+    }
+    .text-muted {
+        color: #6b7280;
+        font-size: 0.875rem;
+    }
+    .text-center {
+        text-align: center;
+    }
+    .p-5 {
+        padding: 2rem;
+    }
+    .mt-2 {
+        margin-top: 0.5rem;
+    }
+    .mt-3 {
+        margin-top: 1rem;
+    }
+    .mt-4 {
+        margin-top: 1.5rem;
+    }
+    .mb-4 {
+        margin-bottom: 1.5rem;
+    }
+    .d-flex {
+        display: flex;
+    }
+    .align-center {
+        align-items: center;
+    }
+    .justify-between {
+        justify-content: space-between;
+    }
+    .gap-2 {
+        gap: 0.5rem;
+    }
+    .gap-4 {
+        gap: 1rem;
     }
 </style>
 {% endblock %}

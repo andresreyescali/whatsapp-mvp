@@ -1417,6 +1417,106 @@ def responder_manual():
     
     return jsonify({'error': 'No se pudo enviar el mensaje'}), 500
 
+# ==================== PERSONALIZACIÓN DE PRODUCTOS ====================
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/categorias', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_categorias_personalizacion(tenant_id):
+    """Obtiene las categorías de personalización del tenant"""
+    categorias = tenant_repo.get_categorias_personalizacion(tenant_id)
+    return jsonify(categorias)
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/opciones', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_opciones_personalizacion(tenant_id):
+    """Obtiene las opciones de personalización del tenant"""
+    categoria = request.args.get('categoria')
+    opciones = tenant_repo.get_opciones_personalizacion(tenant_id, categoria)
+    return jsonify(opciones)
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/opciones', methods=['POST'])
+@login_required
+@tenant_owner_required
+def add_opcion_personalizacion(tenant_id):
+    """Agrega una nueva opción de personalización"""
+    data = request.json
+    result = tenant_repo.agregar_opcion_personalizacion(tenant_id, data)
+    return jsonify(result)
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/opciones/<int:opcion_id>', methods=['PUT'])
+@login_required
+@tenant_owner_required
+def update_opcion_personalizacion(tenant_id, opcion_id):
+    """Actualiza una opción de personalización"""
+    data = request.json
+    result = tenant_repo.actualizar_opcion_personalizacion(tenant_id, opcion_id, data)
+    return jsonify({'success': result})
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/opciones/<int:opcion_id>', methods=['DELETE'])
+@login_required
+@tenant_owner_required
+def delete_opcion_personalizacion(tenant_id, opcion_id):
+    """Elimina una opción de personalización"""
+    result = tenant_repo.eliminar_opcion_personalizacion(tenant_id, opcion_id)
+    return jsonify({'success': result})
+
+
+@app.route('/api/tenant/<tenant_id>/productos/<product_id>/personalizacion', methods=['GET', 'PUT'])
+@login_required
+@tenant_owner_required
+def gestionar_personalizacion_producto(tenant_id, product_id):
+    """Gestiona si un producto es personalizable"""
+    schema_name = _get_schema_name(tenant_id)
+    
+    if request.method == 'GET':
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT es_personalizable, tamanios_disponibles, opciones_base
+                        FROM "{schema_name}".productos 
+                        WHERE id = %s
+                    """, (product_id,))
+                    row = cur.fetchone()
+                    if row:
+                        return jsonify({
+                            'es_personalizable': row[0] or False,
+                            'tamanios_disponibles': row[1] if row[1] else [],
+                            'opciones_base': row[2] if row[2] else {}
+                        })
+                    return jsonify({})
+        except Exception as e:
+            logger.error(f"Error obteniendo personalización: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    if request.method == 'PUT':
+        data = request.json
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        UPDATE "{schema_name}".productos 
+                        SET es_personalizable = %s, 
+                            tamanios_disponibles = %s,
+                            opciones_base = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                    """, (data.get('es_personalizable', False), 
+                          json.dumps(data.get('tamanios_disponibles', [])),
+                          json.dumps(data.get('opciones_base', {})),
+                          product_id))
+                    conn.commit()
+                    return jsonify({'success': True})
+        except Exception as e:
+            logger.error(f"Error actualizando personalización: {e}")
+            return jsonify({'error': str(e)}), 500
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])

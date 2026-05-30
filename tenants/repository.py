@@ -14,7 +14,8 @@ class TenantRepository:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, activo, created_at
+                        SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, activo, 
+                               configuracion, created_at
                         FROM public.tenants
                         WHERE phone_id = %s AND activo = true
                     """, (phone_id,))
@@ -29,7 +30,8 @@ class TenantRepository:
                             'token': row[5],
                             'usar_ia': row[6],
                             'activo': row[7],
-                            'created_at': row[8]
+                            'configuracion': row[8] if row[8] else {},
+                            'created_at': row[9]
                         }
                     return None
         except Exception as e:
@@ -42,7 +44,8 @@ class TenantRepository:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, activo, created_at
+                        SELECT id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, activo,
+                               configuracion, created_at
                         FROM public.tenants
                         WHERE id = %s AND activo = true
                     """, (tenant_id,))
@@ -57,7 +60,8 @@ class TenantRepository:
                             'token': row[5],
                             'usar_ia': row[6],
                             'activo': row[7],
-                            'created_at': row[8]
+                            'configuracion': row[8] if row[8] else {},
+                            'created_at': row[9]
                         }
                     return None
         except Exception as e:
@@ -71,6 +75,24 @@ class TenantRepository:
             # Crear schema_name válido (reemplazar guiones por guiones bajos)
             schema_name = f"tenant_{tenant_id.replace('-', '_')}"
             
+            # Configuración inicial por defecto
+            configuracion_inicial = {
+                'productos': {
+                    'campos_personalizados': [],  # Lista de campos extra que el tenant puede agregar
+                    'categorias_disponibles': [],
+                    'unidades_medida': []  # unidades como 'unidad', 'kg', 'litro', etc.
+                },
+                'pedidos': {
+                    'estados_personalizados': [],
+                    'requiere_direccion': True,
+                    'requiere_telefono': True
+                },
+                'apariencia': {
+                    'tema': 'default',
+                    'logo_url': None
+                }
+            }
+            
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -79,7 +101,7 @@ class TenantRepository:
                             usar_ia, configuracion, created_at, activo
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
                         RETURNING id
-                    """, (tenant_id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, '{}', True))
+                    """, (tenant_id, nombre, tipo_negocio, schema_name, phone_id, token, usar_ia, json.dumps(configuracion_inicial), True))
                     result = cur.fetchone()
                     conn.commit()
                     
@@ -196,6 +218,243 @@ class TenantRepository:
         except Exception as e:
             logger.error(f"Error obteniendo tenants: {e}")
             return []
+    
+    # ==================== MÉTODOS PARA CONFIGURACIÓN DEL TENANT ====================
+    
+    def get_configuracion(self, tenant_id: str) -> dict:
+        """Obtiene la configuración completa del tenant"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT configuracion 
+                        FROM public.tenants 
+                        WHERE id = %s
+                    """, (tenant_id,))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        if isinstance(row[0], str):
+                            return json.loads(row[0])
+                        return row[0]
+                    return {}
+        except Exception as e:
+            logger.error(f"Error obteniendo configuración de tenant {tenant_id}: {e}")
+            return {}
+    
+    def update_configuracion(self, tenant_id: str, configuracion: dict) -> bool:
+        """Actualiza la configuración completa del tenant"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE public.tenants 
+                        SET configuracion = %s
+                        WHERE id = %s
+                    """, (json.dumps(configuracion), tenant_id))
+                    conn.commit()
+            
+            # Limpiar caché
+            db_manager.clear_tenant_cache(tenant_id)
+            
+            logger.info(f"Configuración actualizada para tenant {tenant_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error actualizando configuración de tenant {tenant_id}: {e}")
+            return False
+    
+    def agregar_campo_personalizado(self, tenant_id: str, campo: dict) -> dict:
+        """
+        Agrega un campo personalizado para los productos del tenant
+        campo = {
+            'nombre': 'talla',
+            'tipo': 'text',  # text, number, select, boolean, date
+            'requerido': False,
+            'opciones': ['S', 'M', 'L', 'XL']  # solo para tipo 'select'
+        }
+        """
+        try:
+            config = self.get_configuracion(tenant_id)
+            
+            if 'productos' not in config:
+                config['productos'] = {}
+            if 'campos_personalizados' not in config['productos']:
+                config['productos']['campos_personalizados'] = []
+            
+            # Verificar si ya existe un campo con el mismo nombre
+            for existing in config['productos']['campos_personalizados']:
+                if existing.get('nombre') == campo.get('nombre'):
+                    # Actualizar campo existente
+                    existing.update(campo)
+                    self.update_configuracion(tenant_id, config)
+                    logger.info(f"Campo personalizado actualizado: {campo.get('nombre')}")
+                    return {'success': True, 'message': 'Campo actualizado', 'campo': existing}
+            
+            # Agregar nuevo campo
+            config['productos']['campos_personalizados'].append(campo)
+            self.update_configuracion(tenant_id, config)
+            logger.info(f"Campo personalizado agregado: {campo.get('nombre')}")
+            return {'success': True, 'message': 'Campo agregado', 'campo': campo}
+        except Exception as e:
+            logger.error(f"Error agregando campo personalizado: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def eliminar_campo_personalizado(self, tenant_id: str, nombre_campo: str) -> dict:
+        """Elimina un campo personalizado de los productos del tenant"""
+        try:
+            config = self.get_configuracion(tenant_id)
+            
+            if 'productos' not in config or 'campos_personalizados' not in config['productos']:
+                return {'success': False, 'message': 'No hay campos personalizados configurados'}
+            
+            original_len = len(config['productos']['campos_personalizados'])
+            config['productos']['campos_personalizados'] = [
+                c for c in config['productos']['campos_personalizados'] 
+                if c.get('nombre') != nombre_campo
+            ]
+            
+            if len(config['productos']['campos_personalizados']) < original_len:
+                self.update_configuracion(tenant_id, config)
+                logger.info(f"Campo personalizado eliminado: {nombre_campo}")
+                return {'success': True, 'message': 'Campo eliminado'}
+            
+            return {'success': False, 'message': 'Campo no encontrado'}
+        except Exception as e:
+            logger.error(f"Error eliminando campo personalizado: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def obtener_campos_personalizados(self, tenant_id: str) -> list:
+        """Obtiene la lista de campos personalizados configurados para el tenant"""
+        config = self.get_configuracion(tenant_id)
+        return config.get('productos', {}).get('campos_personalizados', [])
+    
+    def obtener_categorias(self, tenant_id: str) -> list:
+        """Obtiene las categorías disponibles para el tenant"""
+        config = self.get_configuracion(tenant_id)
+        categorias = config.get('productos', {}).get('categorias_disponibles', [])
+        
+        # Si no hay categorías configuradas, devolver categorías por defecto según tipo de negocio
+        if not categorias:
+            tenant = self.find_by_id(tenant_id)
+            if tenant:
+                tipo = tenant.get('tipo_negocio')
+                categorias_por_defecto = {
+                    'restaurante': ['pizzas', 'hamburguesas', 'bebidas', 'postres', 'entradas'],
+                    'panaderia': ['panes', 'pastelería', 'galletas', 'tortas'],
+                    'pasteleria': ['tortas', 'postres', 'galletas', 'cupcakes'],
+                    'inmobiliaria': ['apartamentos', 'casas', 'comercial', 'terrenos'],
+                    'venta_autos': ['sedanes', 'suvs', 'camionetas', 'deportivos', 'hatchbacks'],
+                    'venta_motos': ['scooters', 'naked', 'enduro', 'deportivas', 'electricas'],
+                    'hotel': ['habitaciones', 'servicios', 'paquetes'],
+                    'agencia_viajes': ['paquetes', 'servicios', 'tours', 'vuelos']
+                }
+                return categorias_por_defecto.get(tipo, ['general'])
+        return categorias
+    
+    def actualizar_categorias(self, tenant_id: str, categorias: list) -> dict:
+        """Actualiza la lista de categorías disponibles para el tenant"""
+        try:
+            config = self.get_configuracion(tenant_id)
+            
+            if 'productos' not in config:
+                config['productos'] = {}
+            
+            config['productos']['categorias_disponibles'] = categorias
+            self.update_configuracion(tenant_id, config)
+            
+            logger.info(f"Categorías actualizadas para tenant {tenant_id}: {categorias}")
+            return {'success': True, 'message': 'Categorías actualizadas'}
+        except Exception as e:
+            logger.error(f"Error actualizando categorías: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def actualizar_unidades_medida(self, tenant_id: str, unidades: list) -> dict:
+        """Actualiza la lista de unidades de medida disponibles"""
+        try:
+            config = self.get_configuracion(tenant_id)
+            
+            if 'productos' not in config:
+                config['productos'] = {}
+            
+            config['productos']['unidades_medida'] = unidades
+            self.update_configuracion(tenant_id, config)
+            
+            logger.info(f"Unidades de medida actualizadas para tenant {tenant_id}: {unidades}")
+            return {'success': True, 'message': 'Unidades de medida actualizadas'}
+        except Exception as e:
+            logger.error(f"Error actualizando unidades de medida: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def obtener_configuracion_visual(self, tenant_id: str) -> dict:
+        """Obtiene la configuración visual del tenant (tema, logo, etc.)"""
+        config = self.get_configuracion(tenant_id)
+        return config.get('apariencia', {
+            'tema': 'default',
+            'logo_url': None,
+            'colores': {}
+        })
+    
+    def actualizar_configuracion_visual(self, tenant_id: str, apariencia: dict) -> dict:
+        """Actualiza la configuración visual del tenant"""
+        try:
+            config = self.get_configuracion(tenant_id)
+            config['apariencia'] = apariencia
+            self.update_configuracion(tenant_id, config)
+            
+            logger.info(f"Configuración visual actualizada para tenant {tenant_id}")
+            return {'success': True, 'message': 'Configuración visual actualizada'}
+        except Exception as e:
+            logger.error(f"Error actualizando configuración visual: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    # ==================== MÉTODOS PARA MIGRACIÓN ====================
+    
+    def migrar_tenant_existente(self, tenant_id: str) -> dict:
+        """Migra un tenant existente para agregar la columna configuracion si no existe"""
+        try:
+            # Verificar si la columna configuracion existe
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'tenants' AND column_name = 'configuracion'
+                    """)
+                    if not cur.fetchone():
+                        # Agregar columna configuracion si no existe
+                        cur.execute("""
+                            ALTER TABLE public.tenants 
+                            ADD COLUMN configuracion JSONB DEFAULT '{}'::jsonb
+                        """)
+                        conn.commit()
+                        logger.info(f"Columna configuracion agregada a la tabla tenants")
+            
+            # Verificar si el tenant ya tiene configuración
+            config = self.get_configuracion(tenant_id)
+            if not config:
+                # Crear configuración por defecto
+                configuracion_por_defecto = {
+                    'productos': {
+                        'campos_personalizados': [],
+                        'categorias_disponibles': [],
+                        'unidades_medida': []
+                    },
+                    'pedidos': {
+                        'estados_personalizados': [],
+                        'requiere_direccion': True,
+                        'requiere_telefono': True
+                    },
+                    'apariencia': {
+                        'tema': 'default',
+                        'logo_url': None
+                    }
+                }
+                self.update_configuracion(tenant_id, configuracion_por_defecto)
+                logger.info(f"Configuración por defecto creada para tenant {tenant_id}")
+            
+            return {'success': True, 'message': 'Tenant migrado exitosamente'}
+        except Exception as e:
+            logger.error(f"Error migrando tenant {tenant_id}: {e}")
+            return {'success': False, 'error': str(e)}
 
 
 # ==================== INSTANCIA GLOBAL ====================
