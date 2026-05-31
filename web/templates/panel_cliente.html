@@ -108,6 +108,9 @@
         justify-content: center;
         align-items: center;
     }
+    .modal.active {
+        display: flex;
+    }
     .modal-content {
         background: white;
         border-radius: 10px;
@@ -116,6 +119,29 @@
         width: 90%;
         max-height: 80vh;
         overflow-y: auto;
+    }
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    .modal-footer {
+        margin-top: 20px;
+        padding-top: 15px;
+        border-top: 1px solid #e5e7eb;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+    }
+    .modal-close {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: #999;
     }
     .close {
         float: right;
@@ -153,7 +179,6 @@
     .mensaje-cliente { background: #e3f2fd; border-left: 3px solid #2196F3; padding: 10px; margin: 10px 0; border-radius: 8px; }
     .mensaje-bot { background: #e8f5e9; border-left: 3px solid #4CAF50; padding: 10px; margin: 10px 0; border-radius: 8px; }
     
-    /* Animaciones para notificaciones */
     @keyframes slideIn {
         from { transform: translateX(100%); opacity: 0; }
         to { transform: translateX(0); opacity: 1; }
@@ -230,7 +255,6 @@
         
         <button class="btn-sm" style="background:#25D366; color:white; padding:8px 16px;" onclick="cargarPedidos()">🔄 Actualizar</button>
         
-        <!-- Botones de control -->
         <div style="display: flex; gap: 8px; margin-left: auto;">
             <button id="btnAutoActualizar" class="btn-sm btn-success" onclick="toggleAutoActualizar()">
                 🔄 Auto ON
@@ -281,8 +305,10 @@
 <!-- Modal de detalle de pedido -->
 <div id="detalleModal" class="modal">
     <div class="modal-content">
-        <span class="close" onclick="cerrarModal()">&times;</span>
-        <h2 id="detalleTitulo">Detalle del Pedido</h2>
+        <div class="modal-header">
+            <h2 id="detalleTitulo">Detalle del Pedido</h2>
+            <button class="modal-close" onclick="cerrarModal()">&times;</button>
+        </div>
         <div id="detalleContent"></div>
         <div class="pedido-actions" id="detalleActions" style="margin-top: 15px;"></div>
     </div>
@@ -321,8 +347,6 @@
     let ultimosPedidos = [];
     let intervalActualizacion = null;
     let clienteActivo = null;
-
-    // ==================== FUNCIONES EXISTENTES (MODIFICADAS) ====================
 
     function toggleAutoActualizar() {
         autoActualizarActivo = !autoActualizarActivo;
@@ -410,7 +434,6 @@
         container.innerHTML = '<div class="loading">Cargando pedidos...</div>';
         
         try {
-            // Usar endpoint ligero para la actualización automática
             const esAutoActualizacion = !document.getElementById('btnAutoActualizar').innerText.includes('OFF');
             const url = esAutoActualizacion 
                 ? `${API_BASE}/api/tenant/${tenantId}/pedidos/light?estado=${estado}`
@@ -477,62 +500,6 @@
                     <div class="pedido-actions">
                         <button class="btn-sm btn-detalle" onclick="verDetalle('${pedido.id}')">🔍 Ver detalle</button>
                         <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${pedido.cliente_numero}')">💬 WhatsApp</button>
-                    </div>
-                </div>
-            `;
-        }
-        container.innerHTML = html;
-    }
-        
-    function renderPedidos(pedidos) {
-        const container = document.getElementById('pedidosContainer');
-        
-        if (!pedidos || pedidos.length === 0) {
-            container.innerHTML = '<div class="empty">📭 No hay pedidos con los filtros seleccionados</div>';
-            return;
-        }
-        
-        let html = '';
-        for (const pedido of pedidos) {
-            let estadoClass = '';
-            let estadoTexto = pedido.estado || 'nuevo';
-            if (estadoTexto === 'nuevo') estadoClass = 'estado-nuevo';
-            else if (estadoTexto === 'pagado') estadoClass = 'estado-pagado';
-            else if (estadoTexto === 'enviado') estadoClass = 'estado-enviado';
-            else estadoClass = 'estado-cancelado';
-            
-            let items = [];
-            if (pedido.items) {
-                if (Array.isArray(pedido.items)) {
-                    items = pedido.items;
-                } else if (typeof pedido.items === 'string') {
-                    try {
-                        items = JSON.parse(pedido.items);
-                    } catch(e) { items = []; }
-                }
-            }
-            
-            const nombreCliente = pedido.cliente_nombre || pedido.cliente_numero || 'Cliente';
-            const numeroPedido = pedido.numero_pedido || pedido.id?.substring(0, 8) || 'N/A';
-            
-            html += `
-                <div class="pedido-card">
-                    <div class="pedido-header">
-                        <span><strong>📱 ${escapeHtml(nombreCliente)}</strong></span>
-                        <span><strong>📄 ${escapeHtml(numeroPedido)}</strong></span>
-                        <span class="estado-badge ${estadoClass}">${estadoTexto.toUpperCase()}</span>
-                    </div>
-                    <div class="pedido-items">
-                        <strong>🛒 Productos:</strong>
-                        <ul>
-                            ${items.map(i => `<li>${i.cantidad || 1}x ${escapeHtml(i.nombre)} - $${((i.precio || 0) * (i.cantidad || 1)).toLocaleString()}</li>`).join('')}
-                        </ul>
-                    </div>
-                    <p><strong>💰 Total:</strong> $${(pedido.total || 0).toLocaleString()}</p>
-                    <p><strong>🕒 Fecha:</strong> ${new Date(pedido.created_at).toLocaleString()}</p>
-                    <div class="pedido-actions">
-                        <button class="btn-sm btn-detalle" onclick="verDetalle('${pedido.id}')">🔍 Ver detalle</button>
-                        <button class="btn-sm btn-chat" onclick="abrirWhatsApp('${pedido.cliente_numero}')">💬 WhatsApp</button>
                         <button class="btn-sm btn-historial" onclick="verHistorialCliente('${pedido.cliente_numero}', '${escapeHtml(nombreCliente)}')">📜 Historial</button>
                     </div>
                 </div>
@@ -540,7 +507,7 @@
         }
         container.innerHTML = html;
     }
-    
+        
     function actualizarStats(pedidos) {
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
@@ -566,7 +533,7 @@
         if (!confirm(`¿Marcar este pedido como ${nuevoEstado}?`)) return;
         
         try {
-            const response = await fetch(`${API_BASE}/api/tenant/${tenantId}/pedido/${pedidoId}/estado`, {
+            const response = await fetch(`${API_BASE}/api/pedido/${pedidoId}/estado`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ estado: nuevoEstado }),
@@ -638,7 +605,7 @@
             document.getElementById('detalleTitulo').innerHTML = `📋 Pedido ${pedido.numero_pedido || pedido.id.substring(0, 8)}`;
             document.getElementById('detalleContent').innerHTML = html;
             document.getElementById('detalleActions').innerHTML = actionsHtml;
-            document.getElementById('detalleModal').style.display = 'flex';
+            document.getElementById('detalleModal').classList.add('active');
         } catch (error) {
             console.error('Error:', error);
             showAlert('Error al cargar detalle', 'error');
@@ -715,7 +682,7 @@
             document.getElementById('detalleTitulo').innerHTML = 'Historial de Conversación';
             document.getElementById('detalleContent').innerHTML = html;
             document.getElementById('detalleActions').innerHTML = '<button class="btn-sm btn-chat" onclick="abrirWhatsApp(\'' + clienteNumero + '\')">💬 WhatsApp</button><button class="btn-sm btn-responder" onclick="abrirResponderModal(\'' + clienteNumero + '\', \'' + escapeHtml(clienteNombre) + '\')">✏️ Responder</button><button class="btn-sm" onclick="cerrarModal()">Cerrar</button>';
-            document.getElementById('detalleModal').style.display = 'flex';
+            document.getElementById('detalleModal').classList.add('active');
         } catch (error) {
             console.error('Error:', error);
             showAlert('Error al cargar el historial', 'error');
@@ -731,7 +698,7 @@
     }
 
     function cerrarModal() {
-        document.getElementById('detalleModal').style.display = 'none';
+        document.getElementById('detalleModal').classList.remove('active');
     }
 
     async function cargarConfiguracion() {
@@ -740,6 +707,7 @@
                 credentials: 'include'
             });
             const config = await response.json();
+            document.getElementById('configNombre').value = config.nombre || '{{ tenant.nombre }}';
             document.getElementById('configHorario').value = config.horario || '';
             document.getElementById('configUbicacion').value = config.ubicacion || '';
             document.getElementById('configPoliticas').value = config.politicas || '';
@@ -751,6 +719,7 @@
     document.getElementById('configForm').onsubmit = async (e) => {
         e.preventDefault();
         const data = {
+            nombre: document.getElementById('configNombre').value,
             horario: document.getElementById('configHorario').value,
             ubicacion: document.getElementById('configUbicacion').value,
             politicas: document.getElementById('configPoliticas').value
@@ -789,8 +758,6 @@
         div.textContent = text;
         return div.innerHTML;
     }
-
-    // ==================== FUNCIONES DE RESPUESTA MANUAL ====================
 
     function abrirResponderModal(clienteNumero, clienteNombre) {
         clienteActivo = clienteNumero;
@@ -850,8 +817,6 @@
         }
     }
 
-    // ==================== ACTUALIZACIÓN AUTOMÁTICA ====================
-
     function iniciarActualizacionAutomatica() {
         if (intervalActualizacion) clearInterval(intervalActualizacion);
         
@@ -872,12 +837,9 @@
         }
     }
 
-    async function solicitarPermisoNotificaciones() {
+    function solicitarPermisoNotificaciones() {
         if ('Notification' in window) {
-            const permiso = await Notification.requestPermission();
-            if (permiso === 'granted') {
-                console.log("🔔 Notificaciones de escritorio activadas");
-            }
+            Notification.requestPermission();
         }
     }
 
@@ -911,7 +873,6 @@
     }
 
     function mostrarAlertaVisual(titulo, mensaje) {
-        const alertContainer = document.getElementById('alertContainer');
         const alertDiv = document.createElement('div');
         alertDiv.className = 'alert alert-info alert-notificacion';
         alertDiv.style.cssText = 'position:fixed;top:20px;right:20px;z-index:1000;min-width:250px;animation:slideIn 0.3s ease-out;';
@@ -970,18 +931,14 @@
         }
     }
 
-    // ==================== INICIALIZACIÓN ====================
-    
+    // Inicialización
     cargarPedidos();
     iniciarActualizacionAutomatica();
     solicitarPermisoNotificaciones();
     
     window.onclick = function(event) {
-        if (event.target == document.getElementById('detalleModal')) {
-            cerrarModal();
-        }
-        if (event.target == document.getElementById('responderModal')) {
-            cerrarResponderModal();
+        if (event.target.classList.contains('modal')) {
+            event.target.classList.remove('active');
         }
     }
     

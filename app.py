@@ -1518,6 +1518,166 @@ def gestionar_personalizacion_producto(tenant_id, product_id):
             logger.error(f"Error actualizando personalización: {e}")
             return jsonify({'error': str(e)}), 500
 
+# ======== Cambio SubProductos y personalizaciones ========
+
+# ==================== PRODUCTOS CON ADICIONALES Y PERSONALIZACIONES ====================
+
+@app.route('/api/tenant/<tenant_id>/productos/base', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_productos_base(tenant_id):
+    """Obtiene los productos base (no adicionales)"""
+    try:
+        productos = schema_manager.get_productos_base(tenant_id)
+        return jsonify(productos)
+    except Exception as e:
+        logger.error(f'Error obteniendo productos base: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/productos/<producto_id>/adicionales', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_adicionales_producto(tenant_id, producto_id):
+    """Obtiene los adicionales disponibles para un producto base"""
+    try:
+        adicionales = schema_manager.get_adicionales_producto(tenant_id, producto_id)
+        return jsonify(adicionales)
+    except Exception as e:
+        logger.error(f'Error obteniendo adicionales: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/productos/<producto_id>/personalizaciones', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_personalizaciones_producto(tenant_id, producto_id):
+    """Obtiene las personalizaciones para un producto base"""
+    try:
+        personalizaciones = schema_manager.get_personalizaciones_producto(tenant_id, producto_id)
+        return jsonify(personalizaciones)
+    except Exception as e:
+        logger.error(f'Error obteniendo personalizaciones: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/producto/calcular', methods=['POST'])
+@login_required
+@tenant_owner_required
+def calcular_precio_producto(tenant_id):
+    """Calcula el precio de un producto base con sus adicionales"""
+    try:
+        data = request.json
+        producto_id = data.get('producto_id')
+        adicionales_ids = data.get('adicionales_ids', [])
+        cantidades = data.get('cantidades', {})
+        
+        total = schema_manager.calcular_precio_con_adicionales(
+            tenant_id, producto_id, adicionales_ids, cantidades
+        )
+        
+        return jsonify({'total': total})
+    except Exception as e:
+        logger.error(f'Error calculando precio: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/adicionales', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_todos_adicionales(tenant_id):
+    """Obtiene todos los adicionales disponibles (para administración)"""
+    try:
+        schema_name = schema_manager._get_schema_name(tenant_id)
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT id, nombre, descripcion, precio, disponible
+                    FROM "{schema_name}".productos 
+                    WHERE es_base = false
+                    ORDER BY nombre
+                """)
+                rows = cur.fetchall()
+                adicionales = [{
+                    'id': str(row[0]),
+                    'nombre': row[1],
+                    'descripcion': row[2] or '',
+                    'precio': row[3],
+                    'disponible': row[4]
+                } for row in rows]
+                return jsonify(adicionales)
+    except Exception as e:
+        logger.error(f'Error obteniendo adicionales: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/add_adicional/<tenant_id>', methods=['POST', 'OPTIONS'])
+@login_required
+@tenant_owner_required
+def add_adicional(tenant_id):
+    """Agrega un nuevo adicional (producto con es_base=false)"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        data = request.get_json()
+        nombre = data.get('nombre')
+        if not nombre:
+            return jsonify({'error': 'El nombre es requerido'}), 400
+        
+        schema_name = schema_manager._get_schema_name(tenant_id)
+        adicional_id = str(uuid.uuid4())
+        
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    INSERT INTO "{schema_name}".productos 
+                    (id, nombre, descripcion, precio, categoria, es_base, disponible)
+                    VALUES (%s, %s, %s, %s, %s, false, true)
+                """, (adicional_id, nombre, data.get('descripcion', ''), 
+                      data.get('precio', 0), data.get('categoria', 'adicionales')))
+            conn.commit()
+        
+        return jsonify({'success': True, 'message': 'Adicional agregado', 'id': adicional_id}), 201
+    except Exception as e:
+        logger.error(f'Error agregando adicional: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/relacionar_adicional/<tenant_id>', methods=['POST', 'OPTIONS'])
+@login_required
+@tenant_owner_required
+def relacionar_adicional(tenant_id):
+    """Relaciona un adicional con un producto base"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        data = request.json
+        producto_id = data.get('producto_id')
+        adicional_id = data.get('adicional_id')
+        cantidad_maxima = data.get('cantidad_maxima', 1)
+        
+        if not producto_id or not adicional_id:
+            return jsonify({'error': 'Faltan producto_id o adicional_id'}), 400
+        
+        schema_name = schema_manager._get_schema_name(tenant_id)
+        
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    INSERT INTO "{schema_name}".producto_adicionales 
+                    (producto_id, adicional_id, cantidad_maxima)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (producto_id, adicional_id) DO UPDATE
+                    SET cantidad_maxima = EXCLUDED.cantidad_maxima
+                """, (producto_id, adicional_id, cantidad_maxima))
+            conn.commit()
+        
+        return jsonify({'success': True, 'message': 'Adicional relacionado'})
+    except Exception as e:
+        logger.error(f'Error relacionando adicional: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
