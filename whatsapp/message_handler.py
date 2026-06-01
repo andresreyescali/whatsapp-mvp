@@ -17,12 +17,26 @@ class MessageHandler:
     def __init__(self):
         """Inicializa el manejador de mensajes"""
         self._datos_cliente = {}
+        self._estados_conversacion = {}  # {numero: estado}
+        self._producto_temporal = {}     # {numero: producto_info}
     
     def _get_schema_name(self, tenant_id: str) -> str:
         tenant = tenant_repo.find_by_id(tenant_id)
         if tenant and tenant.get('schema_name'):
             return tenant['schema_name']
         return f"tenant_{tenant_id.replace('-', '_')}"
+    
+    def _get_estado(self, numero: str) -> str:
+        """Obtiene el estado actual de una conversación"""
+        return self._estados_conversacion.get(numero)
+    
+    def _set_estado(self, numero: str, estado: str):
+        """Establece el estado de una conversación"""
+        if estado is None:
+            self._estados_conversacion.pop(numero, None)
+        else:
+            self._estados_conversacion[numero] = estado
+        logger.info(f'📌 [ESTADO] {numero} -> {estado}')
     
     def process(self, phone_id: str, numero: str, texto: str):
         logger.info(f'🟢 [PROCESS] Iniciando - Cliente: {numero}, Mensaje: {texto[:100]}')
@@ -36,7 +50,15 @@ class MessageHandler:
         menu = self._obtener_menu(tenant['id'])
         contexto = self._obtener_contexto_tenant(tenant['id'])
         
-        respuesta = self._procesar_con_ia(texto, tenant, menu, numero, contexto)
+        # Verificar estado actual de la conversación
+        estado_actual = self._get_estado(numero)
+        
+        if estado_actual == 'esperando_adicional':
+            respuesta = self._procesar_adicional(texto, tenant, numero)
+        elif estado_actual == 'esperando_personalizacion':
+            respuesta = self._procesar_personalizacion(texto, tenant, numero)
+        else:
+            respuesta = self._procesar_con_ia(texto, tenant, menu, numero, contexto)
         
         if respuesta:
             whatsapp_client.send_message(tenant, numero, respuesta)
@@ -51,19 +73,36 @@ class MessageHandler:
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        SELECT id, nombre, descripcion, precio, categoria, disponible 
+                        SELECT id, nombre, descripcion, precio, categoria, disponible, 
+                               imagen_url, tiempo_preparacion, destacado, metadata
                         FROM "{schema_name}".productos 
+                        WHERE disponible = true
                         ORDER BY categoria, nombre
                     """)
                     rows = cur.fetchall()
-                    return [{
-                        'id': str(row[0]),
-                        'nombre': row[1],
-                        'descripcion': row[2] or '',
-                        'precio': row[3],
-                        'categoria': row[4] or 'general',
-                        'disponible': row[5]
-                    } for row in rows]
+                    productos = []
+                    for row in rows:
+                        metadata = row[9] if len(row) > 9 and row[9] else {}
+                        if isinstance(metadata, str):
+                            try:
+                                metadata = json.loads(metadata)
+                            except:
+                                metadata = {}
+                        
+                        productos.append({
+                            'id': str(row[0]),
+                            'nombre': row[1],
+                            'descripcion': row[2] or '',
+                            'precio': row[3],
+                            'categoria': row[4] or 'general',
+                            'disponible': row[5],
+                            'imagen_url': row[6],
+                            'tiempo_preparacion': row[7],
+                            'destacado': row[8] if row[8] else False,
+                            'personalizaciones': metadata.get('personalizaciones', []),
+                            'adicionales': metadata.get('adicionales', [])
+                        })
+                    return productos
         except Exception as e:
             logger.error(f'Error obteniendo menú: {e}')
             return []
@@ -104,11 +143,346 @@ class MessageHandler:
         except Exception as e:
             logger.error(f'Error guardando conversación: {e}')
     
+    # ==================== MANEJO DE ADICIONALES Y PERSONALIZACIONES ====================
+    
+    def _procesar_seleccion_producto(self, tenant_id: str, numero: str, producto_id: str):
+        """Maneja la selección de un producto y pregunta por sus adicionales"""
+        try:
+            producto = self._obtener_producto_por_id(tenant_id, producto_id)
+            if not producto:
+                return "❌ Producto no encontrado"
+            
+            # Guardar producto temporalmente
+            self._producto_temporal[numero] = {
+                'id': producto_id,
+                'nombre': producto['nombre'],
+                'precio_base': producto['precio'],
+                'adicionales': producto.get('adicionales', []),
+                'personalizaciones': producto.get('personalizaciones', []),
+                'adicionales_seleccionados': [],
+                'personalizaciones_seleccionadas': {}
+            }
+            
+            adicionales = producto.get('adicionales', [])
+            
+            if adicionales and len(adicionales) > 0:
+                # Preguntar por los adicionales
+                mensaje = f"✅ *{producto['nombre']}* - ${producto['precio']:,}\n\n"
+                mensaje += "🎨 *Opciones adicionales disponibles:*\n\n"
+                
+                for i, adic in enumerate(adicionales, 1):
+                    precio_extra = adic.get('precio_extra', 0)
+                    multiple = adic.get('multiple', False)
+                    multi_texto = " (puedes elegir varios)" if multiple else ""
+                    
+                    if precio_extra > 0:
+                        mensaje += f"{i}. {adic['nombre']} *(+${precio_extra:,})*{multi_texto}\n"
+                    else:
+                        mensaje += f"{i}. {adic['nombre']} *(sin costo extra)*{multi_texto}\n"
+                
+                mensaje += "\n📝 *Responde con el número de la opción que deseas*\n"
+                mensaje += "Ejemplo: *1* para seleccionar la primera opción\n"
+                mensaje += "Puedes elegir múltiples opciones si están permitidas\n"
+                mensaje += "Responde *ninguno* si no quieres adicionales\n"
+                mensaje += "O responde *siguiente* para continuar sin más adicionales"
+                
+                self._set_estado(numero, 'esperando_adicional')
+                return mensaje
+            else:
+                # No tiene adicionales, continuar con personalizaciones
+                return self._procesar_personalizaciones_producto(tenant_id, numero)
+                
+        except Exception as e:
+            logger.error(f'Error en selección de producto: {e}')
+            return "❌ Error al procesar el producto"
+    
+    def _procesar_adicional(self, texto: str, tenant: dict, numero: str) -> str:
+        """Procesa la selección de adicionales"""
+        try:
+            producto_temp = self._producto_temporal.get(numero)
+            if not producto_temp:
+                self._set_estado(numero, None)
+                return "❌ Por favor, selecciona un producto primero"
+            
+            adicionales = producto_temp.get('adicionales', [])
+            respuesta = texto.lower().strip()
+            
+            # Verificar si quiere continuar sin más adicionales
+            if respuesta in ['ninguno', 'ninguna', 'no', '0', 'siguiente', 'continuar']:
+                # Pasar a personalizaciones
+                return self._procesar_personalizaciones_producto(tenant['id'], numero)
+            
+            # Verificar si es un número o lista de números (ej: "1,2,3" o "1 2 3")
+            if ',' in respuesta or ' ' in respuesta:
+                # Múltiples selecciones
+                partes = re.split(r'[, ]+', respuesta)
+                indices = []
+                for p in partes:
+                    try:
+                        idx = int(p) - 1
+                        if 0 <= idx < len(adicionales):
+                            indices.append(idx)
+                    except ValueError:
+                        pass
+                
+                if indices:
+                    for idx in indices:
+                        adic = adicionales[idx]
+                        producto_temp['adicionales_seleccionados'].append(adic)
+                    return self._preguntar_si_mas_adicionales(tenant['id'], numero, producto_temp)
+                else:
+                    return self._opcion_invalida_adicional(adicionales)
+            
+            # Selección única
+            try:
+                opcion_idx = int(respuesta) - 1
+                if 0 <= opcion_idx < len(adicionales):
+                    adic = adicionales[opcion_idx]
+                    producto_temp['adicionales_seleccionados'].append(adic)
+                    
+                    # Verificar si el adicional permite múltiples
+                    if adic.get('multiple', False):
+                        return self._preguntar_si_mas_adicionales(tenant['id'], numero, producto_temp)
+                    else:
+                        return self._procesar_personalizaciones_producto(tenant['id'], numero)
+                else:
+                    return self._opcion_invalida_adicional(adicionales)
+            except ValueError:
+                return self._opcion_invalida_adicional(adicionales)
+                
+        except Exception as e:
+            logger.error(f'Error procesando adicional: {e}')
+            self._set_estado(numero, None)
+            return "❌ Error al procesar tu selección. Por favor intenta de nuevo."
+    
+    def _preguntar_si_mas_adicionales(self, tenant_id: str, numero: str, producto_temp: dict) -> str:
+        """Pregunta si quiere agregar más adicionales"""
+        adicionales = producto_temp.get('adicionales', [])
+        seleccionados = producto_temp.get('adicionales_seleccionados', [])
+        
+        # Mostrar seleccionados hasta ahora
+        if seleccionados:
+            mensaje = "📋 *Adicionales seleccionados hasta ahora:*\n"
+            for s in seleccionados:
+                precio = s.get('precio_extra', 0)
+                mensaje += f"  • {s['nombre']}" + (f" (+${precio:,})" if precio > 0 else "") + "\n"
+            mensaje += "\n"
+        
+        mensaje += "¿Deseas agregar *más adicionales*?\n\n"
+        
+        for i, adic in enumerate(adicionales, 1):
+            precio_extra = adic.get('precio_extra', 0)
+            ya_seleccionado = any(s.get('nombre') == adic['nombre'] for s in seleccionados)
+            if ya_seleccionado:
+                mensaje += f"{i}. {adic['nombre']} *[YA SELECCIONADO]*\n"
+            else:
+                if precio_extra > 0:
+                    mensaje += f"{i}. {adic['nombre']} *(+${precio_extra:,})*\n"
+                else:
+                    mensaje += f"{i}. {adic['nombre']} *(sin costo extra)*\n"
+        
+        mensaje += "\n📝 *Responde con el número* del adicional que quieres agregar\n"
+        mensaje += "Responde *ninguno* si no quieres más\n"
+        mensaje += "Responde *siguiente* para continuar"
+        
+        return mensaje
+    
+    def _opcion_invalida_adicional(self, adicionales: list) -> str:
+        """Mensaje de opción inválida para adicionales"""
+        mensaje = "❌ *Opción inválida*\n\n"
+        mensaje += "Por favor, elige un número del 1 al " + str(len(adicionales)) + "\n"
+        mensaje += "O responde *ninguno* si no quieres adicionales"
+        return mensaje
+    
+    def _procesar_personalizaciones_producto(self, tenant_id: str, numero: str) -> str:
+        """Procesa las personalizaciones del producto"""
+        producto_temp = self._producto_temporal.get(numero)
+        if not producto_temp:
+            self._set_estado(numero, None)
+            return "❌ Por favor, selecciona un producto primero"
+        
+        personalizaciones = producto_temp.get('personalizaciones', [])
+        
+        if personalizaciones and len(personalizaciones) > 0:
+            # Filtrar personalizaciones no respondidas
+            pendientes = []
+            for p in personalizaciones:
+                nombre = p.get('nombre')
+                if nombre not in producto_temp.get('personalizaciones_seleccionadas', {}):
+                    pendientes.append(p)
+            
+            if pendientes:
+                siguiente = pendientes[0]
+                mensaje = f"📝 *Personalización: {siguiente['nombre']}*\n\n"
+                
+                if siguiente.get('tipo') == 'select' and siguiente.get('opciones'):
+                    opciones = siguiente.get('opciones', [])
+                    mensaje += "Opciones disponibles:\n"
+                    for i, opt in enumerate(opciones, 1):
+                        mensaje += f"{i}. {opt}\n"
+                    mensaje += f"\n📝 Responde con el número de tu elección"
+                else:
+                    mensaje += "Por favor, escribe tu respuesta:"
+                    if siguiente.get('requerido'):
+                        mensaje += " *(requerido)*"
+                
+                self._set_estado(numero, 'esperando_personalizacion')
+                return mensaje
+        
+        # No hay más personalizaciones, agregar al carrito
+        return self._agregar_al_carrito_desde_temporal(tenant_id, numero)
+    
+    def _procesar_personalizacion(self, texto: str, tenant: dict, numero: str) -> str:
+        """Procesa una respuesta de personalización"""
+        try:
+            producto_temp = self._producto_temporal.get(numero)
+            if not producto_temp:
+                self._set_estado(numero, None)
+                return "❌ Por favor, selecciona un producto primero"
+            
+            personalizaciones = producto_temp.get('personalizaciones', [])
+            seleccionadas = producto_temp.get('personalizaciones_seleccionadas', {})
+            
+            # Encontrar la siguiente personalización pendiente
+            pendiente = None
+            for p in personalizaciones:
+                if p.get('nombre') not in seleccionadas:
+                    pendiente = p
+                    break
+            
+            if not pendiente:
+                return self._agregar_al_carrito_desde_temporal(tenant['id'], numero)
+            
+            # Procesar respuesta según tipo
+            if pendiente.get('tipo') == 'select' and pendiente.get('opciones'):
+                try:
+                    opcion_idx = int(texto) - 1
+                    opciones = pendiente.get('opciones', [])
+                    if 0 <= opcion_idx < len(opciones):
+                        seleccionadas[pendiente['nombre']] = opciones[opcion_idx]
+                    else:
+                        return f"❌ Opción inválida. Elige un número del 1 al {len(opciones)}"
+                except ValueError:
+                    return f"❌ Por favor, responde con el número de la opción (1-{len(pendiente.get('opciones', []))})"
+            else:
+                # Texto libre
+                if not texto.strip() and pendiente.get('requerido'):
+                    return f"❌ '{pendiente['nombre']}' es requerido. Por favor responde:"
+                seleccionadas[pendiente['nombre']] = texto.strip()
+            
+            producto_temp['personalizaciones_seleccionadas'] = seleccionadas
+            self._producto_temporal[numero] = producto_temp
+            
+            # Continuar con siguiente personalización
+            return self._procesar_personalizaciones_producto(tenant['id'], numero)
+            
+        except Exception as e:
+            logger.error(f'Error procesando personalización: {e}')
+            self._set_estado(numero, None)
+            return "❌ Error al procesar tu respuesta"
+    
+    def _agregar_al_carrito_desde_temporal(self, tenant_id: str, numero: str) -> str:
+        """Agrega el producto temporal al carrito con todos sus adicionales y personalizaciones"""
+        try:
+            producto_temp = self._producto_temporal.pop(numero, None)
+            if not producto_temp:
+                return "❌ Error: No hay producto para agregar"
+            
+            # Calcular precio final
+            precio_final = producto_temp['precio_base']
+            for adic in producto_temp.get('adicionales_seleccionados', []):
+                precio_final += adic.get('precio_extra', 0)
+            
+            # Construir nombre del producto con detalles
+            nombre_producto = producto_temp['nombre']
+            
+            # Agregar adicionales al nombre si hay
+            if producto_temp.get('adicionales_seleccionados'):
+                nombres_adicionales = [a['nombre'] for a in producto_temp['adicionales_seleccionados']]
+                nombre_producto += f" (+{', '.join(nombres_adicionales)})"
+            
+            # Crear item con todos los detalles
+            item = {
+                'id': producto_temp['id'],
+                'nombre': nombre_producto,
+                'nombre_base': producto_temp['nombre'],
+                'precio': precio_final,
+                'precio_base': producto_temp['precio_base'],
+                'cantidad': 1,
+                'adicionales': producto_temp.get('adicionales_seleccionados', []),
+                'personalizaciones': producto_temp.get('personalizaciones_seleccionadas', {})
+            }
+            
+            # Agregar al carrito
+            carrito = self._cargar_carrito(tenant_id, numero)
+            carrito['items'].append(item)
+            carrito['total'] += precio_final
+            self._guardar_carrito(tenant_id, numero, carrito['items'], carrito['total'])
+            
+            self._set_estado(numero, None)
+            
+            # Mensaje de confirmación
+            mensaje = f"✅ *Agregado a tu pedido:*\n"
+            mensaje += f"• {nombre_producto}: ${precio_final:,}\n"
+            
+            # Mostrar personalizaciones si hay
+            if producto_temp.get('personalizaciones_seleccionadas'):
+                mensaje += "\n📝 *Personalizaciones:*\n"
+                for key, value in producto_temp['personalizaciones_seleccionadas'].items():
+                    mensaje += f"  • {key}: {value}\n"
+            
+            mensaje += f"\n💰 *Total actual:* ${carrito['total']:,}\n\n"
+            mensaje += "¿Algo más? (responde 'ver' para ver tu pedido o 'confirmo' para finalizar)"
+            
+            return mensaje
+            
+        except Exception as e:
+            logger.error(f'Error agregando al carrito desde temporal: {e}')
+            self._set_estado(numero, None)
+            return "❌ Error al agregar el producto al carrito"
+    
+    def _obtener_producto_por_id(self, tenant_id: str, producto_id: str) -> dict:
+        """Obtiene un producto por su ID con todos sus detalles"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT id, nombre, descripcion, precio, categoria, disponible, 
+                               imagen_url, tiempo_preparacion, destacado, metadata
+                        FROM "{schema_name}".productos WHERE id = %s
+                    """, (producto_id,))
+                    row = cur.fetchone()
+                    if row:
+                        metadata = row[9] if len(row) > 9 and row[9] else {}
+                        if isinstance(metadata, str):
+                            try:
+                                metadata = json.loads(metadata)
+                            except:
+                                metadata = {}
+                        
+                        return {
+                            'id': str(row[0]),
+                            'nombre': row[1],
+                            'descripcion': row[2] or '',
+                            'precio': row[3],
+                            'categoria': row[4] or 'general',
+                            'disponible': row[5],
+                            'imagen_url': row[6],
+                            'tiempo_preparacion': row[7],
+                            'destacado': row[8] if row[8] else False,
+                            'personalizaciones': metadata.get('personalizaciones', []),
+                            'adicionales': metadata.get('adicionales', [])
+                        }
+                    return None
+        except Exception as e:
+            logger.error(f'Error obteniendo producto: {e}')
+            return None
+    
     # ==================== MÉTODOS DEL CARRITO ====================
 
     def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
         logger.info(f'💾 [CARRITO] Guardando - Cliente: {cliente_numero}, Items: {len(items)}, Total: ${total:,.0f}')
-        logger.info(f'💾 [CARRITO] Items: {json.dumps(items, indent=2)}')
         
         try:
             schema_name = self._get_schema_name(tenant_id)
@@ -125,21 +499,14 @@ class MessageHandler:
                             SET items = %s, total = %s, updated_at = NOW()
                             WHERE cliente_numero = %s
                         """, (json.dumps(items), total, cliente_numero))
-                        logger.info(f'💾 [CARRITO] Actualizado existente para {cliente_numero}')
                     else:
                         cur.execute(f"""
                             INSERT INTO "{schema_name}".carritos (cliente_numero, items, total, created_at, updated_at)
                             VALUES (%s, %s, %s, NOW(), NOW())
                         """, (cliente_numero, json.dumps(items), total))
-                        logger.info(f'💾 [CARRITO] Creado nuevo carrito para {cliente_numero}')
                     conn.commit()
-                    
-                    cur.execute(f"SELECT items, total FROM \"{schema_name}\".carritos WHERE cliente_numero = %s", (cliente_numero,))
-                    verif = cur.fetchone()
-                    logger.info(f'💾 [CARRITO] Verificación post-guardado - Items: {verif[0]}, Total: {verif[1]}')
         except Exception as e:
             logger.error(f'Error guardando carrito: {e}')
-            raise
 
     def _cargar_carrito(self, tenant_id: str, cliente_numero: str) -> dict:
         try:
@@ -153,64 +520,34 @@ class MessageHandler:
                     if row:
                         items = row[0] if isinstance(row[0], list) else json.loads(row[0]) if row[0] else []
                         total = row[1] or 0
-                        logger.info(f'📖 [CARRITO] Cargado - Cliente: {cliente_numero}, Items: {len(items)}, Total: ${total:,.0f}')
-                        if items:
-                            logger.info(f'📖 [CARRITO] Items: {json.dumps(items, indent=2)}')
                         return {'items': items, 'total': total}
-                    logger.info(f'📖 [CARRITO] Carrito vacío para {cliente_numero}')
                     return {'items': [], 'total': 0}
         except Exception as e:
             logger.error(f'Error cargando carrito: {e}')
             return {'items': [], 'total': 0}
         
     def _agregar_al_carrito(self, tenant_id: str, cliente_numero: str, productos: list):
-        logger.info(f'🛒 [AGREGAR] Productos a agregar: {json.dumps(productos, indent=2)}')
-        
+        """Agrega productos directamente al carrito (sin preguntar adicionales)"""
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
-        logger.info(f'🛒 [AGREGAR] Carrito antes: {json.dumps(carrito, indent=2)}')
         
         for p in productos:
             encontrado = False
             for item in carrito['items']:
                 if item.get('nombre') == p.get('nombre'):
-                    vieja_cantidad = item['cantidad']
                     item['cantidad'] = item.get('cantidad', 1) + p.get('cantidad', 1)
-                    logger.info(f'🛒 [AGREGAR] Actualizado: {p.get("nombre")} - cantidad: {vieja_cantidad} → {item["cantidad"]}')
+                    carrito['total'] += p.get('precio', 0) * p.get('cantidad', 1)
                     encontrado = True
                     break
             if not encontrado:
                 carrito['items'].append({
+                    'id': p.get('id'),
                     'nombre': p.get('nombre'),
                     'precio': p.get('precio', 0),
                     'cantidad': p.get('cantidad', 1)
                 })
-                logger.info(f'🛒 [AGREGAR] Nuevo producto: {p.get("nombre")} x{p.get("cantidad", 1)}')
-            carrito['total'] += p.get('precio', 0) * p.get('cantidad', 1)
+                carrito['total'] += p.get('precio', 0) * p.get('cantidad', 1)
         
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
-        self._log_carrito(tenant_id, cliente_numero, "DESPUÉS DE AGREGAR")
-    
-    def _log_carrito(self, tenant_id: str, cliente_numero: str, accion: str):
-        try:
-            carrito = self._cargar_carrito(tenant_id, cliente_numero)
-            logger.info(f"📊 [CARRITO] {accion} - Cliente: {cliente_numero}")
-            logger.info(f"📊 [CARRITO] Items: {json.dumps(carrito.get('items', []), indent=2)}")
-            logger.info(f"📊 [CARRITO] Total: ${carrito.get('total', 0):,.0f}")
-            logger.info(f"📊 [CARRITO] Cantidad de items: {len(carrito.get('items', []))}")
-        except Exception as e:
-            logger.error(f"Error logging carrito: {e}")
-
-    def _log_pedido(self, tenant_id: str, pedido: dict, accion: str):
-        try:
-            logger.info(f"📦 [PEDIDO] {accion}")
-            logger.info(f"📦 [PEDIDO] ID: {pedido.get('id')}")
-            logger.info(f"📦 [PEDIDO] Número: {pedido.get('numero_pedido')}")
-            logger.info(f"📦 [PEDIDO] Cliente: {pedido.get('cliente_numero')}")
-            logger.info(f"📦 [PEDIDO] Items: {json.dumps(pedido.get('items', []), indent=2)}")
-            logger.info(f"📦 [PEDIDO] Total: ${pedido.get('total', 0):,.0f}")
-            logger.info(f"📦 [PEDIDO] Estado: {pedido.get('estado')}")
-        except Exception as e:
-            logger.error(f"Error logging pedido: {e}")
     
     # ==================== MÉTODOS DEL CLIENTE ====================
     
@@ -269,14 +606,12 @@ class MessageHandler:
                         if updates:
                             params.append(row[0])
                             cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
-                            logger.info(f'👤 [CLIENTE] Actualizado: {numero}')
                     else:
                         cliente_id = str(uuid.uuid4())
                         cur.execute(f"""
                             INSERT INTO "{schema_name}".clientes (id, numero_telefono, nombre, cc, email, direccion)
                             VALUES (%s, %s, %s, %s, %s, %s)
                         """, (cliente_id, numero, datos.get('nombre'), datos.get('cc'), datos.get('email'), datos.get('direccion')))
-                        logger.info(f'👤 [CLIENTE] Creado nuevo: {numero}')
                     conn.commit()
         except Exception as e:
             logger.error(f'Error guardando cliente en BD: {e}')
@@ -291,13 +626,6 @@ class MessageHandler:
 - Email: {cliente.get('email', 'N/A')}
 - Dirección: {cliente.get('direccion', 'N/A')}"""
         return "📋 DATOS DEL CLIENTE: No hay datos previos"
-    
-    def _get_carrito_info_para_prompt(self, tenant_id: str, cliente_numero: str) -> str:
-        carrito = self._cargar_carrito(tenant_id, cliente_numero)
-        if not carrito.get('items'):
-            return "Carrito vacío"
-        items_texto = "\n".join([f"- {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in carrito['items']])
-        return f"📦 CARRITO ACTUAL:\n{items_texto}\n💰 Total: ${carrito.get('total', 0):,.0f}"
     
     def _formatear_datos_cliente(self, datos: dict) -> str:
         if not datos:
@@ -323,40 +651,48 @@ class MessageHandler:
             texto += f"\n💰 **Pago:** Contraentrega"
         return texto
     
+    def _mostrar_resumen_carrito(self, tenant: dict, numero: str, carrito: dict) -> str:
+        if not carrito.get('items'):
+            return "No tienes productos en tu carrito. ¿Qué te gustaría ordenar?"
+        
+        items_texto = ""
+        for item in carrito['items']:
+            items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
+            # Mostrar personalizaciones si tiene
+            if item.get('personalizaciones'):
+                for key, value in item['personalizaciones'].items():
+                    items_texto += f"     └─ {key}: {value}\n"
+        
+        return f"""📋 **Tu pedido actual:**
+{items_texto}
+**Total:** ${carrito.get('total', 0):,.0f}
+
+¿Algo más o confirmamos el pedido? (responde "confirmo")"""
+    
     def _finalizar_pedido(self, tenant: dict, numero: str, carrito: dict) -> str:
         """Finaliza el pedido y genera número de seguimiento"""
         logger.info(f"🎯 [FINALIZAR] Iniciando finalización para cliente {numero}")
-        logger.info(f"🎯 [FINALIZAR] Carrito: {json.dumps(carrito, indent=2)}")
         
         if not carrito or not carrito.get('items'):
-            logger.warning(f"🎯 [FINALIZAR] Carrito vacío para {numero}")
             return "No hay productos en tu carrito. ¿Qué te gustaría ordenar?"
         
         datos_cliente = self._datos_cliente.get(numero, {})
         schema_name = self._get_schema_name(tenant['id'])
         
-        # Obtener datos existentes del cliente desde la BD
         cliente_existente = self._obtener_cliente(tenant['id'], numero)
         
-        # ACTUALIZAR: Combinar datos nuevos con existentes (los nuevos tienen prioridad)
         datos_completos = {}
         if cliente_existente:
-            # Copiar datos existentes
             datos_completos.update(cliente_existente)
-        # Sobrescribir con datos nuevos de la conversación
         datos_completos.update(datos_cliente)
-        
-        logger.info(f"👤 [CLIENTE] Datos finales para {numero}: {json.dumps(datos_completos, indent=2)}")
         
         contexto = self._obtener_contexto_tenant(tenant['id'])
         direccion_entrega = datos_completos.get('direccion', '')
         if datos_completos.get('recojo_en_tienda'):
             direccion_entrega = f"Recojo en tienda - {tenant.get('nombre')} - {contexto.get('ubicacion', '')}"
         
-        # Guardar/Actualizar cliente en BD con todos los datos
         cliente_id = self._obtener_o_crear_cliente(tenant['id'], numero, datos_completos)
         if not cliente_id:
-            logger.error(f"🎯 [FINALIZAR] Error creando/actualizando cliente {numero}")
             return "❌ Hubo un error con tus datos. Por favor intenta de nuevo."
         
         pedido_id = str(uuid.uuid4())
@@ -371,35 +707,9 @@ class MessageHandler:
         fecha_str = datetime.now().strftime('%Y%m%d%H%M%S')
         numero_pedido = f"{tenant['nombre'][:3].upper()}-{fecha_str}-{str(uuid.uuid4())[:4].upper()}"
         
-        logger.info(f"🎯 [FINALIZAR] Generando pedido ID: {pedido_id}, Número: {numero_pedido}, Total: ${total:,.0f}")
-        
         try:
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
-                    # Verificar columnas
-                    cur.execute(f"""
-                        DO $$ 
-                        BEGIN
-                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                                        WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'cliente_numero') THEN
-                                ALTER TABLE "{schema_name}".pedidos ADD COLUMN cliente_numero TEXT;
-                            END IF;
-                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                                        WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'secuencial') THEN
-                                ALTER TABLE "{schema_name}".pedidos ADD COLUMN secuencial INTEGER;
-                            END IF;
-                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                                        WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'numero_pedido') THEN
-                                ALTER TABLE "{schema_name}".pedidos ADD COLUMN numero_pedido TEXT;
-                            END IF;
-                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                                        WHERE table_schema = '{schema_name}' AND table_name = 'pedidos' AND column_name = 'cliente_nombre') THEN
-                                ALTER TABLE "{schema_name}".pedidos ADD COLUMN cliente_nombre TEXT;
-                            END IF;
-                        END $$;
-                    """)
-                    conn.commit()
-                    
                     cur.execute(f'INSERT INTO "{schema_name}".pedidos (id, cliente_id, cliente_numero, cliente_nombre, numero_pedido, secuencial, items, total, estado, direccion_entrega, notas) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)', (pedido_id, cliente_id, numero, datos_completos.get('nombre', numero), numero_pedido, secuencial, json.dumps(items), total, 'nuevo', direccion_entrega, f"Fecha: {datos_completos.get('fecha_entrega', '')} Hora: {datos_completos.get('hora_entrega', '')}".strip()))
                 conn.commit()
             
@@ -407,70 +717,62 @@ class MessageHandler:
             if numero in self._datos_cliente:
                 del self._datos_cliente[numero]
             
-            items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in items])
-            datos_texto = self._formatear_datos_cliente(datos_completos)
+            items_texto = ""
+            for item in items:
+                items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
+                if item.get('personalizaciones'):
+                    for key, value in item['personalizaciones'].items():
+                        items_texto += f"     └─ {key}: {value}\n"
             
-            logger.info(f"🎯 [FINALIZAR] Éxito! Pedido {numero_pedido} creado para {numero}")
+            datos_texto = self._formatear_datos_cliente(datos_completos)
             
             return f"""✅ **¡PEDIDO CONFIRMADO!**
 
-    📌 **Número de pedido:** *{numero_pedido}*
-    📝 *Guarda este número para hacer seguimiento*
-    {datos_texto}
+📌 **Número de pedido:** *{numero_pedido}*
+📝 *Guarda este número para hacer seguimiento*
+{datos_texto}
 
-    📋 **Productos:**
-    {items_texto}
-    💰 **Total:** ${total:,.0f}
+📋 **Productos:**
+{items_texto}
+💰 **Total:** ${total:,.0f}
 
-    📦 **Entrega:** {direccion_entrega}
+📦 **Entrega:** {direccion_entrega}
 
-    📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
-    📞 *Para consultar tu pedido, envía "estado {numero_pedido}"*"""
+📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*
+📞 *Para consultar tu pedido, envía "estado {numero_pedido}"*"""
         except Exception as e:
             logger.error(f'Error creando pedido: {e}')
-            import traceback
-            traceback.print_exc()
             return "❌ Hubo un error procesando tu solicitud. Por favor intenta de nuevo."
     
     def _obtener_o_crear_cliente(self, tenant_id: str, numero: str, datos_cliente: dict = None) -> str:
-        """Obtiene o crea un cliente en el esquema del tenant, actualizando datos si es necesario"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f'SELECT id, nombre, cc, email, direccion FROM "{schema_name}".clientes WHERE numero_telefono = %s', (numero,))
+                    cur.execute(f'SELECT id FROM "{schema_name}".clientes WHERE numero_telefono = %s', (numero,))
                     row = cur.fetchone()
                     
                     if row:
                         cliente_id = row[0]
-                        # ACTUALIZAR: Siempre actualizar con los datos más recientes
-                        updates = []
-                        params = []
-                        
-                        if datos_cliente and datos_cliente.get('nombre'):
-                            updates.append("nombre = %s")
-                            params.append(datos_cliente['nombre'])
-                        elif datos_cliente and datos_cliente.get('nombre') is None and not row[1]:
-                            pass  # No actualizar si no hay nombre
-                        
-                        if datos_cliente and datos_cliente.get('cc'):
-                            updates.append("cc = %s")
-                            params.append(datos_cliente['cc'])
-                        
-                        if datos_cliente and datos_cliente.get('email'):
-                            updates.append("email = %s")
-                            params.append(datos_cliente['email'])
-                        
-                        if datos_cliente and datos_cliente.get('direccion'):
-                            updates.append("direccion = %s")
-                            params.append(datos_cliente['direccion'])
-                        
-                        if updates:
-                            params.append(cliente_id)
-                            cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
-                            logger.info(f'👤 [CLIENTE] Actualizado: {numero} - Datos: {dict(zip([u.split("=")[0].strip() for u in updates], params[:-1]))}')
-                            conn.commit()
-                        
+                        if datos_cliente:
+                            updates = []
+                            params = []
+                            if datos_cliente.get('nombre'):
+                                updates.append("nombre = %s")
+                                params.append(datos_cliente['nombre'])
+                            if datos_cliente.get('cc'):
+                                updates.append("cc = %s")
+                                params.append(datos_cliente['cc'])
+                            if datos_cliente.get('email'):
+                                updates.append("email = %s")
+                                params.append(datos_cliente['email'])
+                            if datos_cliente.get('direccion'):
+                                updates.append("direccion = %s")
+                                params.append(datos_cliente['direccion'])
+                            if updates:
+                                params.append(cliente_id)
+                                cur.execute(f'UPDATE "{schema_name}".clientes SET {", ".join(updates)}, updated_at = NOW() WHERE id = %s', params)
+                                conn.commit()
                         return cliente_id
                     else:
                         cliente_id = str(uuid.uuid4())
@@ -483,12 +785,11 @@ class MessageHandler:
                             datos_cliente.get('email') if datos_cliente else None,
                             datos_cliente.get('direccion') if datos_cliente else None))
                         conn.commit()
-                        logger.info(f'👤 [CLIENTE] Creado nuevo: {numero}')
                         return cliente_id
         except Exception as e:
             logger.error(f'Error gestionando cliente: {e}')
             return None
-            
+    
     # ==================== HISTORIAL ====================
     
     def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 10) -> list:
@@ -500,9 +801,7 @@ class MessageHandler:
                         SELECT mensaje, respuesta FROM "{schema_name}".conversaciones 
                         WHERE cliente_numero = %s ORDER BY created_at ASC LIMIT %s
                     """, (cliente_numero, limit))
-                    rows = cur.fetchall()
-                    logger.info(f'📜 [HISTORIAL] Obtenido {len(rows)} mensajes para {cliente_numero}')
-                    return rows
+                    return cur.fetchall()
         except Exception as e:
             logger.error(f'Error obteniendo historial: {e}')
             return []
@@ -536,7 +835,7 @@ class MessageHandler:
         - Extrae la cantidad (si no se especifica, es 1)
         
         Devuelve SOLO un JSON válido:
-        {{"productos": [{{"nombre": "nombre exacto del catálogo", "cantidad": 1}}]}}
+        {{"productos": [{{"id": "id_del_producto", "nombre": "nombre exacto del catálogo", "cantidad": 1}}]}}
         """
         
         try:
@@ -544,7 +843,7 @@ class MessageHandler:
                 model=ai_client.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=300
+                max_tokens=500
             )
             contenido = response.choices[0].message.content
             contenido = contenido.replace('```json', '').replace('```', '').strip()
@@ -557,6 +856,7 @@ class MessageHandler:
                 for producto in menu:
                     if producto['nombre'].lower() == nombre.lower():
                         productos.append({
+                            'id': producto['id'],
                             'nombre': producto['nombre'],
                             'precio': producto.get('precio', 0),
                             'cantidad': cantidad
@@ -583,7 +883,7 @@ class MessageHandler:
         {texto_historial}
         
         CATÁLOGO DE PRODUCTOS:
-        {json.dumps([{'nombre': p['nombre'], 'precio': p['precio']} for p in menu], indent=2, ensure_ascii=False)}
+        {json.dumps([{'id': p['id'], 'nombre': p['nombre'], 'precio': p['precio']} for p in menu], indent=2, ensure_ascii=False)}
         
         IMPORTANTE:
         - El cliente acaba de confirmar el pedido (dijo "confirmo" o "si")
@@ -592,7 +892,7 @@ class MessageHandler:
         - Extrae la cantidad
         
         Devuelve SOLO un JSON:
-        {{"productos": [{{"nombre": "nombre exacto del catálogo", "cantidad": 1}}]}}
+        {{"productos": [{{"id": "id_del_producto", "nombre": "nombre exacto del catálogo", "cantidad": 1}}]}}
         """
         
         try:
@@ -610,14 +910,30 @@ class MessageHandler:
             for p in resultado.get('productos', []):
                 nombre = p.get('nombre', '')
                 cantidad = p.get('cantidad', 1)
-                for producto in menu:
-                    if producto['nombre'].lower() == nombre.lower():
-                        productos.append({
-                            'nombre': producto['nombre'],
-                            'precio': producto.get('precio', 0),
-                            'cantidad': cantidad
-                        })
-                        break
+                producto_id = p.get('id')
+                
+                # Buscar por ID o por nombre
+                producto_encontrado = None
+                if producto_id:
+                    for producto in menu:
+                        if producto['id'] == producto_id:
+                            producto_encontrado = producto
+                            break
+                
+                if not producto_encontrado:
+                    for producto in menu:
+                        if producto['nombre'].lower() == nombre.lower():
+                            producto_encontrado = producto
+                            break
+                
+                if producto_encontrado:
+                    productos.append({
+                        'id': producto_encontrado['id'],
+                        'nombre': producto_encontrado['nombre'],
+                        'precio': producto_encontrado.get('precio', 0),
+                        'cantidad': cantidad
+                    })
+            
             if productos:
                 logger.info(f"🤖 [IA] Productos encontrados en historial: {productos}")
             return productos
@@ -665,17 +981,6 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
             logger.info(f"✅ [CONFIRMACION] Detectada: {texto}")
         return es_confirmacion
     
-    def _mostrar_resumen_carrito(self, tenant: dict, numero: str, carrito: dict) -> str:
-        if not carrito.get('items'):
-            return "No tienes productos en tu carrito. ¿Qué te gustaría ordenar?"
-        items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in carrito['items']])
-        logger.info(f"📋 [RESUMEN] Mostrando carrito para {numero} - Total: ${carrito.get('total', 0):,.0f}")
-        return f"""📋 **Tu pedido actual:**
-{items_texto}
-**Total:** ${carrito.get('total', 0):,.0f}
-
-¿Algo más o confirmamos el pedido? (responde "confirmo")"""
-    
     def _procesar_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict) -> str:
         """Procesa el mensaje usando IA para lenguaje natural"""
         
@@ -686,8 +991,6 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
             return self._respuesta_fallback(tenant, menu)
         
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
-        logger.info(f"🤖 [IA] Carrito actual: {len(carrito_actual.get('items', []))} items, Total: ${carrito_actual.get('total', 0):,.0f}")
-        
         resumen_cliente = self._get_resumen_cliente(tenant['id'], numero)
         historial = self._get_historial_conversacion(tenant['id'], numero, 15)
         historial_texto = self._formatear_historial_para_prompt(historial)
@@ -701,68 +1004,91 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
         # 1. Verificar pago
         if any(p in texto_lower for p in ['pague', 'pago', 'pagado', 'transferí', 'consigné', 'pagué', 'ya pague', 'listo el pago']):
             logger.info("💰 [PAGO] Detectado mensaje de pago")
-            try:
-                resultado = order_repo.marcar_pagado(tenant['id'], numero)
-                if resultado > 0:
-                    return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
-                else:
-                    schema_name = self._get_schema_name(tenant['id'])
-                    with db_manager.get_connection(tenant['id']) as conn:
-                        with conn.cursor() as cur:
-                            cur.execute(f'UPDATE "{schema_name}".pedidos SET estado = "pagado", pagado_at = NOW() WHERE cliente_numero = %s AND estado = "nuevo" ORDER BY created_at DESC LIMIT 1', (numero,))
-                            if cur.rowcount > 0:
-                                return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
-                    return "✅ ¡Gracias por confirmar el pago! Procesaremos tu pedido."
-            except Exception as e:
-                logger.error(f"Error procesando pago: {e}")
-                return "✅ Gracias por confirmar. Procesaremos tu pedido."
+            return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
         
-        # 2. Verificar confirmación - USANDO IA
+        # 2. Verificar confirmación
         if self._cliente_confirmo(texto):
             logger.info(f"✅ [CONFIRMACION] Cliente confirmó: {texto}")
             if carrito_actual.get('items'):
-                logger.info(f"✅ [CONFIRMACION] Carrito tiene items, finalizando pedido")
                 self._guardar_datos_cliente_en_bd(tenant['id'], numero)
                 return self._finalizar_pedido(tenant, numero, carrito_actual)
             else:
-                logger.info(f"✅ [CONFIRMACION] Carrito vacío, usando IA para buscar productos en historial")
                 productos_encontrados = self._extraer_productos_del_historial_con_ia(historial, menu)
-                logger.info(f"🤖 [IA] Productos encontrados en historial: {productos_encontrados}")
                 if productos_encontrados:
                     self._agregar_al_carrito(tenant['id'], numero, productos_encontrados)
                     carrito_actual = self._cargar_carrito(tenant['id'], numero)
                     if carrito_actual.get('items'):
                         return self._finalizar_pedido(tenant, numero, carrito_actual)
-                return "❌ No pude identificar los productos que deseas. Por favor, escríbelos nuevamente.\n\nEjemplo: 'quiero 25 empanadas hawaianas'"
+                return "❌ No pude identificar los productos que deseas. Por favor, escríbelos nuevamente.\n\nEjemplo: 'quiero una torta porcion personal'"
         
         # 3. Verificar consulta de carrito
         if any(p in texto_lower for p in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
-            logger.info(f"📋 [CONSULTA] Cliente consultó carrito")
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # 4. Detectar productos en el mensaje actual - USANDO IA
+        # 4. Verificar si quiere ver el menú
+        if any(p in texto_lower for p in ['menú', 'menu', 'productos', 'catálogo', 'catalogo', 'qué venden']):
+            return self._mostrar_menu(tenant, menu)
+        
+        # 5. Detectar productos en el mensaje actual
         productos_detectados = self._extraer_productos_con_ia(texto, menu)
         
-        # 5. Si hay productos, agregar al carrito
+        # 6. Si hay productos, procesar el primero con sus adicionales
         if productos_detectados:
-            logger.info(f"🛒 [PRODUCTOS] Detectados por IA: {productos_detectados}")
-            self._agregar_al_carrito(tenant['id'], numero, productos_detectados)
-            nuevo_carrito = self._cargar_carrito(tenant['id'], numero)
-            items_texto = "\n".join([f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}" for item in nuevo_carrito['items']])
-            return f"""✅ **Agregado a tu pedido:**
-
-{items_texto}
-**Total:** ${nuevo_carrito.get('total', 0):,.0f}
-
-¿Algo más o confirmamos el pedido? (responde "confirmo" para finalizar)"""
+            producto = productos_detectados[0]
+            logger.info(f"🛒 [PRODUCTO] Detectado: {producto}")
+            return self._procesar_seleccion_producto(tenant['id'], numero, producto['id'])
         
-        # 6. Si hay carrito, mostrar resumen
+        # 7. Si hay carrito, mostrar resumen
         if carrito_actual.get('items'):
-            logger.info(f"📋 [CARRITO] Mostrando resumen, carrito no vacío")
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # 7. Si no hay carrito, usar IA para responder
-        logger.info(f"🤖 [IA] Usando IA para respuesta general")
+        # 8. Si no hay carrito, usar IA para responder
+        return self._respuesta_con_ia(texto, tenant, menu, numero, contexto, resumen_cliente, historial_texto)
+    
+    def _mostrar_menu(self, tenant: dict, menu: list) -> str:
+        """Muestra el menú de productos disponibles"""
+        if not menu:
+            return "📋 No hay productos disponibles en este momento."
+        
+        # Agrupar por categoría
+        categorias = {}
+        for p in menu:
+            cat = p.get('categoria', 'general')
+            if cat not in categorias:
+                categorias[cat] = []
+            categorias[cat].append(p)
+        
+        mensaje = f"📋 *MENÚ DE {tenant.get('nombre', 'PRODUCTOS')}*\n\n"
+        
+        for cat, productos in categorias.items():
+            emoji = self._get_emoji_categoria(cat)
+            mensaje += f"*{emoji} {cat.upper()}*\n"
+            for p in productos[:10]:  # Limitar a 10 por categoría
+                mensaje += f"• *{p['nombre']}* - ${p['precio']:,}\n"
+                if p.get('descripcion'):
+                    mensaje += f"  {p['descripcion'][:60]}...\n"
+            mensaje += "\n"
+        
+        mensaje += "📝 *Para pedir, solo escribe el nombre del producto*\n"
+        mensaje += "Ejemplo: 'quiero una torta porcion personal'"
+        
+        return mensaje
+    
+    def _get_emoji_categoria(self, categoria: str) -> str:
+        emojis = {
+            'tortas': '🍰',
+            'postres': '🍨',
+            'panes': '🥖',
+            'bebidas': '🥤',
+            'pizzas': '🍕',
+            'hamburguesas': '🍔',
+            'general': '📦',
+            'adicionales': '➕'
+        }
+        return emojis.get(categoria.lower(), '📦')
+    
+    def _respuesta_con_ia(self, texto: str, tenant: dict, menu: list, numero: str, contexto: dict, resumen_cliente: str, historial_texto: str) -> str:
+        """Genera respuesta usando IA"""
         menu_simplificado = [{'nombre': p.get('nombre'), 'precio': p.get('precio')} for p in menu[:30]]
         
         system_prompt = f"""Eres un asistente de ventas conversacional para {tenant.get('nombre', 'Mi negocio')}.
@@ -771,7 +1097,7 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
 - Horario: {contexto.get('horario', 'No especificado')}
 - Ubicación: {contexto.get('ubicacion', 'No especificada')}
 
-📋 PRODUCTOS:
+📋 PRODUCTOS DISPONIBLES:
 {json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
 
 {resumen_cliente}
@@ -797,7 +1123,6 @@ RESPONDE en español."""
                 temperature=0.7,
                 max_tokens=500
             )
-            logger.info(f"🤖 [IA] Respuesta generada: {response.choices[0].message.content[:100]}...")
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f'Error en IA: {e}')
