@@ -76,9 +76,11 @@ class IATrainer:
         return texto.strip()
     
     def _extraer_json(self, texto: str) -> dict:
-        """Extrae y parsea JSON de una respuesta de IA"""
+        """Extrae y parsea JSON de una respuesta de IA (más tolerante)"""
         try:
             texto_limpio = texto.strip()
+            
+            # Eliminar marcadores de código
             if texto_limpio.startswith('```json'):
                 texto_limpio = texto_limpio[7:]
             elif texto_limpio.startswith('```'):
@@ -86,17 +88,23 @@ class IATrainer:
             if texto_limpio.endswith('```'):
                 texto_limpio = texto_limpio[:-3]
             
+            # Buscar el primer { y el último }
             inicio = texto_limpio.find('{')
             fin = texto_limpio.rfind('}')
-            if inicio != -1 and fin != -1:
+            if inicio != -1 and fin != -1 and fin > inicio:
                 texto_limpio = texto_limpio[inicio:fin+1]
             
+            # Limpiar JSON
             texto_limpio = re.sub(r',\s*}', '}', texto_limpio)
             texto_limpio = re.sub(r',\s*]', ']', texto_limpio)
+            texto_limpio = re.sub(r'}\s*{', '},{', texto_limpio)
             
+            # Intentar parsear
             return json.loads(texto_limpio)
+            
         except json.JSONDecodeError as e:
             logger.error(f"Error JSON: {e}")
+            logger.debug(f"Texto problemático: {texto[:300]}")
             return None
     
     def _normalizar_precio(self, precio) -> int:
@@ -305,79 +313,185 @@ class IATrainer:
     def procesar_texto(self, tenant_id: str, texto: str) -> dict:
         """Procesa texto descriptivo y guarda los productos en BD"""
         logger.info(f"📝 [TEXTO] Procesando texto para tenant {tenant_id}")
+        logger.info(f"📝 [TEXTO] Longitud del texto: {len(texto)} caracteres")
         
         if not ai_client.client:
             logger.error("Cliente de IA no disponible")
-            return None
+            return {'productos': []}
         
+        # Intentar extraer productos manualmente primero (más confiable)
+        productos_manual = self._extraer_productos_manual(texto)
+        if productos_manual:
+            logger.info(f"✅ [MANUAL] Productos extraídos manualmente: {len(productos_manual)}")
+            guardados = self._guardar_productos_en_bd(tenant_id, productos_manual)
+            
+            # También extraer contexto
+            contexto = self._extraer_contexto_manual(texto)
+            self._guardar_contexto_en_bd(tenant_id, contexto)
+            
+            return {
+                'productos': productos_manual,
+                'productos_guardados': guardados,
+                'horario': contexto.get('horario', ''),
+                'ubicacion': contexto.get('ubicacion', ''),
+                'politicas': contexto.get('politicas', ''),
+                'instrucciones_adicionales': contexto.get('instrucciones_adicionales', ''),
+                'message': f"✅ Se procesaron {len(productos_manual)} productos"
+            }
+        
+        # Si no se pudo extraer manualmente, usar IA
         prompt = f"""
-        Extrae información de este negocio.
-        
-        DESCRIPCIÓN:
-        {texto[:3000]}
-        
-        IMPORTANTE: Devuelve SOLO un JSON válido.
-        
-        Formato:
-        {{
-            "productos": [
-                {{"nombre": "nombre", "precio": 25000, "categoria": "tortas", "descripcion": ""}}
-            ],
-            "horario": "",
-            "ubicacion": "",
-            "politicas": "",
-            "instrucciones_adicionales": ""
-        }}
-        """
+    Extrae TODOS los productos y precios del siguiente texto.
+
+    TEXTO:
+    {texto[:4000]}
+
+    REGLAS:
+    1. Busca patrones como "nombre: $precio", "nombre $precio", o "nombre - $precio"
+    2. Si un producto tiene múltiples tamaños (Porción, Cuarto, Media, Libra), crea una línea por cada tamaño
+    3. Normaliza precios: elimina puntos, comas, y símbolos. Ej: "$13,000" → 13000
+    4. Usa categorías: "tortas" para productos principales, "decoraciones" para adicionales
+
+    Devuelve SOLO UN JSON. Ejemplo exacto:
+    {{
+        "productos": [
+            {{"nombre": "Torta Negra Porción", "precio": 19000, "categoria": "tortas"}},
+            {{"nombre": "Torta Negra Libra", "precio": 177500, "categoria": "tortas"}}
+        ],
+        "horario": "Lunes a Domingo 8am-8pm",
+        "ubicacion": "Cali, Colombia",
+        "politicas": "Pedido con 24 horas de anticipación"
+    }}
+
+    Si no encuentras productos, devuelve {{"productos": []}}
+    """
         
         try:
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
+                max_tokens=4000,
                 temperature=0.1
             )
             
             contenido = response.choices[0].message.content
+            logger.info(f"📥 [IA] Respuesta recibida ({len(contenido)} caracteres)")
+            logger.debug(f"📥 [IA] Respuesta: {contenido[:500]}")
+            
             resultado = self._extraer_json(contenido)
             
-            if resultado:
-                # Asegurar campos
-                resultado.setdefault('productos', [])
-                resultado.setdefault('horario', '')
-                resultado.setdefault('ubicacion', '')
-                resultado.setdefault('politicas', '')
-                resultado.setdefault('instrucciones_adicionales', '')
-                
+            if resultado and resultado.get('productos'):
                 productos_validos = []
                 for p in resultado.get('productos', []):
                     nombre = p.get('nombre', '').strip()
-                    if nombre and len(nombre) > 1:
-                        p['nombre'] = re.sub(r'[»«•*+_\-]', '', nombre).strip()
-                        p['precio'] = self._normalizar_precio(p.get('precio', 0))
-                        p['categoria'] = p.get('categoria', 'general')
-                        p['es_base'] = True
-                        if p['precio'] > 0:
-                            productos_validos.append(p)
+                    precio = self._normalizar_precio(p.get('precio', 0))
+                    if nombre and len(nombre) > 2 and precio > 0:
+                        productos_validos.append({
+                            'nombre': nombre,
+                            'precio': precio,
+                            'categoria': p.get('categoria', 'tortas'),
+                            'es_base': True,
+                            'descripcion': ''
+                        })
                 
-                resultado['productos'] = productos_validos
-                
-                # Guardar en BD
-                guardados = self._guardar_productos_en_bd(tenant_id, productos_validos)
-                self._guardar_contexto_en_bd(tenant_id, resultado)
-                
-                logger.info(f"📊 [IA] Productos extraídos: {len(productos_validos)}, guardados: {guardados}")
-                
-                resultado['productos_guardados'] = guardados
-                resultado['message'] = f"✅ Se agregaron {guardados} nuevos productos"
-                
-                return resultado
+                if productos_validos:
+                    guardados = self._guardar_productos_en_bd(tenant_id, productos_validos)
+                    self._guardar_contexto_en_bd(tenant_id, resultado)
+                    
+                    return {
+                        'productos': productos_validos,
+                        'productos_guardados': guardados,
+                        'horario': resultado.get('horario', ''),
+                        'ubicacion': resultado.get('ubicacion', ''),
+                        'politicas': resultado.get('politicas', ''),
+                        'instrucciones_adicionales': resultado.get('instrucciones_adicionales', ''),
+                        'message': f"✅ Se procesaron {len(productos_validos)} productos"
+                    }
             
-            return {'productos': []}
+            return {'productos': [], 'message': 'No se encontraron productos en el texto'}
             
         except Exception as e:
             logger.error(f"Error procesando texto: {e}")
+            import traceback
+            traceback.print_exc()
             return {'productos': []}
+
+
+    def _extraer_productos_manual(self, texto: str) -> list:
+        """Extrae productos manualmente usando regex (fallback cuando la IA falla)"""
+        productos = []
+        
+        # Patrón para encontrar productos con precios
+        # Ejemplos: "Torta Negra Porción: $19,000" o "Torta Negra Libra 177500"
+        patrones = [
+            r'([A-Za-zÁÉÍÓÚáéíóúÑñ\s\-]+?)(?:[:|-]?\s*)\$?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\b',
+            r'([A-Za-zÁÉÍÓÚáéíóúÑñ\s\-]+?)\s+(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\b',
+        ]
+        
+        for patron in patrones:
+            matches = re.findall(patron, texto)
+            for match in matches:
+                nombre = match[0].strip()
+                precio_str = match[1]
+                
+                # Limpiar nombre
+                nombre = re.sub(r'[^\w\sÁÉÍÓÚáéíóúÑñ-]', '', nombre)
+                nombre = re.sub(r'\s+', ' ', nombre).strip()
+                
+                # Normalizar precio
+                precio = self._normalizar_precio(precio_str)
+                
+                if nombre and len(nombre) > 3 and precio > 0:
+                    # Determinar categoría
+                    categoria = 'tortas'
+                    if any(p in nombre.lower() for p in ['drip', 'letrero', 'caja', 'flor', 'chocolate', 'decor']):
+                        categoria = 'decoraciones'
+                    elif any(p in nombre.lower() for p in ['porción', 'cuarto', 'media', 'libra']):
+                        categoria = 'tortas'
+                    
+                    productos.append({
+                        'nombre': nombre,
+                        'precio': precio,
+                        'categoria': categoria,
+                        'es_base': True
+                    })
+        
+        # Eliminar duplicados por nombre
+        vistos = set()
+        unicos = []
+        for p in productos:
+            if p['nombre'] not in vistos:
+                vistos.add(p['nombre'])
+                unicos.append(p)
+        
+        return unicos
+
+
+    def _extraer_contexto_manual(self, texto: str) -> dict:
+        """Extrae contexto manualmente usando regex"""
+        contexto = {
+            'horario': '',
+            'ubicacion': '',
+            'politicas': '',
+            'instrucciones_adicionales': ''
+        }
+        
+        # Buscar horario
+        horario_match = re.search(r'horario:?\s*([^.\n]+)', texto, re.IGNORECASE)
+        if horario_match:
+            contexto['horario'] = horario_match.group(1).strip()
+        
+        # Buscar ubicación
+        ubicacion_match = re.search(r'ubicaci[oó]n:?\s*([^.\n]+)', texto, re.IGNORECASE)
+        if ubicacion_match:
+            contexto['ubicacion'] = ubicacion_match.group(1).strip()
+        
+        # Buscar políticas
+        politicas_match = re.search(r'pol[ií]ticas:?\s*([^.\n]+)', texto, re.IGNORECASE)
+        if politicas_match:
+            contexto['politicas'] = politicas_match.group(1).strip()
+        
+        return contexto
     
     def generar_prompt_personalizado(self, contexto: dict) -> str:
         """Genera prompt personalizado para el asistente"""
