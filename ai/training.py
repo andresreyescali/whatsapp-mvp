@@ -2,50 +2,53 @@ import base64
 import io
 import json
 import re
+import uuid
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
 from core.logger import logger
 from ai.client import ai_client
+from core.database import db_manager
+
 
 class IATrainer:
-    """Entrenador de IA para cada negocio con soporte OCR mejorado (sin dependencias pesadas)"""
+    """Entrenador de IA que guarda productos y precios en la base de datos"""
+    
+    def __init__(self):
+        pass
+    
+    def _get_schema_name(self, tenant_id: str) -> str:
+        """Obtiene el schema_name del tenant"""
+        from tenants.repository import tenant_repo
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if tenant and tenant.get('schema_name'):
+            return tenant['schema_name']
+        return f"tenant_{tenant_id.replace('-', '_')}"
     
     def _preprocesar_imagen(self, image: Image.Image) -> Image.Image:
-        """Preprocesa la imagen para mejorar el reconocimiento OCR usando solo PIL"""
+        """Preprocesa la imagen para mejorar el reconocimiento OCR"""
         try:
-            # 1. Convertir a escala de grises
             if image.mode != 'L':
                 image = image.convert('L')
             
-            # 2. Redimensionar si es muy pequeña (mejora OCR)
             width, height = image.size
             if width < 800 or height < 600:
                 scale = max(1.5, 1200 / width)
                 new_width = int(width * scale)
                 new_height = int(height * scale)
                 image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                logger.info(f"Imagen redimensionada: {width}x{height} -> {new_width}x{new_height}")
             
-            # 3. Aumentar contraste
             enhancer = ImageEnhance.Contrast(image)
             image = enhancer.enhance(2.0)
             
-            # 4. Aumentar nitidez
             enhancer = ImageEnhance.Sharpness(image)
             image = enhancer.enhance(2.0)
             
-            # 5. Aplicar filtro para reducir ruido
             image = image.filter(ImageFilter.MedianFilter())
-            
-            # 6. Binarización (umbral simple)
-            # Convertir a blanco y negro con umbral adaptativo
             image = image.point(lambda x: 0 if x < 128 else 255, '1')
             
             return image
-            
         except Exception as e:
             logger.error(f"Error en preprocesamiento: {e}")
-            # Fallback: solo escala de grises
             if image.mode != 'L':
                 return image.convert('L')
             return image
@@ -55,35 +58,19 @@ class IATrainer:
         if not texto:
             return ""
         
-        # Reemplazar caracteres confusos comunes
         correcciones = {
-            '5': '$',      # El símbolo $ a menudo se lee como 5
-            '5$': '$',     # Caso especial
-            'S': '$',      # A veces S se confunde con $
-            's': '$',      # s minúscula
-            '|': '1',      # Pipe como 1
-            'I': '1',      # I mayúscula como 1
-            'l': '1',      # l minúscula como 1
-            'O': '0',      # O mayúscula como 0
-            'o': '0',      # o minúscula como 0
-            ',': '.',      # Normalizar decimales
-            ';': ',',      # Punto y coma como coma
-            '€': '$',      # Euro como dólar
-            '£': '$',      # Libra como dólar
+            '5': '$', 'S': '$', 's': '$', '|': '1', 'I': '1',
+            'l': '1', 'O': '0', 'o': '0', ',': '.', ';': ',',
+            '€': '$', '£': '$'
         }
         
         for error, correcto in correcciones.items():
             texto = texto.replace(error, correcto)
         
-        # Corregir patrones de precio comunes
-        texto = re.sub(r'(\d+)[.,](\d{3})', r'\1\2', texto)      # 25.000 -> 25000
-        texto = re.sub(r'(\d+)[.,](\d{2})', r'\1.\2', texto)      # 25.00 -> 25.00
-        texto = re.sub(r'\$?(\d+)\$', r'$\1', texto)               # 25000$ -> $25000
-        
-        # Eliminar caracteres no deseados
+        texto = re.sub(r'(\d+)[.,](\d{3})', r'\1\2', texto)
+        texto = re.sub(r'(\d+)[.,](\d{2})', r'\1.\2', texto)
+        texto = re.sub(r'\$?(\d+)\$', r'$\1', texto)
         texto = re.sub(r'[»«•*+_=~]', '', texto)
-        
-        # Normalizar espacios
         texto = re.sub(r'\s+', ' ', texto)
         
         return texto.strip()
@@ -116,90 +103,169 @@ class IATrainer:
         """Normaliza un precio a entero"""
         if precio is None:
             return 0
-        
         if isinstance(precio, int):
             return precio
-        
         if isinstance(precio, float):
             return int(precio)
-        
         if isinstance(precio, str):
             precio_limpio = re.sub(r'[^0-9]', '', precio)
             if precio_limpio:
                 return int(precio_limpio)
-        
         return 0
     
-    def procesar_imagen(self, image_base64: str) -> dict:
-        """Procesa una imagen de menú usando Tesseract OCR + IA"""
+    def _guardar_productos_en_bd(self, tenant_id: str, productos: list) -> int:
+        """Guarda los productos extraídos en la base de datos del tenant"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            guardados = 0
+            actualizados = 0
+            
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    for producto in productos:
+                        nombre = producto.get('nombre', '').strip()
+                        precio = producto.get('precio', 0)
+                        categoria = producto.get('categoria', 'general')
+                        descripcion = producto.get('descripcion', '')
+                        es_base = producto.get('es_base', True)
+                        destacado = producto.get('destacado', False)
+                        tiempo_preparacion = producto.get('tiempo_preparacion')
+                        
+                        if not nombre or precio <= 0:
+                            continue
+                        
+                        # Verificar si ya existe
+                        cur.execute(f'SELECT id, precio, nombre FROM "{schema_name}".productos WHERE nombre ILIKE %s', (nombre,))
+                        existing = cur.fetchone()
+                        
+                        if existing:
+                            existing_precio = existing[1]
+                            if existing_precio != precio:
+                                cur.execute(f"""
+                                    UPDATE "{schema_name}".productos 
+                                    SET precio = %s, descripcion = %s, categoria = %s, 
+                                        updated_at = NOW()
+                                    WHERE id = %s
+                                """, (precio, descripcion, categoria, existing[0]))
+                                actualizados += 1
+                                logger.info(f"🔄 [BD] Actualizado: '{nombre}' ${existing_precio} → ${precio}")
+                            else:
+                                logger.debug(f"⏭️ [BD] Sin cambios: '{nombre}'")
+                        else:
+                            # Insertar nuevo producto
+                            product_id = str(uuid.uuid4())
+                            cur.execute(f"""
+                                INSERT INTO "{schema_name}".productos 
+                                (id, nombre, descripcion, precio, categoria, disponible, 
+                                 es_base, destacado, tiempo_preparacion, created_at, updated_at)
+                                VALUES (%s, %s, %s, %s, %s, true, %s, %s, %s, NOW(), NOW())
+                            """, (product_id, nombre, descripcion, precio, categoria, 
+                                  es_base, destacado, tiempo_preparacion))
+                            guardados += 1
+                            logger.info(f"➕ [BD] Nuevo producto: '{nombre}' - ${precio}")
+                    
+                    conn.commit()
+            
+            logger.info(f"✅ [BD] Productos: {guardados} nuevos, {actualizados} actualizados")
+            return guardados
+            
+        except Exception as e:
+            logger.error(f"Error guardando productos: {e}")
+            return 0
+    
+    def _guardar_contexto_en_bd(self, tenant_id: str, contexto: dict):
+        """Guarda el contexto (horario, ubicación, políticas) en la base de datos"""
+        try:
+            instrucciones = contexto.get('instrucciones_adicionales', '')
+            politicas = contexto.get('politicas', '')
+            horario = contexto.get('horario', '')
+            ubicacion = contexto.get('ubicacion', '')
+            
+            if not any([instrucciones, politicas, horario, ubicacion]):
+                return
+            
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('''
+                        INSERT INTO public.tenant_context 
+                        (tenant_id, instrucciones, politicas, horario, ubicacion, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (tenant_id) DO UPDATE SET
+                            instrucciones = EXCLUDED.instrucciones,
+                            politicas = EXCLUDED.politicas,
+                            horario = EXCLUDED.horario,
+                            ubicacion = EXCLUDED.ubicacion,
+                            updated_at = NOW()
+                    ''', (tenant_id, instrucciones, politicas, horario, ubicacion))
+                    conn.commit()
+                    
+            logger.info(f"✅ [BD] Contexto guardado para tenant {tenant_id}")
+            
+        except Exception as e:
+            logger.error(f"Error guardando contexto: {e}")
+    
+    def procesar_imagen(self, tenant_id: str, image_base64: str) -> dict:
+        """Procesa una imagen de menú y guarda los productos en BD"""
         try:
             image_data = base64.b64decode(image_base64)
             image = Image.open(io.BytesIO(image_data))
             
-            logger.info(f"Imagen original: {image.size}, modo: {image.mode}")
+            logger.info(f"📸 [OCR] Procesando imagen: {image.size}")
             
             # Preprocesar imagen
             processed_image = self._preprocesar_imagen(image)
             
-            # Configuración de Tesseract
             custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789$.,- "'
             
-            # Aplicar OCR
-            logger.info("Aplicando OCR a la imagen procesada...")
             texto_extraido = pytesseract.image_to_string(processed_image, lang='spa', config=custom_config)
-            
-            # Limpiar texto
             texto_extraido = self._limpiar_texto_ocr(texto_extraido)
             
-            logger.info(f"Texto extraído ({len(texto_extraido)} caracteres)")
+            logger.info(f"📝 [OCR] Texto extraído: {len(texto_extraido)} caracteres")
             
             if not texto_extraido or len(texto_extraido.strip()) < 10:
-                logger.warning("No se pudo extraer texto suficiente de la imagen")
-                return None
+                logger.warning("No se pudo extraer texto suficiente")
+                return {'productos': [], 'error': 'No se pudo extraer texto de la imagen'}
             
             resultado = self._estructurar_con_ia(texto_extraido)
+            
+            if resultado and resultado.get('productos'):
+                guardados = self._guardar_productos_en_bd(tenant_id, resultado['productos'])
+                self._guardar_contexto_en_bd(tenant_id, resultado)
+                resultado['productos_guardados'] = guardados
+                resultado['message'] = f"✅ Se agregaron {guardados} nuevos productos"
+            
             return resultado
             
         except Exception as e:
             logger.error(f"Error procesando imagen: {e}")
             import traceback
             traceback.print_exc()
-            return None
+            return {'productos': [], 'error': str(e)}
     
     def _estructurar_con_ia(self, texto_ocr: str) -> dict:
         """Usa IA para estructurar el texto extraído por OCR"""
-        
         if not ai_client.client:
             logger.error("Cliente de IA no disponible")
             return None
         
         prompt = f"""
-        Extrae productos y precios del siguiente texto de menú extraído por OCR.
+        Extrae productos y precios del siguiente texto de menú.
         
-        TEXTO EXTRAÍDO (puede tener errores):
+        TEXTO EXTRAÍDO:
         {texto_ocr[:3000]}
-        
-        INSTRUCCIONES IMPORTANTES:
-        1. El símbolo '$' puede aparecer como '5' o 'S' en el texto OCR. Corrígelo.
-        2. Los precios pueden estar en formatos: "25000", "25.000", "25,000" o "$25.000"
-        3. Normaliza todos los precios a números sin puntos ni comas (ej: 25000)
-        4. si en la imagen los precios inician con simbolo '$' entonces todos los precios lo tendran.
-        5. ignora acentos y tildes, reemplaza con la letra sin el acento.
         
         IMPORTANTE: Devuelve SOLO un JSON válido.
         
         Formato exacto:
         {{
             "productos": [
-                {{"nombre": "nombre del producto", "precio": 25000, "descripcion": ""}}
+                {{"nombre": "nombre del producto", "precio": 25000, "categoria": "tortas", "descripcion": ""}}
             ],
             "horario": "",
             "ubicacion": "",
             "politicas": "",
             "instrucciones_adicionales": ""
         }}
-        
-        Si no hay productos, devuelve {{"productos": []}}
         """
         
         try:
@@ -211,24 +277,23 @@ class IATrainer:
             )
             
             contenido = response.choices[0].message.content
-            logger.info(f"Respuesta DeepSeek recibida ({len(contenido)} chars)")
-            
             resultado = self._extraer_json(contenido)
             
             if resultado and 'productos' in resultado:
                 productos_validos = []
                 for p in resultado['productos']:
-                    nombre = p.get('nombre', '')
-                    if nombre and isinstance(nombre, str):
-                        nombre = re.sub(r'[»«•*+_\-]', '', nombre).strip()
-                        if nombre and len(nombre) > 1:
-                            p['nombre'] = nombre
-                            p['precio'] = self._normalizar_precio(p.get('precio', 0))
-                            p['descripcion'] = p.get('descripcion', '')
+                    nombre = p.get('nombre', '').strip()
+                    if nombre and len(nombre) > 1:
+                        p['nombre'] = re.sub(r'[»«•*+_\-]', '', nombre).strip()
+                        p['precio'] = self._normalizar_precio(p.get('precio', 0))
+                        p['categoria'] = p.get('categoria', 'general')
+                        p['descripcion'] = p.get('descripcion', '')
+                        p['es_base'] = True
+                        if p['precio'] > 0:
                             productos_validos.append(p)
                 
                 resultado['productos'] = productos_validos
-                logger.info(f"Productos extraídos: {len(productos_validos)}")
+                logger.info(f"📊 [IA] Productos extraídos: {len(productos_validos)}")
                 return resultado
             
             return {'productos': []}
@@ -237,9 +302,9 @@ class IATrainer:
             logger.error(f"Error en _estructurar_con_ia: {e}")
             return {'productos': []}
     
-    def procesar_texto(self, texto: str) -> dict:
-        """Procesa texto descriptivo del negocio"""
-        logger.info("=== INICIO procesar_texto ===")
+    def procesar_texto(self, tenant_id: str, texto: str) -> dict:
+        """Procesa texto descriptivo y guarda los productos en BD"""
+        logger.info(f"📝 [TEXTO] Procesando texto para tenant {tenant_id}")
         
         if not ai_client.client:
             logger.error("Cliente de IA no disponible")
@@ -255,7 +320,9 @@ class IATrainer:
         
         Formato:
         {{
-            "productos": [{{"nombre": "nombre", "precio": 25000, "descripcion": ""}}],
+            "productos": [
+                {{"nombre": "nombre", "precio": 25000, "categoria": "tortas", "descripcion": ""}}
+            ],
             "horario": "",
             "ubicacion": "",
             "politicas": "",
@@ -275,30 +342,35 @@ class IATrainer:
             resultado = self._extraer_json(contenido)
             
             if resultado:
-                if 'productos' not in resultado:
-                    resultado['productos'] = []
-                if 'horario' not in resultado:
-                    resultado['horario'] = ''
-                if 'ubicacion' not in resultado:
-                    resultado['ubicacion'] = ''
-                if 'politicas' not in resultado:
-                    resultado['politicas'] = ''
-                if 'instrucciones_adicionales' not in resultado:
-                    resultado['instrucciones_adicionales'] = ''
+                # Asegurar campos
+                resultado.setdefault('productos', [])
+                resultado.setdefault('horario', '')
+                resultado.setdefault('ubicacion', '')
+                resultado.setdefault('politicas', '')
+                resultado.setdefault('instrucciones_adicionales', '')
                 
                 productos_validos = []
                 for p in resultado.get('productos', []):
-                    nombre = p.get('nombre', '')
-                    if nombre and isinstance(nombre, str):
-                        nombre = re.sub(r'[»«•*+_\-]', '', nombre).strip()
-                        if nombre and len(nombre) > 1:
-                            p['nombre'] = nombre
-                            p['precio'] = self._normalizar_precio(p.get('precio', 0))
-                            p['descripcion'] = p.get('descripcion', '')
+                    nombre = p.get('nombre', '').strip()
+                    if nombre and len(nombre) > 1:
+                        p['nombre'] = re.sub(r'[»«•*+_\-]', '', nombre).strip()
+                        p['precio'] = self._normalizar_precio(p.get('precio', 0))
+                        p['categoria'] = p.get('categoria', 'general')
+                        p['es_base'] = True
+                        if p['precio'] > 0:
                             productos_validos.append(p)
+                
                 resultado['productos'] = productos_validos
                 
-                logger.info(f"Productos encontrados: {len(productos_validos)}")
+                # Guardar en BD
+                guardados = self._guardar_productos_en_bd(tenant_id, productos_validos)
+                self._guardar_contexto_en_bd(tenant_id, resultado)
+                
+                logger.info(f"📊 [IA] Productos extraídos: {len(productos_validos)}, guardados: {guardados}")
+                
+                resultado['productos_guardados'] = guardados
+                resultado['message'] = f"✅ Se agregaron {guardados} nuevos productos"
+                
                 return resultado
             
             return {'productos': []}
@@ -315,19 +387,20 @@ class IATrainer:
         politicas = contexto.get('politicas', '')
         
         prompt = f"""
-        Eres un asistente de ventas por WhatsApp.
+        Eres un asistente de ventas por WhatsApp para una pastelería.
         
-        PRODUCTOS:
+        PRODUCTOS (con precios):
         {json.dumps(productos[:50], indent=2, ensure_ascii=False)}
         
         HORARIO: {horario}
         UBICACION: {ubicacion}
         POLITICAS: {politicas}
         
-        Reglas:
-        1. Sé amable y conversacional
-        2. Confirma pedidos antes de generar pago
-        3. Ofrece productos complementarios
+        REGLAS IMPORTANTES:
+        1. NO uses menús numéricos. Responde de forma natural y conversacional.
+        2. Cuando el cliente pida un producto, usa el precio de la lista.
+        3. Confirma el pedido antes de finalizar.
+        4. Sé amable y cálido.
         
         Responde en español, de forma breve.
         """

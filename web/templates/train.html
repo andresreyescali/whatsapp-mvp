@@ -19,6 +19,12 @@
                 </a>
             </div>
             <div class="sidebar-item">
+                <a href="/admin/personalizacion?tenant_id={{ tenant_id }}" class="sidebar-link">
+                    <span class="icon">🎨</span>
+                    <span>Personalización</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
                 <a href="/admin/train?tenant_id={{ tenant_id }}" class="sidebar-link active">
                     <span class="icon">🤖</span>
                     <span>Entrenar IA</span>
@@ -37,7 +43,7 @@
         <div id="alertContainer"></div>
 
         <h2 class="mb-4">🤖 Entrenar Inteligencia Artificial</h2>
-        <p class="mb-4">La IA aprenderá sobre tus productos, horarios, ubicación y políticas para atender a tus clientes automáticamente.</p>
+        <p class="mb-4">La IA aprenderá tus productos y precios. Los datos se guardarán automáticamente en tu base de datos.</p>
 
         <div class="grid grid-cols-2" style="gap: 1.5rem;">
             <!-- Texto -->
@@ -46,9 +52,9 @@
                     <h3 class="card-title">📝 Entrenar con Texto</h3>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted mb-3">Describe tu negocio, productos y políticas en texto libre.</p>
+                    <p class="text-muted mb-3">Pega una lista de productos con precios. Ejemplo:</p>
                     <textarea id="trainTexto" class="form-control" rows="8" 
-                        placeholder="Ej: Somos una pastelería especializada en tortas personalizadas..."></textarea>
+                        placeholder="Torta Negra - Porción: $19,000&#10;Torta Negra - Libra: $177,500&#10;Torta Vainilla - Porción: $13,000&#10;Horario: Lunes a Domingo 8am-8pm"></textarea>
                     <button id="btnTrainTexto" class="btn btn-primary w-100 mt-3">🚀 Entrenar con Texto</button>
                 </div>
             </div>
@@ -59,7 +65,7 @@
                     <h3 class="card-title">🖼️ Entrenar con Imagen</h3>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted mb-3">Sube una foto de tu menú físico.</p>
+                    <p class="text-muted mb-3">Sube una foto de tu menú físico. La IA leerá los precios.</p>
                     <input type="file" id="trainImagen" class="form-control" accept="image/*">
                     <div id="imagePreview" style="margin-top: 1rem; display: none;">
                         <img id="previewImg" style="max-width: 100%; border-radius: 0.5rem;">
@@ -76,6 +82,16 @@
             </div>
             <div class="card-body" id="resultContent"></div>
         </div>
+        
+        <!-- Productos actuales -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3 class="card-title">📦 Productos en tu Base de Datos</h3>
+            </div>
+            <div class="card-body">
+                <div id="productosContainer" class="loading">Cargando productos...</div>
+            </div>
+        </div>
     </main>
 </div>
 
@@ -83,23 +99,70 @@
     const tenantId = '{{ tenant_id }}';
     let imagenBase64 = null;
 
+    // Cargar productos actuales
+    async function cargarProductos() {
+        const container = document.getElementById('productosContainer');
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/menu`, {
+                credentials: 'include'
+            });
+            const productos = await response.json();
+            
+            if (!productos || productos.length === 0) {
+                container.innerHTML = '<div class="empty-message">📭 No hay productos. Entrena uno para comenzar.</div>';
+                return;
+            }
+            
+            // Agrupar por categoría
+            const categorias = {};
+            for (const p of productos) {
+                const cat = p.categoria || 'general';
+                if (!categorias[cat]) categorias[cat] = [];
+                categorias[cat].push(p);
+            }
+            
+            let html = '<div style="max-height: 300px; overflow-y: auto;">';
+            for (const [cat, items] of Object.entries(categorias)) {
+                html += `<h4>📁 ${cat.toUpperCase()}</h4>`;
+                html += '<ul style="margin-bottom: 1rem;">';
+                for (const p of items.slice(0, 20)) {
+                    html += `<li><strong>${escapeHtml(p.nombre)}</strong> - $${(p.precio || 0).toLocaleString()}</li>`;
+                }
+                if (items.length > 20) {
+                    html += `<li class="text-muted">... y ${items.length - 20} más</li>`;
+                }
+                html += '</ul>';
+            }
+            html += '</div>';
+            container.innerHTML = html;
+            
+        } catch (error) {
+            console.error('Error:', error);
+            container.innerHTML = '<div class="alert alert-error">❌ Error al cargar productos</div>';
+        }
+    }
+
     function mostrarResultados(resultado) {
         const container = document.getElementById('resultContainer');
         const content = document.getElementById('resultContent');
         
-        const productos = resultado.contexto?.productos || [];
-        const horario = resultado.contexto?.horario || '';
-        const ubicacion = resultado.contexto?.ubicacion || '';
+        const productos = resultado.productos || [];
+        const horario = resultado.horario || '';
+        const ubicacion = resultado.ubicacion || '';
+        const guardados = resultado.productos_guardados || 0;
         
         content.innerHTML = `
             <div class="mb-3">
-                <strong>✅ Productos detectados:</strong> ${resultado.productos_guardados || productos.length}
+                <strong>✅ Productos detectados:</strong> ${productos.length}
+                <br>
+                <strong>💾 Productos guardados (nuevos):</strong> ${guardados}
             </div>
             ${productos.length > 0 ? `
                 <div class="mb-3">
                     <strong>📦 Productos extraídos:</strong>
                     <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem;">
-                        ${productos.map(p => `<span class="badge badge-info">${escapeHtml(p.nombre)} - $${(p.precio || 0).toLocaleString()}</span>`).join('')}
+                        ${productos.slice(0, 15).map(p => `<span class="badge badge-info">${escapeHtml(p.nombre)} - $${(p.precio || 0).toLocaleString()}</span>`).join('')}
+                        ${productos.length > 15 ? `<span class="badge badge-muted">+${productos.length - 15} más</span>` : ''}
                     </div>
                 </div>
             ` : ''}
@@ -111,18 +174,21 @@
         `;
         container.style.display = 'block';
         container.scrollIntoView({ behavior: 'smooth' });
+        
+        // Recargar productos
+        cargarProductos();
     }
 
     document.getElementById('btnTrainTexto').addEventListener('click', async () => {
         const texto = document.getElementById('trainTexto').value;
         if (!texto.trim()) {
-            showAlert('Por favor ingresa una descripción del negocio', 'warning');
+            showAlert('Por favor ingresa una lista de productos y precios', 'warning');
             return;
         }
         
         const btn = document.getElementById('btnTrainTexto');
         btn.disabled = true;
-        btn.innerHTML = '<span class="loader" style="width:16px;height:16px;display:inline-block;margin-right:8px;"></span> Procesando...';
+        btn.innerHTML = '⏳ Procesando...';
         showLoader();
         
         try {
@@ -134,7 +200,7 @@
             });
             const result = await response.json();
             if (result.status === 'ok') {
-                showAlert('✅ Entrenamiento completado exitosamente', 'success');
+                showAlert('✅ Entrenamiento completado', 'success');
                 mostrarResultados(result);
             } else {
                 showAlert(result.error || 'Error al procesar', 'error');
@@ -179,7 +245,7 @@
         }
         
         btnImagen.disabled = true;
-        btnImagen.innerHTML = '<span class="loader" style="width:16px;height:16px;display:inline-block;margin-right:8px;"></span> Procesando imagen...';
+        btnImagen.innerHTML = '⏳ Procesando imagen...';
         showLoader();
         
         try {
@@ -211,5 +277,8 @@
         div.textContent = text;
         return div.innerHTML;
     }
+
+    // Inicializar
+    cargarProductos();
 </script>
 {% endblock %}
