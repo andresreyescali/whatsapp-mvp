@@ -1,0 +1,795 @@
+{% extends "base.html" %}
+
+{% block title %}Configuración de Personalización - {{ tenant.nombre if tenant else 'WhatsApp Bot SaaS' }}{% endblock %}
+
+{% block content %}
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-menu">
+            <div class="sidebar-item">
+                <a href="/dashboard" class="sidebar-link">
+                    <span class="icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/admin/menu?tenant_id={{ tenant.id }}" class="sidebar-link">
+                    <span class="icon">📋</span>
+                    <span>Gestión de Menú</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/admin/personalizacion?tenant_id={{ tenant.id }}" class="sidebar-link active">
+                    <span class="icon">🎨</span>
+                    <span>Personalización</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/admin/train?tenant_id={{ tenant.id }}" class="sidebar-link">
+                    <span class="icon">🤖</span>
+                    <span>Entrenar IA</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/panel/{{ tenant.id }}" class="sidebar-link">
+                    <span class="icon">🏪</span>
+                    <span>Mi Negocio</span>
+                </a>
+            </div>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div id="alertContainer"></div>
+
+        <div class="d-flex justify-between align-center mb-4">
+            <h2>🎨 Configuración de Personalización - {{ tenant.nombre }}</h2>
+            <button class="btn btn-primary" onclick="abrirModalConfiguracion()">➕ Nueva Configuración</button>
+        </div>
+
+        <!-- Configuración general -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="card-title">⚙️ Configuración General</h3>
+            </div>
+            <div class="card-body">
+                <label class="d-flex align-center gap-2">
+                    <input type="checkbox" id="personalizacionHabilitada" onchange="togglePersonalizacionGlobal()">
+                    <span>🎨 Habilitar personalización de productos en WhatsApp</span>
+                </label>
+                <p class="text-muted mt-2">Si está habilitado, los clientes podrán personalizar productos según las configuraciones definidas abajo.</p>
+            </div>
+        </div>
+
+        <!-- Lista de configuraciones -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">📋 Tipos de Personalización</h3>
+                <span class="badge badge-info" id="configsCount">0 configuraciones</span>
+            </div>
+            <div id="configsContainer" class="loading">Cargando configuraciones...</div>
+        </div>
+    </main>
+</div>
+
+<!-- Modal para Configuración -->
+<div id="configModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h3 id="configModalTitle">➕ Nueva Configuración</h3>
+            <button class="modal-close" onclick="cerrarModalConfiguracion()">&times;</button>
+        </div>
+        <form id="formConfiguracion">
+            <input type="hidden" id="configId">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Nombre *</label>
+                    <input type="text" id="configNombre" class="form-control" required placeholder="Ej: tortas, arepas, carros">
+                    <small class="text-muted">El cliente usará este nombre para personalizar (ej: "quiero personalizar una torta")</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Descripción</label>
+                    <textarea id="configDescripcion" class="form-control" rows="2" placeholder="Descripción de este tipo de personalización"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Instrucciones para IA</label>
+                    <textarea id="configInstrucciones" class="form-control" rows="3" placeholder="Instrucciones adicionales para la IA sobre cómo manejar esta personalización"></textarea>
+                    <small class="text-muted">Ej: "El cliente puede personalizar tortas eligiendo sabor, tamaño, tipo de base, letreros, caja y mensaje especial"</small>
+                </div>
+                <div class="form-check">
+                    <label class="d-flex align-center gap-2">
+                        <input type="checkbox" id="configActivo" checked>
+                        <span>✅ Activo</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="cerrarModalConfiguracion()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal para Atributos -->
+<div id="atributoModal" class="modal">
+    <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-header">
+            <h3 id="atributoModalTitle">➕ Nuevo Atributo</h3>
+            <button class="modal-close" onclick="cerrarModalAtributo()">&times;</button>
+        </div>
+        <form id="formAtributo">
+            <input type="hidden" id="atributoId">
+            <input type="hidden" id="atributoConfigId">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Nombre del atributo *</label>
+                    <input type="text" id="atributoNombre" class="form-control" required placeholder="Ej: sabor, tamaño, color">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Tipo *</label>
+                    <select id="atributoTipo" class="form-control" onchange="cambiarTipoAtributo()">
+                        <option value="select">📋 Selección (lista de opciones)</option>
+                        <option value="texto">📝 Texto libre</option>
+                        <option value="numero">🔢 Número</option>
+                        <option value="si_no">✅ Sí/No</option>
+                    </select>
+                </div>
+                <div class="form-group" id="opcionesGroup" style="display: none;">
+                    <label class="form-label">Opciones (separadas por comas)</label>
+                    <input type="text" id="atributoOpciones" class="form-control" placeholder="Ej: Vainilla, Chocolate, Fresa">
+                    <small class="text-muted">Solo para tipo "Selección"</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Pregunta para el cliente *</label>
+                    <input type="text" id="atributoPregunta" class="form-control" required placeholder="Ej: ¿Qué sabor te gustaría?">
+                </div>
+                <div class="form-group" id="precioExtraGroup" style="display: none;">
+                    <label class="form-label">Precios extra (JSON)</label>
+                    <textarea id="atributoPrecioExtra" class="form-control" rows="2" placeholder='{"Vainilla": 0, "Chocolate": 2000, "Fresa": 1500}'></textarea>
+                    <small class="text-muted">Formato JSON: {"opcion": precio_extra}. Solo para tipo "Selección"</small>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="d-flex align-center gap-2">
+                            <input type="checkbox" id="atributoRequerido" checked>
+                            <span>⚠️ Requerido (el cliente debe responder)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Orden</label>
+                    <input type="number" id="atributoOrden" class="form-control" value="0" min="0">
+                    <small class="text-muted">Número más bajo = pregunta primero</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="cerrarModalAtributo()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Guardar Atributo</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .config-card {
+        background: white;
+        border-radius: 12px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+    .config-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+    }
+    .config-header h3 {
+        margin: 0;
+        font-size: 1.1rem;
+    }
+    .config-header .badge {
+        background: rgba(255,255,255,0.2);
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+    }
+    .config-body {
+        padding: 20px;
+        display: none;
+    }
+    .config-body.open {
+        display: block;
+    }
+    .atributo-item {
+        background: #f9fafb;
+        border-radius: 8px;
+        padding: 12px 15px;
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-left: 3px solid #667eea;
+    }
+    .atributo-info {
+        flex: 1;
+    }
+    .atributo-nombre {
+        font-weight: 600;
+        margin-bottom: 5px;
+    }
+    .atributo-pregunta {
+        font-size: 0.85rem;
+        color: #6b7280;
+    }
+    .atributo-precio {
+        font-size: 0.75rem;
+        color: #10b981;
+        margin-top: 4px;
+    }
+    .atributo-actions {
+        display: flex;
+        gap: 8px;
+    }
+    .btn-icon {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.2rem;
+        padding: 5px;
+        border-radius: 6px;
+    }
+    .btn-icon.edit:hover {
+        background: #e0e7ff;
+        color: #4f46e5;
+    }
+    .btn-icon.delete:hover {
+        background: #fee2e2;
+        color: #ef4444;
+    }
+    .empty-message {
+        color: #9ca3af;
+        text-align: center;
+        padding: 40px;
+        font-style: italic;
+    }
+    .inactivo {
+        opacity: 0.6;
+        filter: grayscale(0.2);
+    }
+</style>
+
+<script>
+    var tenantId = '{{ tenant.id }}';
+    var configuraciones = [];
+    var currentConfigId = null;
+
+    async function verificarSesion() {
+        try {
+            var response = await fetch('/api/check-session', { 
+                method: 'GET',
+                credentials: 'include'
+            });
+            if (response.status === 401) {
+                showAlert('⚠️ Tu sesión ha expirado. Serás redirigido.', 'error');
+                setTimeout(function() { window.location.href = '/'; }, 2000);
+                return false;
+            }
+            return true;
+        } catch (error) {
+            console.error('Error verificando sesión:', error);
+            return true;
+        }
+    }
+
+    async function cargarConfiguraciones() {
+        var sessionOk = await verificarSesion();
+        if (!sessionOk) return;
+
+        var container = document.getElementById('configsContainer');
+        container.innerHTML = '<div class="loading">Cargando configuraciones...</div>';
+
+        try {
+            var response = await fetch('/api/tenant/' + tenantId + '/personalizacion/configs?activos=false', {
+                credentials: 'include'
+            });
+
+            if (!response.ok) throw new Error('Error ' + response.status);
+
+            configuraciones = await response.json();
+            document.getElementById('configsCount').innerHTML = configuraciones.length + ' configuraciones';
+            
+            // Cargar estado de personalización global
+            await cargarEstadoGlobal();
+            
+            renderConfiguraciones();
+        } catch (error) {
+            console.error('Error cargando configuraciones:', error);
+            container.innerHTML = '<div class="alert alert-error">❌ Error al cargar las configuraciones</div>';
+        }
+    }
+
+    async function cargarEstadoGlobal() {
+        try {
+            var response = await fetch('/api/tenant/' + tenantId + '/configuracion', {
+                credentials: 'include'
+            });
+            if (response.ok) {
+                var config = await response.json();
+                var habilitada = config.personalizacion?.habilitada ?? true;
+                document.getElementById('personalizacionHabilitada').checked = habilitada;
+            }
+        } catch (error) {
+            console.error('Error cargando estado global:', error);
+        }
+    }
+
+    async function togglePersonalizacionGlobal() {
+        var habilitada = document.getElementById('personalizacionHabilitada').checked;
+        try {
+            var response = await fetch('/api/tenant/' + tenantId + '/personalizacion/habilitar', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ habilitada: habilitada }),
+                credentials: 'include'
+            });
+            if (response.ok) {
+                showAlert(habilitada ? '✅ Personalización habilitada' : '⏹️ Personalización deshabilitada', 'success');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('Error al cambiar estado', 'error');
+        }
+    }
+
+    async function renderConfiguraciones() {
+        var container = document.getElementById('configsContainer');
+        
+        if (!configuraciones || configuraciones.length === 0) {
+            container.innerHTML = '<div class="empty-message">📭 No hay configuraciones de personalización. Crea tu primera configuración.</div>';
+            return;
+        }
+
+        var html = '';
+        for (var i = 0; i < configuraciones.length; i++) {
+            var cfg = configuraciones[i];
+            var activoClass = cfg.activo ? '' : 'inactivo';
+            
+            html += `
+                <div class="config-card ${activoClass}" id="config-${cfg.id}">
+                    <div class="config-header" onclick="toggleConfigBody(${cfg.id})">
+                        <div>
+                            <h3>🎨 ${escapeHtml(cfg.nombre)}</h3>
+                            ${cfg.descripcion ? `<small style="opacity:0.8;">${escapeHtml(cfg.descripcion)}</small>` : ''}
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span class="badge">ID: ${cfg.id}</span>
+                            <span class="badge ${cfg.activo ? 'badge-success' : 'badge-warning'}">${cfg.activo ? 'Activo' : 'Inactivo'}</span>
+                            <button class="btn-icon edit" onclick="event.stopPropagation(); editarConfiguracion(${cfg.id})" title="Editar">✏️</button>
+                            <button class="btn-icon delete" onclick="event.stopPropagation(); eliminarConfiguracion(${cfg.id}, '${escapeHtml(cfg.nombre)}')" title="Eliminar">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="config-body" id="config-body-${cfg.id}">
+                        <div class="d-flex justify-between align-center mb-3">
+                            <h4>📋 Atributos de personalización</h4>
+                            <button class="btn btn-sm btn-primary" onclick="abrirModalAtributo(${cfg.id})">➕ Agregar atributo</button>
+                        </div>
+                        <div id="atributos-${cfg.id}" class="loading">Cargando atributos...</div>
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+        
+        // Cargar atributos para cada configuración
+        for (var i = 0; i < configuraciones.length; i++) {
+            cargarAtributos(configuraciones[i].id);
+        }
+    }
+
+    async function cargarAtributos(configId) {
+        var container = document.getElementById(`atributos-${configId}`);
+        if (!container) return;
+        
+        container.innerHTML = '<div class="loading">Cargando atributos...</div>';
+        
+        try {
+            var response = await fetch(`/api/tenant/${tenantId}/personalizacion/configs/${configId}/atributos?activos=false`, {
+                credentials: 'include'
+            });
+            
+            if (!response.ok) throw new Error('Error ' + response.status);
+            
+            var atributos = await response.json();
+            
+            if (!atributos || atributos.length === 0) {
+                container.innerHTML = '<div class="empty-message">📭 No hay atributos. Agrega el primero.</div>';
+                return;
+            }
+            
+            var html = '';
+            for (var i = 0; i < atributos.length; i++) {
+                var attr = atributos[i];
+                var tipoIcono = '';
+                if (attr.tipo === 'select') tipoIcono = '📋';
+                else if (attr.tipo === 'texto') tipoIcono = '📝';
+                else if (attr.tipo === 'numero') tipoIcono = '🔢';
+                else if (attr.tipo === 'si_no') tipoIcono = '✅';
+                
+                var precioHtml = '';
+                if (attr.precio_extra && Object.keys(attr.precio_extra).length > 0) {
+                    precioHtml = '<div class="atributo-precio">💰 Precios extra: ' + JSON.stringify(attr.precio_extra) + '</div>';
+                }
+                
+                html += `
+                    <div class="atributo-item" id="atributo-${attr.id}">
+                        <div class="atributo-info">
+                            <div class="atributo-nombre">${tipoIcono} ${escapeHtml(attr.nombre)} ${attr.requerido ? '<span class="badge badge-warning" style="font-size:10px;">Requerido</span>' : ''}</div>
+                            <div class="atributo-pregunta">📝 ${escapeHtml(attr.pregunta)}</div>
+                            ${precioHtml}
+                            <div style="font-size:0.7rem; color:#999;">Orden: ${attr.orden} | ${attr.activo ? 'Activo' : 'Inactivo'}</div>
+                        </div>
+                        <div class="atributo-actions">
+                            <button class="btn-icon edit" onclick="editarAtributo(${configId}, ${attr.id})" title="Editar">✏️</button>
+                            <button class="btn-icon delete" onclick="eliminarAtributo(${configId}, ${attr.id})" title="Eliminar">🗑️</button>
+                        </div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        } catch (error) {
+            console.error('Error cargando atributos:', error);
+            container.innerHTML = '<div class="alert alert-error">❌ Error al cargar atributos</div>';
+        }
+    }
+
+    function toggleConfigBody(configId) {
+        var body = document.getElementById(`config-body-${configId}`);
+        if (body) {
+            body.classList.toggle('open');
+        }
+    }
+
+    function abrirModalConfiguracion(configuracion) {
+        var modal = document.getElementById('configModal');
+        var title = document.getElementById('configModalTitle');
+        
+        if (configuracion) {
+            title.textContent = '✏️ Editar Configuración';
+            document.getElementById('configId').value = configuracion.id;
+            document.getElementById('configNombre').value = configuracion.nombre;
+            document.getElementById('configDescripcion').value = configuracion.descripcion || '';
+            document.getElementById('configInstrucciones').value = configuracion.instrucciones_ia || '';
+            document.getElementById('configActivo').checked = configuracion.activo === true;
+        } else {
+            title.textContent = '➕ Nueva Configuración';
+            document.getElementById('formConfiguracion').reset();
+            document.getElementById('configId').value = '';
+            document.getElementById('configActivo').checked = true;
+        }
+        modal.classList.add('active');
+    }
+
+    function cerrarModalConfiguracion() {
+        document.getElementById('configModal').classList.remove('active');
+    }
+
+    async function editarConfiguracion(configId) {
+        var cfg = configuraciones.find(c => c.id === configId);
+        if (cfg) {
+            abrirModalConfiguracion(cfg);
+        }
+    }
+
+    async function eliminarConfiguracion(configId, nombre) {
+        if (!confirm(`¿Estás seguro de eliminar la configuración "${nombre}"?\n\nEsto también eliminará TODOS sus atributos.`)) return;
+        
+        try {
+            var response = await fetch(`/api/tenant/${tenantId}/personalizacion/configs/${configId}`, {
+                method: 'DELETE',
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                showAlert(`✅ Configuración "${nombre}" eliminada`, 'success');
+                cargarConfiguraciones();
+            } else {
+                var error = await response.json();
+                showAlert('❌ Error: ' + (error.error || 'No se pudo eliminar'), 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('❌ Error de conexión', 'error');
+        }
+    }
+
+    function abrirModalAtributo(configId, atributo) {
+        currentConfigId = configId;
+        var modal = document.getElementById('atributoModal');
+        var title = document.getElementById('atributoModalTitle');
+        
+        if (atributo) {
+            title.textContent = '✏️ Editar Atributo';
+            document.getElementById('atributoId').value = atributo.id;
+            document.getElementById('atributoConfigId').value = configId;
+            document.getElementById('atributoNombre').value = atributo.nombre;
+            document.getElementById('atributoTipo').value = atributo.tipo;
+            document.getElementById('atributoPregunta').value = atributo.pregunta;
+            document.getElementById('atributoRequerido').checked = atributo.requerido === true;
+            document.getElementById('atributoOrden').value = atributo.orden || 0;
+            
+            if (atributo.opciones && atributo.opciones.length > 0) {
+                document.getElementById('atributoOpciones').value = atributo.opciones.join(', ');
+            } else {
+                document.getElementById('atributoOpciones').value = '';
+            }
+            
+            if (atributo.precio_extra) {
+                document.getElementById('atributoPrecioExtra').value = JSON.stringify(atributo.precio_extra, null, 2);
+            } else {
+                document.getElementById('atributoPrecioExtra').value = '';
+            }
+        } else {
+            title.textContent = '➕ Nuevo Atributo';
+            document.getElementById('formAtributo').reset();
+            document.getElementById('atributoId').value = '';
+            document.getElementById('atributoConfigId').value = configId;
+            document.getElementById('atributoTipo').value = 'select';
+            document.getElementById('atributoRequerido').checked = true;
+            document.getElementById('atributoOrden').value = 0;
+        }
+        
+        cambiarTipoAtributo();
+        modal.classList.add('active');
+    }
+
+    function cerrarModalAtributo() {
+        document.getElementById('atributoModal').classList.remove('active');
+        currentConfigId = null;
+    }
+
+    function cambiarTipoAtributo() {
+        var tipo = document.getElementById('atributoTipo').value;
+        var opcionesGroup = document.getElementById('opcionesGroup');
+        var precioExtraGroup = document.getElementById('precioExtraGroup');
+        
+        if (tipo === 'select') {
+            opcionesGroup.style.display = 'block';
+            precioExtraGroup.style.display = 'block';
+        } else {
+            opcionesGroup.style.display = 'none';
+            precioExtraGroup.style.display = 'none';
+        }
+    }
+
+    async function editarAtributo(configId, attrId) {
+        try {
+            var response = await fetch(`/api/tenant/${tenantId}/personalizacion/configs/${configId}/atributos?activos=false`, {
+                credentials: 'include'
+            });
+            var atributos = await response.json();
+            var atributo = atributos.find(a => a.id === attrId);
+            if (atributo) {
+                abrirModalAtributo(configId, atributo);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('Error al cargar el atributo', 'error');
+        }
+    }
+
+    async function eliminarAtributo(configId, attrId) {
+        if (!confirm('¿Estás seguro de eliminar este atributo?')) return;
+        
+        try {
+            var response = await fetch(`/api/tenant/${tenantId}/personalizacion/atributos/${attrId}`, {
+                method: 'DELETE',
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                showAlert('✅ Atributo eliminado', 'success');
+                cargarAtributos(configId);
+            } else {
+                showAlert('❌ Error al eliminar el atributo', 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('❌ Error de conexión', 'error');
+        }
+    }
+
+    function showAlert(message, type) {
+        var container = document.getElementById('alertContainer');
+        if (!container) return;
+        
+        var alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-' + type;
+        alertDiv.innerHTML = message + '<button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.25rem;" onclick="this.parentElement.remove()">×</button>';
+        container.appendChild(alertDiv);
+        setTimeout(function() { if(alertDiv.parentElement) alertDiv.remove(); }, 5000);
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Formularios
+    document.getElementById('formConfiguracion').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        var configId = document.getElementById('configId').value;
+        var data = {
+            nombre: document.getElementById('configNombre').value,
+            descripcion: document.getElementById('configDescripcion').value,
+            instrucciones_ia: document.getElementById('configInstrucciones').value,
+            activo: document.getElementById('configActivo').checked
+        };
+        
+        var submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Guardando...';
+        
+        try {
+            var url, method;
+            if (configId) {
+                url = `/api/tenant/${tenantId}/personalizacion/configs/${configId}`;
+                method = 'PUT';
+            } else {
+                url = `/api/tenant/${tenantId}/personalizacion/configs`;
+                method = 'POST';
+            }
+            
+            var response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                showAlert(configId ? '✅ Configuración actualizada' : '✅ Configuración creada', 'success');
+                cerrarModalConfiguracion();
+                cargarConfiguraciones();
+            } else {
+                var error = await response.json();
+                showAlert('❌ Error: ' + (error.error || 'No se pudo guardar'), 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('❌ Error de conexión', 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Guardar';
+        }
+    });
+
+    document.getElementById('formAtributo').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        var attrId = document.getElementById('atributoId').value;
+        var configId = document.getElementById('atributoConfigId').value;
+        var tipo = document.getElementById('atributoTipo').value;
+        
+        var data = {
+            config_id: parseInt(configId),
+            nombre: document.getElementById('atributoNombre').value,
+            tipo: tipo,
+            pregunta: document.getElementById('atributoPregunta').value,
+            requerido: document.getElementById('atributoRequerido').checked,
+            orden: parseInt(document.getElementById('atributoOrden').value) || 0
+        };
+        
+        if (tipo === 'select') {
+            var opcionesStr = document.getElementById('atributoOpciones').value;
+            if (opcionesStr) {
+                data.opciones = opcionesStr.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o; });
+            }
+            
+            var precioExtraStr = document.getElementById('atributoPrecioExtra').value;
+            if (precioExtraStr) {
+                try {
+                    data.precio_extra = JSON.parse(precioExtraStr);
+                } catch (e) {
+                    showAlert('⚠️ El JSON de precios extra no es válido', 'error');
+                    return;
+                }
+            }
+        }
+        
+        var submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Guardando...';
+        
+        try {
+            var url, method;
+            if (attrId) {
+                url = `/api/tenant/${tenantId}/personalizacion/atributos/${attrId}`;
+                method = 'PUT';
+            } else {
+                url = `/api/tenant/${tenantId}/personalizacion/atributos`;
+                method = 'POST';
+            }
+            
+            var response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                showAlert(attrId ? '✅ Atributo actualizado' : '✅ Atributo creado', 'success');
+                cerrarModalAtributo();
+                cargarAtributos(configId);
+            } else {
+                var error = await response.json();
+                showAlert('❌ Error: ' + (error.error || 'No se pudo guardar'), 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('❌ Error de conexión', 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Guardar';
+        }
+    });
+
+    // Exponer funciones globales
+    window.abrirModalConfiguracion = abrirModalConfiguracion;
+    window.cerrarModalConfiguracion = cerrarModalConfiguracion;
+    window.abrirModalAtributo = abrirModalAtributo;
+    window.cerrarModalAtributo = cerrarModalAtributo;
+    window.editarConfiguracion = editarConfiguracion;
+    window.eliminarConfiguracion = eliminarConfiguracion;
+    window.editarAtributo = editarAtributo;
+    window.eliminarAtributo = eliminarAtributo;
+    window.cargarConfiguraciones = cargarConfiguraciones;
+    window.toggleConfigBody = toggleConfigBody;
+    window.cambiarTipoAtributo = cambiarTipoAtributo;
+    window.togglePersonalizacionGlobal = togglePersonalizacionGlobal;
+
+    // Inicializar
+    cargarConfiguraciones();
+</script>
+
+<style>
+    .badge-success {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    .badge-warning {
+        background: #fed7aa;
+        color: #92400e;
+    }
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+    }
+    .mb-3 {
+        margin-bottom: 0.75rem;
+    }
+    .mt-3 {
+        margin-top: 0.75rem;
+    }
+    .mb-4 {
+        margin-bottom: 1.5rem;
+    }
+    .text-muted {
+        color: #6b7280;
+        font-size: 0.75rem;
+    }
+    .btn-sm {
+        padding: 5px 10px;
+        font-size: 0.75rem;
+    }
+</style>
+{% endblock %}

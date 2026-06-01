@@ -62,7 +62,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 3. Tabla de relación producto-adicionales (NUEVA)
+                # 3. Tabla de relación producto-adicionales
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".producto_adicionales (
                     id SERIAL PRIMARY KEY,
@@ -76,7 +76,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 4. Tabla de personalizaciones globales (NUEVA)
+                # 4. Tabla de personalizaciones globales
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".personalizaciones (
                     id SERIAL PRIMARY KEY,
@@ -89,7 +89,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 5. Tabla de relación producto-personalizaciones (NUEVA)
+                # 5. Tabla de relación producto-personalizaciones
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".producto_personalizaciones (
                     id SERIAL PRIMARY KEY,
@@ -101,7 +101,38 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 6. Tabla de pedidos
+                # 6. TABLA DE CONFIGURACIÓN DE PERSONALIZACIÓN (NUEVA)
+                cur.execute(f'''
+                CREATE TABLE IF NOT EXISTS "{schema_name}".configuracion_personalizacion (
+                    id SERIAL PRIMARY KEY,
+                    nombre TEXT NOT NULL,
+                    descripcion TEXT,
+                    activo BOOLEAN DEFAULT true,
+                    instrucciones_ia TEXT,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+                ''')
+                
+                # 7. TABLA DE ATRIBUTOS PERSONALIZABLES (NUEVA)
+                cur.execute(f'''
+                CREATE TABLE IF NOT EXISTS "{schema_name}".atributos_personalizacion (
+                    id SERIAL PRIMARY KEY,
+                    config_id INTEGER REFERENCES "{schema_name}".configuracion_personalizacion(id) ON DELETE CASCADE,
+                    nombre TEXT NOT NULL,
+                    tipo TEXT NOT NULL CHECK (tipo IN ('select', 'texto', 'numero', 'si_no')),
+                    opciones JSONB,
+                    pregunta TEXT NOT NULL,
+                    requerido BOOLEAN DEFAULT true,
+                    precio_extra JSONB,
+                    orden INTEGER DEFAULT 0,
+                    activo BOOLEAN DEFAULT true,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+                ''')
+                
+                # 8. Tabla de pedidos
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -122,7 +153,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 7. Tabla de conversaciones
+                # 9. Tabla de conversaciones
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".conversaciones (
                     id SERIAL PRIMARY KEY,
@@ -135,7 +166,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 8. Tabla de carritos
+                # 10. Tabla de carritos
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
                     id SERIAL PRIMARY KEY,
@@ -147,7 +178,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 9. Tabla de reservas (específica para hotel y viajes)
+                # 11. Tabla de reservas (específica para hotel y viajes)
                 if tipo_negocio in ['hotel', 'agencia_viajes']:
                     cur.execute(f'''
                     CREATE TABLE IF NOT EXISTS "{schema_name}".reservas (
@@ -178,6 +209,8 @@ class SchemaManager:
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_destacado ON "{schema_name}".productos(destacado) WHERE destacado = true')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_metadata ON "{schema_name}".productos USING gin(metadata)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_es_base ON "{schema_name}".productos(es_base)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_config_activo ON "{schema_name}".configuracion_personalizacion(activo)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_atributos_config ON "{schema_name}".atributos_personalizacion(config_id)')
                 
                 if tipo_negocio in ['hotel', 'agencia_viajes']:
                     cur.execute(f'CREATE INDEX IF NOT EXISTS idx_reservas_cliente ON "{schema_name}".reservas(cliente_id)')
@@ -186,9 +219,81 @@ class SchemaManager:
                 # Insertar productos de ejemplo
                 self._insert_default_products(cur, schema_name, tipo_negocio)
                 
+                # Insertar configuraciones de ejemplo según tipo de negocio
+                self._insert_default_personalizacion_configs(cur, schema_name, tipo_negocio)
+                
             conn.commit()
         
         logger.info(f'Schema creado exitosamente para {tenant_id}')
+    
+    def _insert_default_personalizacion_configs(self, cursor, schema_name: str, tipo_negocio: str):
+        """Inserta configuraciones de personalización de ejemplo según tipo de negocio"""
+        
+        cursor.execute(f'SELECT COUNT(*) FROM "{schema_name}".configuracion_personalizacion')
+        count = cursor.fetchone()[0]
+        if count > 0:
+            logger.info(f"Ya existen {count} configuraciones en {schema_name}, omitiendo inserción")
+            return
+        
+        if tipo_negocio == "pasteleria":
+            # Configuración para tortas personalizadas
+            cursor.execute(f'''
+            INSERT INTO "{schema_name}".configuracion_personalizacion (nombre, descripcion, instrucciones_ia) VALUES (
+                'tortas',
+                'Personalización de tortas decoradas',
+                'El cliente puede personalizar tortas eligiendo sabor, tamaño, tipo de base, letreros, caja y mensaje especial. Cada atributo puede tener precio extra.'
+            ) RETURNING id
+            ''')
+            config_id = cursor.fetchone()[0]
+            
+            # Atributos para tortas
+            cursor.execute(f'''
+            INSERT INTO "{schema_name}".atributos_personalizacion (config_id, nombre, tipo, opciones, pregunta, requerido, precio_extra, orden) VALUES
+                ({config_id}, 'sabor', 'select', '["Vainilla Arequipe", "Amapola", "Naranja-Vainilla", "Chocolate/Milky Way", "Red Velvet", "Ponque Tradicional", "Torta Negra", "Manzana y Nueces", "Cookies & Cream"]', '¿Qué sabor te gustaría?', true, '{{"Vainilla Arequipe": 13000, "Amapola": 14000, "Naranja-Vainilla": 12000, "Chocolate/Milky Way": 14000, "Red Velvet": 14000, "Ponque Tradicional": 17500, "Torta Negra": 19000, "Manzana y Nueces": 17500, "Cookies & Cream": 14000}}', 1),
+                ({config_id}, 'tamanio', 'select', '["Porción", "Cuarto", "Media", "Libra"]', '¿De qué tamaño la quieres? (Porción, Cuarto, Media o Libra)', true, '{{"factor": true, "valores": {{"Porción": 1, "Cuarto": 2.65, "Media": 4.6, "Libra": 8.4}}}}', 2),
+                ({config_id}, 'base', 'select', '["Glaze", "Dorada", "Fondant", "Drip colores", "Drip dorado"]', '¿Qué tipo de base prefieres?', false, '{{"Fondant": 15000, "Drip colores": 7000, "Drip dorado": 10000}}', 3),
+                ({config_id}, 'letrero', 'si_no', NULL, '¿Quieres agregar un letrero personalizado? (costo extra $8,000)', false, '{{"si": 8000}}', 4),
+                ({config_id}, 'caja', 'si_no', NULL, '¿Necesitas caja especial? (costo extra $12,000)', false, '{{"si": 12000}}', 5),
+                ({config_id}, 'mensaje', 'texto', NULL, '¿Quieres agregar un mensaje escrito en la torta?', false, NULL, 6)
+            ''')
+        
+        elif tipo_negocio == "restaurante":
+            # Configuración para arepas personalizadas
+            cursor.execute(f'''
+            INSERT INTO "{schema_name}".configuracion_personalizacion (nombre, descripcion, instrucciones_ia) VALUES (
+                'arepas',
+                'Personalización de arepas',
+                'El cliente puede personalizar arepas eligiendo tipo de masa, relleno, salsas y acompañamientos.'
+            ) RETURNING id
+            ''')
+            config_id = cursor.fetchone()[0]
+            
+            cursor.execute(f'''
+            INSERT INTO "{schema_name}".atributos_personalizacion (config_id, nombre, tipo, opciones, pregunta, requerido, precio_extra, orden) VALUES
+                ({config_id}, 'masa', 'select', '["Blanca", "Maíz", "Integral", "Gofio"]', '¿Qué tipo de masa prefieres para tu arepa?', true, NULL, 1),
+                ({config_id}, 'relleno', 'select', '["Queso", "Carne mechada", "Pollo", "Chócolo", "Champiñones", "Mixto"]', '¿Qué relleno quieres?', true, '{{"Carne mechada": 3000, "Pollo": 3000, "Mixto": 5000}}', 2),
+                ({config_id}, 'salsas', 'select', '["Salsa de ajo", "Tártara", "Picante", "Rosada", "Sin salsa"]', '¿Qué salsa prefieres?', false, NULL, 3),
+                ({config_id}, 'extra_queso', 'si_no', NULL, '¿Quieres queso extra? (+$2,000)', false, '{{"si": 2000}}', 4)
+            ''')
+        
+        elif tipo_negocio == "venta_autos":
+            # Configuración para autos personalizados
+            cursor.execute(f'''
+            INSERT INTO "{schema_name}".configuracion_personalizacion (nombre, descripcion, instrucciones_ia) VALUES (
+                'carros',
+                'Personalización de autos',
+                'El cliente puede personalizar autos eligiendo modelo, color, llantas, asientos y accesorios.'
+            ) RETURNING id
+            ''')
+            config_id = cursor.fetchone()[0]
+            
+            cursor.execute(f'''
+            INSERT INTO "{schema_name}".atributos_personalizacion (config_id, nombre, tipo, opciones, pregunta, requerido, precio_extra, orden) VALUES
+                ({config_id}, 'modelo', 'select', '["Sedán", "SUV", "Deportivo", "Camioneta", "Hatchback"]', '¿Qué modelo de auto te interesa?', true, '{{"Deportivo": 15000000, "SUV": 5000000}}', 1),
+                ({config_id}, 'color', 'select', '["Rojo", "Azul", "Negro", "Blanco", "Plateado", "Gris"]', '¿De qué color lo quieres?', true, NULL, 2),
+                ({config_id}, 'llantas', 'select', '["Acero", "Aluminio", "Deportivas", "Negras mate"]', '¿Qué tipo de llantas prefieres?', false, '{{"Deportivas": 2500000, "Aluminio": 1500000}}', 3),
+                ({config_id}, 'asientos', 'select', '["Tela", "Cuero", "Deportivos", "Calefaccionados"]', '¿Qué tipo de asientos quieres?', false, '{{"Cuero": 3000000, "Calefaccionados": 2000000}}', 4)
+            ''')
     
     def ensure_schema(self, tenant_id: str):
         """Asegura que el esquema del tenant existe y tiene todas las tablas necesarias"""
@@ -308,10 +413,43 @@ class SchemaManager:
             )
         """)
         
+        # Tabla configuracion_personalizacion (NUEVA)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS "{schema_name}".configuracion_personalizacion (
+                id SERIAL PRIMARY KEY,
+                nombre TEXT NOT NULL,
+                descripcion TEXT,
+                activo BOOLEAN DEFAULT true,
+                instrucciones_ia TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        # Tabla atributos_personalizacion (NUEVA)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS "{schema_name}".atributos_personalizacion (
+                id SERIAL PRIMARY KEY,
+                config_id INTEGER REFERENCES "{schema_name}".configuracion_personalizacion(id) ON DELETE CASCADE,
+                nombre TEXT NOT NULL,
+                tipo TEXT NOT NULL CHECK (tipo IN ('select', 'texto', 'numero', 'si_no')),
+                opciones JSONB,
+                pregunta TEXT NOT NULL,
+                requerido BOOLEAN DEFAULT true,
+                precio_extra JSONB,
+                orden INTEGER DEFAULT 0,
+                activo BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
         # Índices para nuevas tablas
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_prod_adic_producto ON "{schema_name}".producto_adicionales(producto_id)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_prod_adic_adicional ON "{schema_name}".producto_adicionales(adicional_id)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_prod_perso_producto ON "{schema_name}".producto_personalizaciones(producto_id)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_config_activo ON "{schema_name}".configuracion_personalizacion(activo)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_atributos_config ON "{schema_name}".atributos_personalizacion(config_id)')
     
     def _ensure_tables_exist(self, schema_name: str, cur):
         """Verifica y crea las tablas necesarias si no existen"""
@@ -438,7 +576,7 @@ class SchemaManager:
                 ('Tipo de letra', 'select', '["Cursiva","Redonda","Manuscrita","Impronta"]'::jsonb, false)
             ''')
             
-            # Relaciones producto-adicional (obtener IDs dinámicamente)
+            # Relaciones producto-adicional
             cursor.execute(f'''
             DO $$
             DECLARE
@@ -561,7 +699,7 @@ class SchemaManager:
                         if tiene_es_base and len(row) > 10:
                             producto['es_base'] = row[10] if row[10] is not None else True
                         else:
-                            producto['es_base'] = True  # Default para tenants antiguos
+                            producto['es_base'] = True
                         
                         productos.append(producto)
                     return productos
@@ -625,12 +763,10 @@ class SchemaManager:
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Verificar si ya existe un producto con el mismo nombre
                     cur.execute(f'SELECT id FROM "{schema_name}".productos WHERE nombre ILIKE %s', (nombre,))
                     existing = cur.fetchone()
                     
                     if existing:
-                        # Actualizar producto existente
                         cur.execute(f"""
                             UPDATE "{schema_name}".productos 
                             SET nombre = %s, descripcion = %s, precio = %s, categoria = %s, 
@@ -642,7 +778,6 @@ class SchemaManager:
                         result_id = cur.fetchone()[0]
                         logger.info(f'Producto actualizado: {nombre}')
                     else:
-                        # Insertar nuevo producto
                         cur.execute(f"""
                             INSERT INTO "{schema_name}".productos 
                             (id, nombre, descripcion, precio, categoria, disponible, 
@@ -697,7 +832,6 @@ class SchemaManager:
                 updates.append("es_base = %s")
                 params.append(es_base)
             
-            # Manejar metadata (personalizaciones y adicionales)
             if personalizaciones is not None or adicionales is not None:
                 with db_manager.get_connection(tenant_id) as conn:
                     with conn.cursor() as cur2:
@@ -796,145 +930,288 @@ class SchemaManager:
             logger.error(f'Error obteniendo productos destacados: {e}')
             return []
     
-    # ==================== NUEVOS MÉTODOS PARA ADICIONALES Y PERSONALIZACIONES ====================
+    # ==================== NUEVOS MÉTODOS PARA CONFIGURACIÓN DE PERSONALIZACIÓN ====================
     
-    def get_productos_base(self, tenant_id: str):
-        """Obtiene solo los productos base (no adicionales)"""
+    def get_configuraciones_personalizacion(self, tenant_id: str, solo_activos: bool = True) -> list:
+        """Obtiene todas las configuraciones de personalización del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
+                    where = "WHERE activo = true" if solo_activos else ""
                     cur.execute(f"""
-                        SELECT id, nombre, descripcion, precio, categoria, imagen_url, 
-                               tiempo_preparacion, destacado, disponible
-                        FROM "{schema_name}".productos 
-                        WHERE es_base = true AND disponible = true
-                        ORDER BY destacado DESC, nombre
-                    """)
-                    rows = cur.fetchall()
-                    return [{
-                        'id': str(row[0]),
-                        'nombre': row[1],
-                        'descripcion': row[2] or '',
-                        'precio': row[3],
-                        'categoria': row[4] or 'general',
-                        'imagen_url': row[5],
-                        'tiempo_preparacion': row[6],
-                        'destacado': row[7] if row[7] else False,
-                        'disponible': row[8]
-                    } for row in rows]
-        except Exception as e:
-            logger.error(f'Error obteniendo productos base: {e}')
-            return []
-    
-    def get_adicionales_producto(self, tenant_id: str, producto_id: str):
-        """Obtiene los adicionales disponibles para un producto base"""
-        try:
-            schema_name = self._get_schema_name(tenant_id)
-            with db_manager.get_connection(tenant_id) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"""
-                        SELECT a.id, a.nombre, a.descripcion, a.precio, 
-                               pa.cantidad_maxima, pa.cantidad_minima, pa.predeterminado
-                        FROM "{schema_name}".producto_adicionales pa
-                        JOIN "{schema_name}".productos a ON pa.adicional_id = a.id
-                        WHERE pa.producto_id = %s AND a.disponible = true
-                        ORDER BY a.nombre
-                    """, (producto_id,))
-                    rows = cur.fetchall()
-                    return [{
-                        'id': str(row[0]),
-                        'nombre': row[1],
-                        'descripcion': row[2] or '',
-                        'precio': row[3],
-                        'cantidad_maxima': row[4],
-                        'cantidad_minima': row[5],
-                        'predeterminado': row[6] if row[6] else False
-                    } for row in rows]
-        except Exception as e:
-            logger.error(f'Error obteniendo adicionales: {e}')
-            return []
-    
-    def get_personalizaciones_producto(self, tenant_id: str, producto_id: str):
-        """Obtiene las personalizaciones requeridas para un producto base"""
-        try:
-            schema_name = self._get_schema_name(tenant_id)
-            with db_manager.get_connection(tenant_id) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"""
-                        SELECT p.id, p.nombre, p.tipo, p.opciones, p.requerido
-                        FROM "{schema_name}".producto_personalizaciones pp
-                        JOIN "{schema_name}".personalizaciones p ON pp.personalizacion_id = p.id
-                        WHERE pp.producto_id = %s
-                        ORDER BY pp.orden
-                    """, (producto_id,))
-                    rows = cur.fetchall()
-                    return [{
-                        'id': row[0],
-                        'nombre': row[1],
-                        'tipo': row[2],
-                        'opciones': row[3] if row[3] else [],
-                        'requerido': row[4] if row[4] else False
-                    } for row in rows]
-        except Exception as e:
-            logger.error(f'Error obteniendo personalizaciones: {e}')
-            return []
-    
-    def get_todos_adicionales(self, tenant_id: str):
-        """Obtiene todos los adicionales disponibles (para administración)"""
-        try:
-            schema_name = self._get_schema_name(tenant_id)
-            with db_manager.get_connection(tenant_id) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"""
-                        SELECT id, nombre, descripcion, precio, disponible, categoria
-                        FROM "{schema_name}".productos 
-                        WHERE es_base = false
+                        SELECT id, nombre, descripcion, activo, instrucciones_ia, created_at, updated_at
+                        FROM "{schema_name}".configuracion_personalizacion
+                        {where}
                         ORDER BY nombre
                     """)
                     rows = cur.fetchall()
                     return [{
-                        'id': str(row[0]),
+                        'id': row[0],
                         'nombre': row[1],
-                        'descripcion': row[2] or '',
-                        'precio': row[3],
-                        'disponible': row[4],
-                        'categoria': row[5] or 'adicionales'
+                        'descripcion': row[2],
+                        'activo': row[3],
+                        'instrucciones_ia': row[4],
+                        'created_at': row[5],
+                        'updated_at': row[6]
                     } for row in rows]
         except Exception as e:
-            logger.error(f'Error obteniendo adicionales: {e}')
+            logger.error(f'Error obteniendo configuraciones: {e}')
             return []
     
-    def calcular_precio_con_adicionales(self, tenant_id: str, producto_id: str, adicionales_ids: list, cantidades: dict = None):
-        """Calcula el precio total de un producto base más sus adicionales"""
+    def get_configuracion_personalizacion(self, tenant_id: str, config_id: int) -> dict:
+        """Obtiene una configuración de personalización por ID"""
         try:
             schema_name = self._get_schema_name(tenant_id)
-            total = 0
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT id, nombre, descripcion, activo, instrucciones_ia, created_at, updated_at
+                        FROM "{schema_name}".configuracion_personalizacion
+                        WHERE id = %s
+                    """, (config_id,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            'id': row[0],
+                            'nombre': row[1],
+                            'descripcion': row[2],
+                            'activo': row[3],
+                            'instrucciones_ia': row[4],
+                            'created_at': row[5],
+                            'updated_at': row[6]
+                        }
+                    return None
+        except Exception as e:
+            logger.error(f'Error obteniendo configuración {config_id}: {e}')
+            return None
+    
+    def create_configuracion_personalizacion(self, tenant_id: str, nombre: str, descripcion: str = None, 
+                                              instrucciones_ia: str = None) -> int:
+        """Crea una nueva configuración de personalización"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        INSERT INTO "{schema_name}".configuracion_personalizacion 
+                        (nombre, descripcion, instrucciones_ia, created_at, updated_at)
+                        VALUES (%s, %s, %s, NOW(), NOW())
+                        RETURNING id
+                    """, (nombre, descripcion, instrucciones_ia))
+                    config_id = cur.fetchone()[0]
+                conn.commit()
+                logger.info(f'Configuración de personalización creada: {nombre} (id: {config_id})')
+                return config_id
+        except Exception as e:
+            logger.error(f'Error creando configuración: {e}')
+            raise
+    
+    def update_configuracion_personalizacion(self, tenant_id: str, config_id: int, 
+                                             nombre: str = None, descripcion: str = None,
+                                             activo: bool = None, instrucciones_ia: str = None) -> bool:
+        """Actualiza una configuración de personalización"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            updates = []
+            params = []
+            
+            if nombre is not None:
+                updates.append("nombre = %s")
+                params.append(nombre)
+            if descripcion is not None:
+                updates.append("descripcion = %s")
+                params.append(descripcion)
+            if activo is not None:
+                updates.append("activo = %s")
+                params.append(activo)
+            if instrucciones_ia is not None:
+                updates.append("instrucciones_ia = %s")
+                params.append(instrucciones_ia)
+            
+            if not updates:
+                return False
+            
+            updates.append("updated_at = NOW()")
+            params.append(config_id)
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Precio del producto base
-                    cur.execute(f'SELECT precio FROM "{schema_name}".productos WHERE id = %s', (producto_id,))
-                    row = cur.fetchone()
-                    if row:
-                        total += row[0]
-                    
-                    # Precio de los adicionales
-                    if adicionales_ids:
-                        cur.execute(f"""
-                            SELECT id, precio FROM "{schema_name}".productos 
-                            WHERE id = ANY(%s) AND es_base = false
-                        """, (adicionales_ids,))
-                        for row in cur.fetchall():
-                            adicional_id = str(row[0])
-                            precio = row[1]
-                            cantidad = cantidades.get(adicional_id, 1) if cantidades else 1
-                            total += precio * cantidad
+                    cur.execute(f"""
+                        UPDATE "{schema_name}".configuracion_personalizacion
+                        SET {', '.join(updates)}
+                        WHERE id = %s
+                    """, params)
+                    updated = cur.rowcount
+                conn.commit()
             
-            return total
+            return updated > 0
         except Exception as e:
-            logger.error(f'Error calculando precio: {e}')
-            return 0
+            logger.error(f'Error actualizando configuración {config_id}: {e}')
+            raise
+    
+    def delete_configuracion_personalizacion(self, tenant_id: str, config_id: int) -> bool:
+        """Elimina una configuración de personalización (y sus atributos por CASCADE)"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        DELETE FROM "{schema_name}".configuracion_personalizacion
+                        WHERE id = %s
+                    """, (config_id,))
+                    deleted = cur.rowcount
+                conn.commit()
+            
+            if deleted > 0:
+                logger.info(f'Configuración {config_id} eliminada')
+            return deleted > 0
+        except Exception as e:
+            logger.error(f'Error eliminando configuración {config_id}: {e}')
+            raise
+    
+    # ==================== NUEVOS MÉTODOS PARA ATRIBUTOS DE PERSONALIZACIÓN ====================
+    
+    def get_atributos_personalizacion(self, tenant_id: str, config_id: int = None, solo_activos: bool = True) -> list:
+        """Obtiene los atributos de personalización, opcionalmente filtrados por config_id"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    if config_id:
+                        where = f"WHERE config_id = %s"
+                        if solo_activos:
+                            where += " AND activo = true"
+                        cur.execute(f"""
+                            SELECT id, config_id, nombre, tipo, opciones, pregunta, 
+                                   requerido, precio_extra, orden, activo, created_at, updated_at
+                            FROM "{schema_name}".atributos_personalizacion
+                            {where}
+                            ORDER BY orden
+                        """, (config_id,))
+                    else:
+                        where = "WHERE activo = true" if solo_activos else ""
+                        cur.execute(f"""
+                            SELECT id, config_id, nombre, tipo, opciones, pregunta, 
+                                   requerido, precio_extra, orden, activo, created_at, updated_at
+                            FROM "{schema_name}".atributos_personalizacion
+                            {where}
+                            ORDER BY config_id, orden
+                        """)
+                    rows = cur.fetchall()
+                    return [{
+                        'id': row[0],
+                        'config_id': row[1],
+                        'nombre': row[2],
+                        'tipo': row[3],
+                        'opciones': row[4] if row[4] else [],
+                        'pregunta': row[5],
+                        'requerido': row[6],
+                        'precio_extra': row[7] if row[7] else {},
+                        'orden': row[8],
+                        'activo': row[9],
+                        'created_at': row[10],
+                        'updated_at': row[11]
+                    } for row in rows]
+        except Exception as e:
+            logger.error(f'Error obteniendo atributos: {e}')
+            return []
+    
+    def create_atributo_personalizacion(self, tenant_id: str, config_id: int, nombre: str, tipo: str,
+                                        pregunta: str, opciones: list = None, requerido: bool = True,
+                                        precio_extra: dict = None, orden: int = 0) -> int:
+        """Crea un nuevo atributo de personalización"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        INSERT INTO "{schema_name}".atributos_personalizacion 
+                        (config_id, nombre, tipo, opciones, pregunta, requerido, precio_extra, orden, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        RETURNING id
+                    """, (config_id, nombre, tipo, json.dumps(opciones) if opciones else None, 
+                          pregunta, requerido, json.dumps(precio_extra) if precio_extra else None, orden))
+                    attr_id = cur.fetchone()[0]
+                conn.commit()
+                logger.info(f'Atributo creado: {nombre} (id: {attr_id})')
+                return attr_id
+        except Exception as e:
+            logger.error(f'Error creando atributo: {e}')
+            raise
+    
+    def update_atributo_personalizacion(self, tenant_id: str, attr_id: int, **kwargs) -> bool:
+        """Actualiza un atributo de personalización"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            allowed_fields = ['nombre', 'tipo', 'opciones', 'pregunta', 'requerido', 'precio_extra', 'orden', 'activo']
+            updates = []
+            params = []
+            
+            for field, value in kwargs.items():
+                if field in allowed_fields:
+                    if field in ['opciones', 'precio_extra']:
+                        value = json.dumps(value) if value else None
+                    updates.append(f"{field} = %s")
+                    params.append(value)
+            
+            if not updates:
+                return False
+            
+            updates.append("updated_at = NOW()")
+            params.append(attr_id)
+            
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        UPDATE "{schema_name}".atributos_personalizacion
+                        SET {', '.join(updates)}
+                        WHERE id = %s
+                    """, params)
+                    updated = cur.rowcount
+                conn.commit()
+            
+            return updated > 0
+        except Exception as e:
+            logger.error(f'Error actualizando atributo {attr_id}: {e}')
+            raise
+    
+    def delete_atributo_personalizacion(self, tenant_id: str, attr_id: int) -> bool:
+        """Elimina un atributo de personalización"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        DELETE FROM "{schema_name}".atributos_personalizacion
+                        WHERE id = %s
+                    """, (attr_id,))
+                    deleted = cur.rowcount
+                conn.commit()
+            
+            if deleted > 0:
+                logger.info(f'Atributo {attr_id} eliminado')
+            return deleted > 0
+        except Exception as e:
+            logger.error(f'Error eliminando atributo {attr_id}: {e}')
+            raise
+    
+    def get_configuracion_completa(self, tenant_id: str, config_nombre: str) -> dict:
+        """Obtiene una configuración completa con todos sus atributos"""
+        try:
+            configs = self.get_configuraciones_personalizacion(tenant_id, solo_activos=True)
+            config = next((c for c in configs if c['nombre'].lower() == config_nombre.lower()), None)
+            
+            if not config:
+                return None
+            
+            atributos = self.get_atributos_personalizacion(tenant_id, config['id'], solo_activos=True)
+            config['atributos'] = atributos
+            
+            return config
+        except Exception as e:
+            logger.error(f'Error obteniendo configuración completa: {e}')
+            return None
 
 
 # Instancia global

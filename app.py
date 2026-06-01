@@ -1518,6 +1518,255 @@ def gestionar_personalizacion_producto(tenant_id, product_id):
             logger.error(f"Error actualizando personalización: {e}")
             return jsonify({'error': str(e)}), 500
 
+# ==================== CONFIGURACIÓN DE PERSONALIZACIÓN (NUEVOS ENDPOINTS) ====================
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/configs', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_configuraciones_personalizacion(tenant_id):
+    """Obtiene todas las configuraciones de personalización del tenant"""
+    try:
+        solo_activos = request.args.get('activos', 'true').lower() == 'true'
+        configs = schema_manager.get_configuraciones_personalizacion(tenant_id, solo_activos)
+        return jsonify(configs)
+    except Exception as e:
+        logger.error(f'Error obteniendo configuraciones: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/configs', methods=['POST'])
+@login_required
+@tenant_owner_required
+def create_configuracion_personalizacion(tenant_id):
+    """Crea una nueva configuración de personalización"""
+    try:
+        data = request.json
+        nombre = data.get('nombre')
+        if not nombre:
+            return jsonify({'error': 'El nombre es requerido'}), 400
+        
+        config_id = schema_manager.create_configuracion_personalizacion(
+            tenant_id=tenant_id,
+            nombre=nombre,
+            descripcion=data.get('descripcion'),
+            instrucciones_ia=data.get('instrucciones_ia')
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración creada exitosamente',
+            'config_id': config_id
+        }), 201
+    except Exception as e:
+        logger.error(f'Error creando configuración: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/configs/<int:config_id>', methods=['PUT'])
+@login_required
+@tenant_owner_required
+def update_configuracion_personalizacion(tenant_id, config_id):
+    """Actualiza una configuración de personalización"""
+    try:
+        data = request.json
+        success = schema_manager.update_configuracion_personalizacion(
+            tenant_id=tenant_id,
+            config_id=config_id,
+            nombre=data.get('nombre'),
+            descripcion=data.get('descripcion'),
+            activo=data.get('activo'),
+            instrucciones_ia=data.get('instrucciones_ia')
+        )
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Configuración actualizada'})
+        else:
+            return jsonify({'error': 'No se pudo actualizar la configuración'}), 400
+    except Exception as e:
+        logger.error(f'Error actualizando configuración: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/configs/<int:config_id>', methods=['DELETE'])
+@login_required
+@tenant_owner_required
+def delete_configuracion_personalizacion(tenant_id, config_id):
+    """Elimina una configuración de personalización"""
+    try:
+        success = schema_manager.delete_configuracion_personalizacion(tenant_id, config_id)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Configuración eliminada'})
+        else:
+            return jsonify({'error': 'No se pudo eliminar la configuración'}), 400
+    except Exception as e:
+        logger.error(f'Error eliminando configuración: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/configs/<int:config_id>/atributos', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_atributos_personalizacion(tenant_id, config_id):
+    """Obtiene los atributos de una configuración de personalización"""
+    try:
+        solo_activos = request.args.get('activos', 'true').lower() == 'true'
+        atributos = schema_manager.get_atributos_personalizacion(tenant_id, config_id, solo_activos)
+        return jsonify(atributos)
+    except Exception as e:
+        logger.error(f'Error obteniendo atributos: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/atributos', methods=['POST'])
+@login_required
+@tenant_owner_required
+def create_atributo_personalizacion(tenant_id):
+    """Crea un nuevo atributo de personalización"""
+    try:
+        data = request.json
+        config_id = data.get('config_id')
+        nombre = data.get('nombre')
+        tipo = data.get('tipo')
+        pregunta = data.get('pregunta')
+        
+        if not config_id or not nombre or not tipo or not pregunta:
+            return jsonify({'error': 'Faltan campos requeridos'}), 400
+        
+        attr_id = schema_manager.create_atributo_personalizacion(
+            tenant_id=tenant_id,
+            config_id=config_id,
+            nombre=nombre,
+            tipo=tipo,
+            pregunta=pregunta,
+            opciones=data.get('opciones'),
+            requerido=data.get('requerido', True),
+            precio_extra=data.get('precio_extra'),
+            orden=data.get('orden', 0)
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Atributo creado exitosamente',
+            'attr_id': attr_id
+        }), 201
+    except Exception as e:
+        logger.error(f'Error creando atributo: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/atributos/<int:attr_id>', methods=['PUT'])
+@login_required
+@tenant_owner_required
+def update_atributo_personalizacion(tenant_id, attr_id):
+    """Actualiza un atributo de personalización"""
+    try:
+        data = request.json
+        success = schema_manager.update_atributo_personalizacion(
+            tenant_id=tenant_id,
+            attr_id=attr_id,
+            nombre=data.get('nombre'),
+            tipo=data.get('tipo'),
+            opciones=data.get('opciones'),
+            pregunta=data.get('pregunta'),
+            requerido=data.get('requerido'),
+            precio_extra=data.get('precio_extra'),
+            orden=data.get('orden'),
+            activo=data.get('activo')
+        )
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Atributo actualizado'})
+        else:
+            return jsonify({'error': 'No se pudo actualizar el atributo'}), 400
+    except Exception as e:
+        logger.error(f'Error actualizando atributo: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/atributos/<int:attr_id>', methods=['DELETE'])
+@login_required
+@tenant_owner_required
+def delete_atributo_personalizacion(tenant_id, attr_id):
+    """Elimina un atributo de personalización"""
+    try:
+        success = schema_manager.delete_atributo_personalizacion(tenant_id, attr_id)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Atributo eliminado'})
+        else:
+            return jsonify({'error': 'No se pudo eliminar el atributo'}), 400
+    except Exception as e:
+        logger.error(f'Error eliminando atributo: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/configs/<config_nombre>/completa', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_configuracion_completa(tenant_id, config_nombre):
+    """Obtiene una configuración completa con todos sus atributos"""
+    try:
+        config = schema_manager.get_configuracion_completa(tenant_id, config_nombre)
+        if config:
+            return jsonify(config)
+        else:
+            return jsonify({'error': 'Configuración no encontrada'}), 404
+    except Exception as e:
+        logger.error(f'Error obteniendo configuración completa: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/habilitar', methods=['PUT'])
+@login_required
+@tenant_owner_required
+def habilitar_personalizacion_tenant(tenant_id):
+    """Habilita o deshabilita la personalización para el tenant"""
+    try:
+        data = request.json
+        habilitada = data.get('habilitada', True)
+        result = tenant_repo.habilitar_personalizacion(tenant_id, habilitada)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f'Error cambiando estado de personalización: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/activar-config', methods=['POST'])
+@login_required
+@tenant_owner_required
+def activar_configuracion_personalizacion_tenant(tenant_id):
+    """Activa una configuración de personalización para el tenant"""
+    try:
+        data = request.json
+        config_id = data.get('config_id')
+        if not config_id:
+            return jsonify({'error': 'Se requiere config_id'}), 400
+        
+        result = tenant_repo.activar_configuracion_personalizacion(tenant_id, config_id)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f'Error activando configuración: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/personalizacion/desactivar-config', methods=['POST'])
+@login_required
+@tenant_owner_required
+def desactivar_configuracion_personalizacion_tenant(tenant_id):
+    """Desactiva una configuración de personalización para el tenant"""
+    try:
+        data = request.json
+        config_id = data.get('config_id')
+        if not config_id:
+            return jsonify({'error': 'Se requiere config_id'}), 400
+        
+        result = tenant_repo.desactivar_configuracion_personalizacion(tenant_id, config_id)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f'Error desactivando configuración: {e}')
+        return jsonify({'error': str(e)}), 500
+
 # ======== Cambio SubProductos y personalizaciones ========
 
 # ==================== PRODUCTOS CON ADICIONALES Y PERSONALIZACIONES ====================

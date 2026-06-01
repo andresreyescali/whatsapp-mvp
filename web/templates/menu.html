@@ -19,6 +19,12 @@
                 </a>
             </div>
             <div class="sidebar-item">
+                <a href="/admin/personalizacion?tenant_id={{ tenant.id }}" class="sidebar-link">
+                    <span class="icon">🎨</span>
+                    <span>Personalización</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
                 <a href="/admin/train?tenant_id={{ tenant.id }}" class="sidebar-link">
                     <span class="icon">🤖</span>
                     <span>Entrenar IA</span>
@@ -469,7 +475,9 @@
             '</tr>';
         }
         
-        html += '</tbody></table></div>';
+        html += '</tbody>' +
+            '</table>' +
+            '</div>';
         container.innerHTML = html;
     }
 

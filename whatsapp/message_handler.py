@@ -19,6 +19,7 @@ class MessageHandler:
         self._datos_cliente = {}
         self._estados_conversacion = {}  # {numero: estado}
         self._producto_temporal = {}     # {numero: producto_info}
+        self._conversacion_personalizacion = {}  # {numero: {config_id, atributos_pendientes, respuestas}}
     
     def _get_schema_name(self, tenant_id: str) -> str:
         tenant = tenant_repo.find_by_id(tenant_id)
@@ -53,7 +54,9 @@ class MessageHandler:
         # Verificar estado actual de la conversación
         estado_actual = self._get_estado(numero)
         
-        if estado_actual == 'esperando_adicional':
+        if estado_actual == 'esperando_respuesta_personalizacion':
+            respuesta = self._procesar_respuesta_personalizacion(texto, tenant, numero)
+        elif estado_actual == 'esperando_adicional':
             respuesta = self._procesar_adicional(texto, tenant, numero)
         elif estado_actual == 'esperando_personalizacion':
             respuesta = self._procesar_personalizacion(texto, tenant, numero)
@@ -143,7 +146,254 @@ class MessageHandler:
         except Exception as e:
             logger.error(f'Error guardando conversación: {e}')
     
-    # ==================== MANEJO DE ADICIONALES Y PERSONALIZACIONES ====================
+    # ==================== PERSONALIZACIÓN CONFIGURABLE (NUEVA) ====================
+    
+    def _iniciar_personalizacion_por_config(self, tenant_id: str, numero: str, config_nombre: str) -> str:
+        """Inicia el flujo de personalización usando una configuración existente"""
+        try:
+            config = schema_manager.get_configuracion_completa(tenant_id, config_nombre)
+            if not config:
+                return f"Lo siento, no tengo una configuración para personalizar {config_nombre}. ¿Te gustaría ver nuestro menú regular?"
+            
+            atributos = config.get('atributos', [])
+            if not atributos:
+                return f"La configuración '{config_nombre}' no tiene atributos definidos. Contacta al administrador."
+            
+            # Iniciar conversación de personalización
+            self._conversacion_personalizacion[numero] = {
+                'config_id': config['id'],
+                'config_nombre': config['nombre'],
+                'atributos_pendientes': atributos.copy(),
+                'atributo_actual': None,
+                'respuestas': {},
+                'precio_base': 0
+            }
+            
+            self._set_estado(numero, 'esperando_respuesta_personalizacion')
+            
+            # Hacer la primera pregunta
+            return self._hacer_siguiente_pregunta_personalizacion(tenant_id, numero)
+            
+        except Exception as e:
+            logger.error(f'Error iniciando personalización: {e}')
+            return "❌ Error al iniciar la personalización. Por favor intenta de nuevo."
+    
+    def _hacer_siguiente_pregunta_personalizacion(self, tenant_id: str, numero: str) -> str:
+        """Hace la siguiente pregunta de personalización usando IA para formularla"""
+        conv = self._conversacion_personalizacion.get(numero)
+        if not conv:
+            self._set_estado(numero, None)
+            return "❌ Error en la personalización. Por favor intenta de nuevo."
+        
+        atributos_pendientes = conv.get('atributos_pendientes', [])
+        
+        if not atributos_pendientes:
+            # Todas las preguntas respondidas, calcular precio y finalizar
+            return self._finalizar_personalizacion(tenant_id, numero)
+        
+        # Tomar el siguiente atributo
+        atributo = atributos_pendientes[0]
+        conv['atributo_actual'] = atributo
+        
+        # Usar IA para formular la pregunta de forma natural
+        if ai_client.client:
+            prompt = f"""
+Eres un asistente de ventas. Debes hacer la siguiente pregunta al cliente.
+
+ATRIBUTO A PREGUNTAR:
+- Nombre: {atributo['nombre']}
+- Tipo: {atributo['tipo']}
+- Opciones: {json.dumps(atributo.get('opciones', []))}
+- Pregunta base: {atributo['pregunta']}
+- Requerido: {atributo['requerido']}
+
+RESPUESTAS PREVIAS DEL CLIENTE:
+{json.dumps(conv.get('respuestas', {}), indent=2, ensure_ascii=False)}
+
+INSTRUCCIONES:
+1. Formula la pregunta de forma natural, cálida y conversacional
+2. Si tiene opciones, menciónalas amigablemente
+3. Si tiene precio extra en las opciones, menciónalo
+4. Sé breve y claro
+
+RESPONDE SOLO CON LA PREGUNTA, nada más.
+"""
+            try:
+                response = ai_client.client.chat.completions.create(
+                    model=ai_client.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=300
+                )
+                pregunta = response.choices[0].message.content
+                logger.info(f"🤖 [PREGUNTA IA] {pregunta}")
+                return pregunta
+            except Exception as e:
+                logger.error(f'Error generando pregunta con IA: {e}')
+        
+        # Fallback: usar la pregunta guardada
+        pregunta_base = atributo['pregunta']
+        if atributo.get('tipo') == 'select' and atributo.get('opciones'):
+            opciones = atributo.get('opciones', [])
+            pregunta_base += "\n\nOpciones disponibles:\n"
+            for i, opt in enumerate(opciones, 1):
+                pregunta_base += f"{i}. {opt}\n"
+        
+        return pregunta_base
+    
+    def _procesar_respuesta_personalizacion(self, texto: str, tenant: dict, numero: str) -> str:
+        """Procesa la respuesta del cliente durante la personalización usando IA"""
+        conv = self._conversacion_personalizacion.get(numero)
+        if not conv:
+            self._set_estado(numero, None)
+            return "❌ Error en la personalización. Por favor intenta de nuevo."
+        
+        atributo_actual = conv.get('atributo_actual')
+        if not atributo_actual:
+            return self._hacer_siguiente_pregunta_personalizacion(tenant['id'], numero)
+        
+        # Usar IA para interpretar la respuesta
+        if ai_client.client:
+            prompt = f"""
+Interpreta la respuesta del cliente y extrae el valor para el atributo.
+
+ATRIBUTO:
+- Nombre: {atributo_actual['nombre']}
+- Tipo: {atributo_actual['tipo']}
+- Opciones: {json.dumps(atributo_actual.get('opciones', []))}
+- Precios extra por opción: {json.dumps(atributo_actual.get('precio_extra', {}))}
+
+RESPUESTA DEL CLIENTE: "{texto}"
+
+INSTRUCCIONES:
+1. Extrae el valor que el cliente quiere elegir
+2. Si es tipo 'select', encuentra la opción más cercana
+3. Si es tipo 'si_no', responde true/false
+4. Si es tipo 'numero', extrae el número
+5. Si es tipo 'texto', toma el texto
+6. Calcula el precio extra según las opciones
+
+Devuelve SOLO un JSON:
+{{"valor": "valor_extraido", "precio_extra": 0}}
+"""
+            try:
+                response = ai_client.client.chat.completions.create(
+                    model=ai_client.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    max_tokens=300
+                )
+                contenido = response.choices[0].message.content
+                contenido = contenido.replace('```json', '').replace('```', '').strip()
+                resultado = json.loads(contenido)
+                
+                valor = resultado.get('valor')
+                precio_extra = resultado.get('precio_extra', 0)
+                
+                if valor:
+                    # Guardar respuesta
+                    respuestas = conv.get('respuestas', {})
+                    respuestas[atributo_actual['nombre']] = {
+                        'valor': valor,
+                        'precio_extra': precio_extra
+                    }
+                    conv['respuestas'] = respuestas
+                    conv['precio_base'] = conv.get('precio_base', 0) + precio_extra
+                    
+                    # Mover a siguiente atributo
+                    atributos_pendientes = conv.get('atributos_pendientes', [])
+                    if atributos_pendientes:
+                        conv['atributos_pendientes'] = atributos_pendientes[1:]
+                    
+                    self._conversacion_personalizacion[numero] = conv
+                    
+                    return self._hacer_siguiente_pregunta_personalizacion(tenant['id'], numero)
+                    
+            except Exception as e:
+                logger.error(f'Error interpretando respuesta: {e}')
+        
+        # Fallback: si la IA falla, pedir que repita
+        return f"No entendí bien. {atributo_actual['pregunta']} Por favor, responde claramente."
+    
+    def _finalizar_personalizacion(self, tenant_id: str, numero: str) -> str:
+        """Finaliza la personalización, calcula precio y agrega al carrito"""
+        conv = self._conversacion_personalizacion.pop(numero, None)
+        if not conv:
+            return "❌ Error al finalizar la personalización."
+        
+        respuestas = conv.get('respuestas', {})
+        precio_total = conv.get('precio_base', 0)
+        config_nombre = conv.get('config_nombre', 'Producto')
+        
+        # Construir nombre del producto
+        nombre_producto = f"🎨 {config_nombre.capitalize()} Personalizada"
+        
+        # Crear item para el carrito
+        item = {
+            'id': str(uuid.uuid4()),
+            'nombre': nombre_producto,
+            'precio': precio_total,
+            'cantidad': 1,
+            'personalizacion': respuestas,
+            'tipo': 'personalizado'
+        }
+        
+        # Agregar al carrito
+        carrito = self._cargar_carrito(tenant_id, numero)
+        carrito['items'].append(item)
+        carrito['total'] += precio_total
+        self._guardar_carrito(tenant_id, numero, carrito['items'], carrito['total'])
+        
+        self._set_estado(numero, None)
+        
+        # Generar resumen con IA
+        if ai_client.client:
+            prompt = f"""
+Genera un resumen amigable del producto personalizado que el cliente acaba de crear.
+
+PRODUCTO: {config_nombre}
+PRECIO TOTAL: ${precio_total:,.0f}
+
+RESPUESTAS DEL CLIENTE:
+{json.dumps(respuestas, indent=2, ensure_ascii=False)}
+
+INSTRUCCIONES:
+1. Crea un resumen cálido y claro
+2. Lista todas las opciones que eligió el cliente
+3. Muestra el precio total
+4. Pregunta si quiere agregar algo más o confirmar el pedido
+
+Responde en español, como un asistente amable.
+"""
+            try:
+                response = ai_client.client.chat.completions.create(
+                    model=ai_client.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                resumen = response.choices[0].message.content
+                return resumen
+            except Exception as e:
+                logger.error(f'Error generando resumen: {e}')
+        
+        # Fallback
+        resumen = f"✅ *¡Listo! Tu {config_nombre} personalizada está creada.*\n\n"
+        resumen += "📝 *Detalles de tu personalización:*\n"
+        for key, value in respuestas.items():
+            valor = value.get('valor') if isinstance(value, dict) else value
+            precio_extra = value.get('precio_extra', 0) if isinstance(value, dict) else 0
+            if precio_extra > 0:
+                resumen += f"  • {key}: {valor} (+${precio_extra:,})\n"
+            else:
+                resumen += f"  • {key}: {valor}\n"
+        
+        resumen += f"\n💰 *Precio total:* ${precio_total:,.0f}\n\n"
+        resumen += "¿Algo más que quieras agregar? O responde *confirmo* para finalizar el pedido."
+        
+        return resumen
+    
+    # ==================== MANEJO DE ADICIONALES Y PERSONALIZACIONES (LEGACY) ====================
     
     def _procesar_seleccion_producto(self, tenant_id: str, numero: str, producto_id: str):
         """Maneja la selección de un producto y pregunta por sus adicionales"""
@@ -212,9 +462,8 @@ class MessageHandler:
                 # Pasar a personalizaciones
                 return self._procesar_personalizaciones_producto(tenant['id'], numero)
             
-            # Verificar si es un número o lista de números (ej: "1,2,3" o "1 2 3")
+            # Verificar si es un número o lista de números
             if ',' in respuesta or ' ' in respuesta:
-                # Múltiples selecciones
                 partes = re.split(r'[, ]+', respuesta)
                 indices = []
                 for p in partes:
@@ -240,7 +489,6 @@ class MessageHandler:
                     adic = adicionales[opcion_idx]
                     producto_temp['adicionales_seleccionados'].append(adic)
                     
-                    # Verificar si el adicional permite múltiples
                     if adic.get('multiple', False):
                         return self._preguntar_si_mas_adicionales(tenant['id'], numero, producto_temp)
                     else:
@@ -260,7 +508,6 @@ class MessageHandler:
         adicionales = producto_temp.get('adicionales', [])
         seleccionados = producto_temp.get('adicionales_seleccionados', [])
         
-        # Mostrar seleccionados hasta ahora
         if seleccionados:
             mensaje = "📋 *Adicionales seleccionados hasta ahora:*\n"
             for s in seleccionados:
@@ -304,7 +551,6 @@ class MessageHandler:
         personalizaciones = producto_temp.get('personalizaciones', [])
         
         if personalizaciones and len(personalizaciones) > 0:
-            # Filtrar personalizaciones no respondidas
             pendientes = []
             for p in personalizaciones:
                 nombre = p.get('nombre')
@@ -329,7 +575,6 @@ class MessageHandler:
                 self._set_estado(numero, 'esperando_personalizacion')
                 return mensaje
         
-        # No hay más personalizaciones, agregar al carrito
         return self._agregar_al_carrito_desde_temporal(tenant_id, numero)
     
     def _procesar_personalizacion(self, texto: str, tenant: dict, numero: str) -> str:
@@ -343,7 +588,6 @@ class MessageHandler:
             personalizaciones = producto_temp.get('personalizaciones', [])
             seleccionadas = producto_temp.get('personalizaciones_seleccionadas', {})
             
-            # Encontrar la siguiente personalización pendiente
             pendiente = None
             for p in personalizaciones:
                 if p.get('nombre') not in seleccionadas:
@@ -353,7 +597,6 @@ class MessageHandler:
             if not pendiente:
                 return self._agregar_al_carrito_desde_temporal(tenant['id'], numero)
             
-            # Procesar respuesta según tipo
             if pendiente.get('tipo') == 'select' and pendiente.get('opciones'):
                 try:
                     opcion_idx = int(texto) - 1
@@ -365,7 +608,6 @@ class MessageHandler:
                 except ValueError:
                     return f"❌ Por favor, responde con el número de la opción (1-{len(pendiente.get('opciones', []))})"
             else:
-                # Texto libre
                 if not texto.strip() and pendiente.get('requerido'):
                     return f"❌ '{pendiente['nombre']}' es requerido. Por favor responde:"
                 seleccionadas[pendiente['nombre']] = texto.strip()
@@ -373,7 +615,6 @@ class MessageHandler:
             producto_temp['personalizaciones_seleccionadas'] = seleccionadas
             self._producto_temporal[numero] = producto_temp
             
-            # Continuar con siguiente personalización
             return self._procesar_personalizaciones_producto(tenant['id'], numero)
             
         except Exception as e:
@@ -388,20 +629,16 @@ class MessageHandler:
             if not producto_temp:
                 return "❌ Error: No hay producto para agregar"
             
-            # Calcular precio final
             precio_final = producto_temp['precio_base']
             for adic in producto_temp.get('adicionales_seleccionados', []):
                 precio_final += adic.get('precio_extra', 0)
             
-            # Construir nombre del producto con detalles
             nombre_producto = producto_temp['nombre']
             
-            # Agregar adicionales al nombre si hay
             if producto_temp.get('adicionales_seleccionados'):
                 nombres_adicionales = [a['nombre'] for a in producto_temp['adicionales_seleccionados']]
                 nombre_producto += f" (+{', '.join(nombres_adicionales)})"
             
-            # Crear item con todos los detalles
             item = {
                 'id': producto_temp['id'],
                 'nombre': nombre_producto,
@@ -413,7 +650,6 @@ class MessageHandler:
                 'personalizaciones': producto_temp.get('personalizaciones_seleccionadas', {})
             }
             
-            # Agregar al carrito
             carrito = self._cargar_carrito(tenant_id, numero)
             carrito['items'].append(item)
             carrito['total'] += precio_final
@@ -421,11 +657,9 @@ class MessageHandler:
             
             self._set_estado(numero, None)
             
-            # Mensaje de confirmación
             mensaje = f"✅ *Agregado a tu pedido:*\n"
             mensaje += f"• {nombre_producto}: ${precio_final:,}\n"
             
-            # Mostrar personalizaciones si hay
             if producto_temp.get('personalizaciones_seleccionadas'):
                 mensaje += "\n📝 *Personalizaciones:*\n"
                 for key, value in producto_temp['personalizaciones_seleccionadas'].items():
@@ -658,8 +892,11 @@ class MessageHandler:
         items_texto = ""
         for item in carrito['items']:
             items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
-            # Mostrar personalizaciones si tiene
-            if item.get('personalizaciones'):
+            if item.get('personalizacion'):
+                for key, value in item['personalizacion'].items():
+                    valor = value.get('valor') if isinstance(value, dict) else value
+                    items_texto += f"     └─ {key}: {valor}\n"
+            elif item.get('personalizaciones'):
                 for key, value in item['personalizaciones'].items():
                     items_texto += f"     └─ {key}: {value}\n"
         
@@ -720,7 +957,11 @@ class MessageHandler:
             items_texto = ""
             for item in items:
                 items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
-                if item.get('personalizaciones'):
+                if item.get('personalizacion'):
+                    for key, value in item['personalizacion'].items():
+                        valor = value.get('valor') if isinstance(value, dict) else value
+                        items_texto += f"     └─ {key}: {valor}\n"
+                elif item.get('personalizaciones'):
                     for key, value in item['personalizaciones'].items():
                         items_texto += f"     └─ {key}: {value}\n"
             
@@ -912,7 +1153,6 @@ class MessageHandler:
                 cantidad = p.get('cantidad', 1)
                 producto_id = p.get('id')
                 
-                # Buscar por ID o por nombre
                 producto_encontrado = None
                 if producto_id:
                     for producto in menu:
@@ -1006,7 +1246,31 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
             logger.info("💰 [PAGO] Detectado mensaje de pago")
             return "✅ ¡Pago confirmado! En breve comenzamos a preparar tu pedido."
         
-        # 2. Verificar confirmación
+        # 2. Verificar si quiere personalizar algo (NUEVO)
+        palabras_personalizar = ['personalizar', 'personalizado', 'customizar', 'a mi gusto', 'quiero crear', 'hacer una']
+        if any(p in texto_lower for p in palabras_personalizar):
+            # Buscar configuraciones disponibles
+            configs = schema_manager.get_configuraciones_personalizacion(tenant['id'], solo_activos=True)
+            if configs:
+                if len(configs) == 1:
+                    return self._iniciar_personalizacion_por_config(tenant['id'], numero, configs[0]['nombre'])
+                else:
+                    mensaje = "🎨 *Opciones de personalización disponibles:*\n\n"
+                    for i, cfg in enumerate(configs, 1):
+                        mensaje += f"{i}. {cfg['nombre'].capitalize()}\n"
+                        if cfg.get('descripcion'):
+                            mensaje += f"   {cfg['descripcion']}\n"
+                    mensaje += "\n📝 Responde con el número de la opción que deseas personalizar"
+                    return mensaje
+        
+        # 3. Verificar respuesta de selección de configuración
+        if texto_lower.isdigit() and 1 <= int(texto_lower) <= 10:
+            configs = schema_manager.get_configuraciones_personalizacion(tenant['id'], solo_activos=True)
+            idx = int(texto_lower) - 1
+            if 0 <= idx < len(configs):
+                return self._iniciar_personalizacion_por_config(tenant['id'], numero, configs[idx]['nombre'])
+        
+        # 4. Verificar confirmación
         if self._cliente_confirmo(texto):
             logger.info(f"✅ [CONFIRMACION] Cliente confirmó: {texto}")
             if carrito_actual.get('items'):
@@ -1021,28 +1285,28 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
                         return self._finalizar_pedido(tenant, numero, carrito_actual)
                 return "❌ No pude identificar los productos que deseas. Por favor, escríbelos nuevamente.\n\nEjemplo: 'quiero una torta porcion personal'"
         
-        # 3. Verificar consulta de carrito
+        # 5. Verificar consulta de carrito
         if any(p in texto_lower for p in ['qué pedí', 'mi pedido', 'ver carrito', 'que tengo']):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # 4. Verificar si quiere ver el menú
+        # 6. Verificar si quiere ver el menú
         if any(p in texto_lower for p in ['menú', 'menu', 'productos', 'catálogo', 'catalogo', 'qué venden']):
             return self._mostrar_menu(tenant, menu)
         
-        # 5. Detectar productos en el mensaje actual
+        # 7. Detectar productos en el mensaje actual
         productos_detectados = self._extraer_productos_con_ia(texto, menu)
         
-        # 6. Si hay productos, procesar el primero con sus adicionales
+        # 8. Si hay productos, procesar el primero con sus adicionales
         if productos_detectados:
             producto = productos_detectados[0]
             logger.info(f"🛒 [PRODUCTO] Detectado: {producto}")
             return self._procesar_seleccion_producto(tenant['id'], numero, producto['id'])
         
-        # 7. Si hay carrito, mostrar resumen
+        # 9. Si hay carrito, mostrar resumen
         if carrito_actual.get('items'):
             return self._mostrar_resumen_carrito(tenant, numero, carrito_actual)
         
-        # 8. Si no hay carrito, usar IA para responder
+        # 10. Si no hay carrito, usar IA para responder
         return self._respuesta_con_ia(texto, tenant, menu, numero, contexto, resumen_cliente, historial_texto)
     
     def _mostrar_menu(self, tenant: dict, menu: list) -> str:
@@ -1050,7 +1314,6 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
         if not menu:
             return "📋 No hay productos disponibles en este momento."
         
-        # Agrupar por categoría
         categorias = {}
         for p in menu:
             cat = p.get('categoria', 'general')
@@ -1063,10 +1326,18 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
         for cat, productos in categorias.items():
             emoji = self._get_emoji_categoria(cat)
             mensaje += f"*{emoji} {cat.upper()}*\n"
-            for p in productos[:10]:  # Limitar a 10 por categoría
+            for p in productos[:10]:
                 mensaje += f"• *{p['nombre']}* - ${p['precio']:,}\n"
                 if p.get('descripcion'):
                     mensaje += f"  {p['descripcion'][:60]}...\n"
+            mensaje += "\n"
+        
+        # Verificar si hay configuraciones de personalización
+        configs = schema_manager.get_configuraciones_personalizacion(tenant['id'], solo_activos=True)
+        if configs:
+            mensaje += "🎨 *¿Quieres personalizar algo?*\n"
+            for cfg in configs:
+                mensaje += f"• *{cfg['nombre'].capitalize()} personalizada*\n"
             mensaje += "\n"
         
         mensaje += "📝 *Para pedir, solo escribe el nombre del producto*\n"
@@ -1091,6 +1362,10 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
         """Genera respuesta usando IA"""
         menu_simplificado = [{'nombre': p.get('nombre'), 'precio': p.get('precio')} for p in menu[:30]]
         
+        # Obtener configuraciones disponibles
+        configs = schema_manager.get_configuraciones_personalizacion(tenant['id'], solo_activos=True)
+        configs_texto = "\n".join([f"- {c['nombre'].capitalize()} personalizada" for c in configs]) if configs else "No hay opciones de personalización"
+        
         system_prompt = f"""Eres un asistente de ventas conversacional para {tenant.get('nombre', 'Mi negocio')}.
 
 🏪 INFORMACIÓN:
@@ -1100,13 +1375,16 @@ Devuelve SOLO un JSON: {{"nombre": "", "cc": "", "telefono": "", "email": "", "d
 📋 PRODUCTOS DISPONIBLES:
 {json.dumps(menu_simplificado, indent=2, ensure_ascii=False)}
 
+🎨 OPCIONES DE PERSONALIZACIÓN DISPONIBLES:
+{configs_texto}
+
 {resumen_cliente}
 {historial_texto}
 
 INSTRUCCIONES IMPORTANTES:
 1. Responde de forma natural, cálida y conversacional en español.
 2. Cuando el cliente pida un producto, confirma los detalles.
-3. Luego pregunta "¿Confirmas este pedido?".
+3. Si el cliente quiere personalizar, ofrécele las opciones disponibles.
 4. NO generes números de pedido ni confirmes reservas.
 5. Para finalizar, el cliente debe decir "confirmo".
 6. Sé breve y cálido.
@@ -1132,7 +1410,7 @@ RESPONDE en español."""
         if menu:
             primeros = menu[:3]
             sugerencias = ", ".join([p['nombre'] for p in primeros])
-            return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿Te gustaría ordenar {sugerencias}? Escríbeme lo que deseas."
+            return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿Te gustaría ordenar {sugerencias} o personalizar algo? Escríbeme lo que deseas."
         return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte?"
 
 

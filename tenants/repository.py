@@ -90,6 +90,10 @@ class TenantRepository:
                 'apariencia': {
                     'tema': 'default',
                     'logo_url': None
+                },
+                'personalizacion': {
+                    'habilitada': True,
+                    'configuraciones': []  # IDs de configuraciones activas
                 }
             }
             
@@ -446,6 +450,10 @@ class TenantRepository:
                     'apariencia': {
                         'tema': 'default',
                         'logo_url': None
+                    },
+                    'personalizacion': {
+                        'habilitada': True,
+                        'configuraciones': []
                     }
                 }
                 self.update_configuracion(tenant_id, configuracion_por_defecto)
@@ -455,6 +463,76 @@ class TenantRepository:
         except Exception as e:
             logger.error(f"Error migrando tenant {tenant_id}: {e}")
             return {'success': False, 'error': str(e)}
+    
+    # ==================== NUEVOS MÉTODOS PARA PERSONALIZACIÓN ====================
+    
+    def habilitar_personalizacion(self, tenant_id: str, habilitada: bool = True) -> dict:
+        """Habilita o deshabilita la funcionalidad de personalización para el tenant"""
+        try:
+            config = self.get_configuracion(tenant_id)
+            
+            if 'personalizacion' not in config:
+                config['personalizacion'] = {}
+            
+            config['personalizacion']['habilitada'] = habilitada
+            self.update_configuracion(tenant_id, config)
+            
+            estado = "habilitada" if habilitada else "deshabilitada"
+            logger.info(f"Personalización {estado} para tenant {tenant_id}")
+            return {'success': True, 'message': f'Personalización {estado}'}
+        except Exception as e:
+            logger.error(f"Error cambiando estado de personalización: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def obtener_configuraciones_personalizacion_activas(self, tenant_id: str) -> list:
+        """Obtiene los IDs de las configuraciones de personalización activas para el tenant"""
+        config = self.get_configuracion(tenant_id)
+        return config.get('personalizacion', {}).get('configuraciones', [])
+    
+    def activar_configuracion_personalizacion(self, tenant_id: str, config_id: int) -> dict:
+        """Activa una configuración de personalización para el tenant"""
+        try:
+            config = self.get_configuracion(tenant_id)
+            
+            if 'personalizacion' not in config:
+                config['personalizacion'] = {}
+            if 'configuraciones' not in config['personalizacion']:
+                config['personalizacion']['configuraciones'] = []
+            
+            if config_id not in config['personalizacion']['configuraciones']:
+                config['personalizacion']['configuraciones'].append(config_id)
+                self.update_configuracion(tenant_id, config)
+                logger.info(f"Configuración {config_id} activada para tenant {tenant_id}")
+            
+            return {'success': True, 'message': 'Configuración activada'}
+        except Exception as e:
+            logger.error(f"Error activando configuración: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def desactivar_configuracion_personalizacion(self, tenant_id: str, config_id: int) -> dict:
+        """Desactiva una configuración de personalización para el tenant"""
+        try:
+            config = self.get_configuracion(tenant_id)
+            
+            if 'personalizacion' not in config:
+                config['personalizacion'] = {}
+            if 'configuraciones' not in config['personalizacion']:
+                config['personalizacion']['configuraciones'] = []
+            
+            if config_id in config['personalizacion']['configuraciones']:
+                config['personalizacion']['configuraciones'].remove(config_id)
+                self.update_configuracion(tenant_id, config)
+                logger.info(f"Configuración {config_id} desactivada para tenant {tenant_id}")
+            
+            return {'success': True, 'message': 'Configuración desactivada'}
+        except Exception as e:
+            logger.error(f"Error desactivando configuración: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def get_personalizacion_habilitada(self, tenant_id: str) -> bool:
+        """Verifica si la personalización está habilitada para el tenant"""
+        config = self.get_configuracion(tenant_id)
+        return config.get('personalizacion', {}).get('habilitada', True)
 
 
 # ==================== INSTANCIA GLOBAL ====================
