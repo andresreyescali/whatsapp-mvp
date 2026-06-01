@@ -2123,14 +2123,15 @@ def exportar_productos(tenant_id):
         writer.writerow(['Nombre', 'Precio', 'Categoría', 'Disponible', 'Destacado'])
         
         for p in productos:
-            writer.writerow([p['nombre'], p['precio'], p['categoria'], p['disponible'], p['destacado']])
+            writer.writerow([p['nombre'], p['precio'], p.get('categoria', 'general'), p.get('disponible', True), p.get('destacado', False)])
         
-        response = make_response(output.getvalue())
-        response.headers['Content-Disposition'] = 'attachment; filename=productos.csv'
-        response.headers['Content-type'] = 'text/csv'
-        return response
+        return output.getvalue(), 200, {
+            'Content-Type': 'text/csv',
+            'Content-Disposition': 'attachment; filename=productos.csv'
+        }
         
     except Exception as e:
+        logger.error(f'Error exportando productos: {e}')
         return jsonify({'error': str(e)}), 500
 
 # ==================== DEBUG ENDPOINTS ====================
