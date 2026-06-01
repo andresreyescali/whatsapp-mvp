@@ -42,66 +42,312 @@
     <main class="main-content">
         <div id="alertContainer"></div>
 
-        <h2 class="mb-4">🤖 Entrenar Inteligencia Artificial</h2>
-        <p class="mb-4">La IA aprenderá tus productos y precios. Los datos se guardarán automáticamente en tu base de datos.</p>
+        <h2 class="mb-4">🤖 Centro de Entrenamiento de IA</h2>
+        <p class="mb-4">Gestiona lo que la IA sabe sobre tu negocio. Puedes agregar, actualizar o eliminar información.</p>
 
-        <div class="grid grid-cols-2" style="gap: 1.5rem;">
-            <!-- Texto -->
-            <div class="card">
-                <div class="card-header">
-                    <h3 class="card-title">📝 Entrenar con Texto</h3>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-3">Pega una lista de productos con precios. Ejemplo:</p>
-                    <textarea id="trainTexto" class="form-control" rows="8" 
-                        placeholder="Torta Negra - Porción: $19,000&#10;Torta Negra - Libra: $177,500&#10;Torta Vainilla - Porción: $13,000&#10;Horario: Lunes a Domingo 8am-8pm"></textarea>
-                    <button id="btnTrainTexto" class="btn btn-primary w-100 mt-3">🚀 Entrenar con Texto</button>
-                </div>
-            </div>
+        <!-- Tabs -->
+        <div class="tabs" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb;">
+            <button class="tab-btn active" onclick="mostrarTab('entrenar')">📤 Entrenar</button>
+            <button class="tab-btn" onclick="mostrarTab('contexto')">📚 Contexto Actual</button>
+            <button class="tab-btn" onclick="mostrarTab('productos')">📦 Productos</button>
+        </div>
 
-            <!-- Imagen -->
-            <div class="card">
-                <div class="card-header">
-                    <h3 class="card-title">🖼️ Entrenar con Imagen</h3>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-3">Sube una foto de tu menú físico. La IA leerá los precios.</p>
-                    <input type="file" id="trainImagen" class="form-control" accept="image/*">
-                    <div id="imagePreview" style="margin-top: 1rem; display: none;">
-                        <img id="previewImg" style="max-width: 100%; border-radius: 0.5rem;">
+        <!-- TAB 1: ENTRENAR -->
+        <div id="tabEntrenar" class="tab-content active">
+            <div class="grid grid-cols-2" style="gap: 1.5rem;">
+                <!-- Texto -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">📝 Entrenar con Texto</h3>
                     </div>
-                    <button id="btnTrainImagen" class="btn btn-primary w-100 mt-3" disabled>📸 Entrenar con Imagen</button>
+                    <div class="card-body">
+                        <p class="text-muted mb-3">Pega texto con productos, precios o instrucciones.</p>
+                        <textarea id="trainTexto" class="form-control" rows="10" 
+                            placeholder="Ejemplo:&#10;Torta Negra - Porción: $19,000&#10;Torta Negra - Libra: $177,500&#10;Horario: Lunes a Domingo 8am-8pm&#10;Ubicación: Calle 123, Cali"></textarea>
+                        
+                        <div class="mt-3">
+                            <label class="form-label">Modo de entrenamiento:</label>
+                            <select id="modoEntrenamiento" class="form-control">
+                                <option value="acumular">➕ Acumular (agrega nueva info sin borrar la existente)</option>
+                                <option value="reemplazar">🔄 Reemplazar (sobrescribe la info existente)</option>
+                            </select>
+                        </div>
+                        
+                        <button id="btnTrainTexto" class="btn btn-primary w-100 mt-3">🚀 Entrenar con Texto</button>
+                    </div>
+                </div>
+
+                <!-- Imagen -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">🖼️ Entrenar con Imagen</h3>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted mb-3">Sube una foto de tu menú físico.</p>
+                        <input type="file" id="trainImagen" class="form-control" accept="image/*">
+                        <div id="imagePreview" style="margin-top: 1rem; display: none;">
+                            <img id="previewImg" style="max-width: 100%; border-radius: 0.5rem;">
+                        </div>
+                        <button id="btnTrainImagen" class="btn btn-primary w-100 mt-3" disabled>📸 Entrenar con Imagen</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resultados del entrenamiento -->
+            <div id="resultContainer" class="card mt-4" style="display: none;">
+                <div class="card-header">
+                    <h3 class="card-title">📊 Resultados del Entrenamiento</h3>
+                </div>
+                <div class="card-body" id="resultContent"></div>
+            </div>
+        </div>
+
+        <!-- TAB 2: CONTEXTO ACTUAL -->
+        <div id="tabContexto" class="tab-content" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">📚 Información que la IA conoce sobre tu negocio</h3>
+                </div>
+                <div class="card-body">
+                    <div id="contextoContainer" class="loading">Cargando contexto...</div>
                 </div>
             </div>
         </div>
 
-        <!-- Resultados -->
-        <div id="resultContainer" class="card mt-4" style="display: none;">
-            <div class="card-header">
-                <h3 class="card-title">📊 Resultados del Entrenamiento</h3>
-            </div>
-            <div class="card-body" id="resultContent"></div>
-        </div>
-        
-        <!-- Productos actuales -->
-        <div class="card mt-4">
-            <div class="card-header">
-                <h3 class="card-title">📦 Productos en tu Base de Datos</h3>
-            </div>
-            <div class="card-body">
-                <div id="productosContainer" class="loading">Cargando productos...</div>
+        <!-- TAB 3: PRODUCTOS -->
+        <div id="tabProductos" class="tab-content" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">📦 Productos en tu Base de Datos</h3>
+                    <button class="btn btn-sm btn-outline" onclick="exportarProductos()">📥 Exportar CSV</button>
+                </div>
+                <div class="card-body">
+                    <div id="productosContainer" class="loading">Cargando productos...</div>
+                </div>
             </div>
         </div>
     </main>
 </div>
 
+<style>
+    .tab-btn {
+        padding: 10px 20px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        border-radius: 8px 8px 0 0;
+        transition: all 0.2s;
+    }
+    .tab-btn.active {
+        background: #25D366;
+        color: white;
+    }
+    .tab-content {
+        animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    .contexto-card {
+        background: #f9fafb;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 20px;
+        border-left: 4px solid #25D366;
+    }
+    .contexto-label {
+        font-weight: 600;
+        margin-bottom: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .contexto-content {
+        background: white;
+        padding: 12px;
+        border-radius: 8px;
+        margin-top: 8px;
+        white-space: pre-wrap;
+        font-family: monospace;
+        font-size: 0.9rem;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+    .modo-buttons {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+    }
+    .modo-btn {
+        padding: 4px 12px;
+        font-size: 0.75rem;
+        border-radius: 20px;
+        cursor: pointer;
+        border: 1px solid #d1d5db;
+        background: white;
+    }
+    .modo-btn.active {
+        background: #25D366;
+        color: white;
+        border-color: #25D366;
+    }
+    .producto-item {
+        display: inline-block;
+        background: #f3f4f6;
+        padding: 6px 12px;
+        border-radius: 20px;
+        margin: 4px;
+        font-size: 0.85rem;
+    }
+    .producto-precio {
+        color: #10b981;
+        font-weight: 600;
+    }
+</style>
+
 <script>
     const tenantId = '{{ tenant_id }}';
     let imagenBase64 = null;
 
-    // Cargar productos actuales
+    function mostrarTab(tab) {
+        document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        
+        document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`).style.display = 'block';
+        event.target.classList.add('active');
+        
+        if (tab === 'contexto') cargarContexto();
+        if (tab === 'productos') cargarProductos();
+    }
+
+    // ==================== CARGAR CONTEXTO ====================
+    async function cargarContexto() {
+        const container = document.getElementById('contextoContainer');
+        container.innerHTML = '<div class="loading">Cargando contexto...</div>';
+        
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/contexto`, {
+                credentials: 'include'
+            });
+            const data = await response.json();
+            
+            if (data.error) throw new Error(data.error);
+            
+            container.innerHTML = `
+                <div class="contexto-card">
+                    <div class="contexto-label">
+                        <span>📝 <strong>Instrucciones / Prompt</strong></span>
+                        <span style="font-size:0.7rem;">Última actualización: ${data.updated_at ? new Date(data.updated_at).toLocaleString() : 'Nunca'}</span>
+                    </div>
+                    <div class="contexto-content" id="instrucciones-content">${escapeHtml(data.instrucciones) || '<em class="text-muted">Sin contenido</em>'}</div>
+                    <div class="modo-buttons">
+                        <button class="modo-btn" onclick="editarCampo('instrucciones', '${escapeHtml(data.instrucciones).replace(/'/g, "\\'")}')">✏️ Editar</button>
+                        <button class="modo-btn" onclick="acumularCampo('instrucciones')">➕ Acumular</button>
+                        <button class="modo-btn" onclick="reemplazarCampo('instrucciones')">🔄 Reemplazar</button>
+                        <button class="modo-btn" onclick="eliminarCampo('instrucciones')">🗑️ Eliminar</button>
+                    </div>
+                </div>
+                
+                <div class="contexto-card">
+                    <div class="contexto-label">
+                        <span>🕐 <strong>Horario</strong></span>
+                    </div>
+                    <div class="contexto-content" id="horario-content">${escapeHtml(data.horario) || '<em class="text-muted">Sin contenido</em>'}</div>
+                    <div class="modo-buttons">
+                        <button class="modo-btn" onclick="editarCampo('horario', '${escapeHtml(data.horario).replace(/'/g, "\\'")}')">✏️ Editar</button>
+                        <button class="modo-btn" onclick="acumularCampo('horario')">➕ Acumular</button>
+                        <button class="modo-btn" onclick="reemplazarCampo('horario')">🔄 Reemplazar</button>
+                        <button class="modo-btn" onclick="eliminarCampo('horario')">🗑️ Eliminar</button>
+                    </div>
+                </div>
+                
+                <div class="contexto-card">
+                    <div class="contexto-label">
+                        <span>📍 <strong>Ubicación</strong></span>
+                    </div>
+                    <div class="contexto-content" id="ubicacion-content">${escapeHtml(data.ubicacion) || '<em class="text-muted">Sin contenido</em>'}</div>
+                    <div class="modo-buttons">
+                        <button class="modo-btn" onclick="editarCampo('ubicacion', '${escapeHtml(data.ubicacion).replace(/'/g, "\\'")}')">✏️ Editar</button>
+                        <button class="modo-btn" onclick="acumularCampo('ubicacion')">➕ Acumular</button>
+                        <button class="modo-btn" onclick="reemplazarCampo('ubicacion')">🔄 Reemplazar</button>
+                        <button class="modo-btn" onclick="eliminarCampo('ubicacion')">🗑️ Eliminar</button>
+                    </div>
+                </div>
+                
+                <div class="contexto-card">
+                    <div class="contexto-label">
+                        <span>📋 <strong>Políticas</strong></span>
+                    </div>
+                    <div class="contexto-content" id="politicas-content">${escapeHtml(data.politicas) || '<em class="text-muted">Sin contenido</em>'}</div>
+                    <div class="modo-buttons">
+                        <button class="modo-btn" onclick="editarCampo('politicas', '${escapeHtml(data.politicas).replace(/'/g, "\\'")}')">✏️ Editar</button>
+                        <button class="modo-btn" onclick="acumularCampo('politicas')">➕ Acumular</button>
+                        <button class="modo-btn" onclick="reemplazarCampo('politicas')">🔄 Reemplazar</button>
+                        <button class="modo-btn" onclick="eliminarCampo('politicas')">🗑️ Eliminar</button>
+                    </div>
+                </div>
+            `;
+            
+        } catch (error) {
+            console.error('Error:', error);
+            container.innerHTML = '<div class="alert alert-error">❌ Error al cargar el contexto</div>';
+        }
+    }
+
+    async function editarCampo(campo, valorActual) {
+        const nuevoValor = prompt(`Editar ${campo}:`, valorActual);
+        if (nuevoValor !== null && nuevoValor !== valorActual) {
+            await actualizarCampo(campo, nuevoValor, 'reemplazar');
+        }
+    }
+
+    async function acumularCampo(campo) {
+        const nuevoValor = prompt(`Agregar información a "${campo}":`);
+        if (nuevoValor) {
+            await actualizarCampo(campo, nuevoValor, 'acumular');
+        }
+    }
+
+    async function reemplazarCampo(campo) {
+        const nuevoValor = prompt(`Reemplazar todo el contenido de "${campo}":`);
+        if (nuevoValor !== null) {
+            await actualizarCampo(campo, nuevoValor, 'reemplazar');
+        }
+    }
+
+    async function eliminarCampo(campo) {
+        if (confirm(`¿Eliminar todo el contenido de "${campo}"?`)) {
+            await actualizarCampo(campo, '', 'eliminar');
+        }
+    }
+
+    async function actualizarCampo(campo, valor, modo) {
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/contexto`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ campo: campo, valor: valor, modo: modo }),
+                credentials: 'include'
+            });
+            const result = await response.json();
+            if (result.success) {
+                showAlert(`✅ ${campo} actualizado (${modo})`, 'success');
+                cargarContexto();
+            } else {
+                showAlert('❌ Error al actualizar', 'error');
+            }
+        } catch (error) {
+            showAlert('❌ Error de conexión', 'error');
+        }
+    }
+
+    // ==================== CARGAR PRODUCTOS ====================
     async function cargarProductos() {
         const container = document.getElementById('productosContainer');
+        container.innerHTML = '<div class="loading">Cargando productos...</div>';
+        
         try {
             const response = await fetch(`/api/tenant/${tenantId}/menu`, {
                 credentials: 'include'
@@ -121,18 +367,22 @@
                 categorias[cat].push(p);
             }
             
-            let html = '<div style="max-height: 300px; overflow-y: auto;">';
+            let html = '<div style="max-height: 500px; overflow-y: auto;">';
             for (const [cat, items] of Object.entries(categorias)) {
-                html += `<h4>📁 ${cat.toUpperCase()}</h4>`;
-                html += '<ul style="margin-bottom: 1rem;">';
-                for (const p of items.slice(0, 20)) {
-                    html += `<li><strong>${escapeHtml(p.nombre)}</strong> - $${(p.precio || 0).toLocaleString()}</li>`;
+                html += `<h4>📁 ${cat.toUpperCase()} (${items.length})</h4>`;
+                html += '<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1rem;">';
+                for (const p of items) {
+                    html += `
+                        <div class="producto-item">
+                            <strong>${escapeHtml(p.nombre)}</strong>
+                            <span class="producto-precio">$${(p.precio || 0).toLocaleString()}</span>
+                            ${p.destacado ? '<span class="badge badge-star">⭐</span>' : ''}
+                        </div>
+                    `;
                 }
-                if (items.length > 20) {
-                    html += `<li class="text-muted">... y ${items.length - 20} más</li>`;
-                }
-                html += '</ul>';
+                html += '</div>';
             }
+            html += `<div class="text-muted mt-3">Total: ${productos.length} productos</div>`;
             html += '</div>';
             container.innerHTML = html;
             
@@ -142,13 +392,54 @@
         }
     }
 
+    function exportarProductos() {
+        window.open(`/api/tenant/${tenantId}/menu/exportar`, '_blank');
+    }
+
+    // ==================== ENTRENAMIENTO ====================
+    async function entrenar(tipo, contenido) {
+        const modo = document.getElementById('modoEntrenamiento')?.value || 'acumular';
+        
+        const btn = tipo === 'texto' ? document.getElementById('btnTrainTexto') : document.getElementById('btnTrainImagen');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Procesando...';
+        showLoader();
+        
+        try {
+            const body = tipo === 'texto' 
+                ? { tipo: 'texto', texto: contenido, modo: modo }
+                : { tipo: 'imagen', imagen: contenido, modo: modo };
+            
+            const response = await fetch(`/admin/train/${tenantId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                credentials: 'include'
+            });
+            const result = await response.json();
+            
+            if (result.status === 'ok') {
+                showAlert('✅ Entrenamiento completado', 'success');
+                mostrarResultados(result);
+                cargarContexto();
+                cargarProductos();
+            } else {
+                showAlert(result.error || 'Error al procesar', 'error');
+            }
+        } catch (error) {
+            showAlert('Error de conexión', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = tipo === 'texto' ? '🚀 Entrenar con Texto' : '📸 Entrenar con Imagen';
+            hideLoader();
+        }
+    }
+
     function mostrarResultados(resultado) {
         const container = document.getElementById('resultContainer');
         const content = document.getElementById('resultContent');
         
         const productos = resultado.productos || [];
-        const horario = resultado.horario || '';
-        const ubicacion = resultado.ubicacion || '';
         const guardados = resultado.productos_guardados || 0;
         
         content.innerHTML = `
@@ -162,56 +453,25 @@
                     <strong>📦 Productos extraídos:</strong>
                     <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem;">
                         ${productos.slice(0, 15).map(p => `<span class="badge badge-info">${escapeHtml(p.nombre)} - $${(p.precio || 0).toLocaleString()}</span>`).join('')}
-                        ${productos.length > 15 ? `<span class="badge badge-muted">+${productos.length - 15} más</span>` : ''}
                     </div>
                 </div>
             ` : ''}
-            ${horario ? `<div class="mb-3"><strong>🕐 Horario:</strong> ${escapeHtml(horario)}</div>` : ''}
-            ${ubicacion ? `<div class="mb-3"><strong>📍 Ubicación:</strong> ${escapeHtml(ubicacion)}</div>` : ''}
             <div class="alert alert-success mt-3">
                 ${resultado.message || 'Entrenamiento completado exitosamente'}
             </div>
         `;
         container.style.display = 'block';
         container.scrollIntoView({ behavior: 'smooth' });
-        
-        // Recargar productos
-        cargarProductos();
     }
 
-    document.getElementById('btnTrainTexto').addEventListener('click', async () => {
+    // Event listeners
+    document.getElementById('btnTrainTexto').addEventListener('click', () => {
         const texto = document.getElementById('trainTexto').value;
         if (!texto.trim()) {
-            showAlert('Por favor ingresa una lista de productos y precios', 'warning');
+            showAlert('Por favor ingresa texto para entrenar', 'warning');
             return;
         }
-        
-        const btn = document.getElementById('btnTrainTexto');
-        btn.disabled = true;
-        btn.innerHTML = '⏳ Procesando...';
-        showLoader();
-        
-        try {
-            const response = await fetch(`/admin/train/${tenantId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tipo: 'texto', texto: texto }),
-                credentials: 'include'
-            });
-            const result = await response.json();
-            if (result.status === 'ok') {
-                showAlert('✅ Entrenamiento completado', 'success');
-                mostrarResultados(result);
-            } else {
-                showAlert(result.error || 'Error al procesar', 'error');
-            }
-        } catch (error) {
-            showAlert('Error de conexión', 'error');
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = '🚀 Entrenar con Texto';
-            hideLoader();
-        }
+        entrenar('texto', texto);
     });
 
     const imagenInput = document.getElementById('trainImagen');
@@ -219,7 +479,7 @@
     const imagePreview = document.getElementById('imagePreview');
     const previewImg = document.getElementById('previewImg');
 
-    imagenInput.addEventListener('change', async (e) => {
+    imagenInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
         
@@ -238,37 +498,12 @@
         reader.readAsDataURL(file);
     });
 
-    btnImagen.addEventListener('click', async () => {
+    btnImagen.addEventListener('click', () => {
         if (!imagenBase64) {
             showAlert('Por favor selecciona una imagen', 'warning');
             return;
         }
-        
-        btnImagen.disabled = true;
-        btnImagen.innerHTML = '⏳ Procesando imagen...';
-        showLoader();
-        
-        try {
-            const response = await fetch(`/admin/train/${tenantId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tipo: 'imagen', imagen: imagenBase64 }),
-                credentials: 'include'
-            });
-            const result = await response.json();
-            if (result.status === 'ok') {
-                showAlert('✅ Entrenamiento con imagen completado', 'success');
-                mostrarResultados(result);
-            } else {
-                showAlert(result.error || 'Error al procesar la imagen', 'error');
-            }
-        } catch (error) {
-            showAlert('Error de conexión', 'error');
-        } finally {
-            btnImagen.disabled = false;
-            btnImagen.innerHTML = '📸 Entrenar con Imagen';
-            hideLoader();
-        }
+        entrenar('imagen', imagenBase64);
     });
 
     function escapeHtml(text) {

@@ -1926,6 +1926,212 @@ def relacionar_adicional(tenant_id):
         logger.error(f'Error relacionando adicional: {e}')
         return jsonify({'error': str(e)}), 500
 
+# ==================== GESTIÓN DE CONTEXTO (ENTRENAMIENTO) ====================
+
+@app.route('/api/tenant/<tenant_id>/contexto', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_contexto_tenant(tenant_id):
+    """Obtiene el contexto actual del tenant"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT instrucciones, horario, ubicacion, politicas, prompt_personalizado, 
+                           menu_estructurado, updated_at
+                    FROM public.tenant_context 
+                    WHERE tenant_id = %s
+                ''', (tenant_id,))
+                row = cur.fetchone()
+                
+                if row:
+                    menu = row[5] if row[5] else []
+                    if isinstance(menu, str):
+                        try:
+                            menu = json.loads(menu)
+                        except:
+                            menu = []
+                    
+                    return jsonify({
+                        'instrucciones': row[0] or '',
+                        'horario': row[1] or '',
+                        'ubicacion': row[2] or '',
+                        'politicas': row[3] or '',
+                        'prompt_personalizado': row[4] or '',
+                        'productos': menu[:50] if menu else [],
+                        'total_productos': len(menu) if menu else 0,
+                        'updated_at': row[6] if row[6] else None
+                    })
+                else:
+                    return jsonify({
+                        'instrucciones': '',
+                        'horario': '',
+                        'ubicacion': '',
+                        'politicas': '',
+                        'prompt_personalizado': '',
+                        'productos': [],
+                        'total_productos': 0
+                    })
+    except Exception as e:
+        logger.error(f'Error obteniendo contexto: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/contexto', methods=['PUT'])
+@login_required
+@tenant_owner_required
+def update_contexto_tenant(tenant_id):
+    """Actualiza el contexto del tenant (reemplaza o acumula según parámetro)"""
+    try:
+        data = request.json
+        campo = data.get('campo')  # instrucciones, horario, ubicacion, politicas
+        valor = data.get('valor', '')
+        modo = data.get('modo', 'reemplazar')  # reemplazar, acumular, eliminar
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Obtener contexto actual
+                cur.execute('''
+                    SELECT instrucciones, horario, ubicacion, politicas, prompt_personalizado
+                    FROM public.tenant_context 
+                    WHERE tenant_id = %s
+                ''', (tenant_id,))
+                row = cur.fetchone()
+                
+                if not row:
+                    # Crear registro inicial
+                    cur.execute('''
+                        INSERT INTO public.tenant_context (tenant_id, created_at, updated_at)
+                        VALUES (%s, NOW(), NOW())
+                    ''', (tenant_id,))
+                    conn.commit()
+                    row = (None, None, None, None, None)
+                
+                instrucciones_actual = row[0] or ''
+                horario_actual = row[1] or ''
+                ubicacion_actual = row[2] or ''
+                politicas_actual = row[3] or ''
+                prompt_actual = row[4] or ''
+                
+                # Aplicar según modo
+                if modo == 'eliminar':
+                    nuevo_valor = ''
+                elif modo == 'acumular':
+                    if valor and valor not in instrucciones_actual:
+                        nuevo_valor = f"{instrucciones_actual}\n\n{valor}" if instrucciones_actual else valor
+                    else:
+                        nuevo_valor = instrucciones_actual
+                else:  # reemplazar
+                    nuevo_valor = valor
+                
+                # Actualizar el campo específico
+                if campo == 'instrucciones':
+                    cur.execute('''
+                        UPDATE public.tenant_context 
+                        SET instrucciones = %s, updated_at = NOW()
+                        WHERE tenant_id = %s
+                    ''', (nuevo_valor, tenant_id))
+                elif campo == 'horario':
+                    cur.execute('''
+                        UPDATE public.tenant_context 
+                        SET horario = %s, updated_at = NOW()
+                        WHERE tenant_id = %s
+                    ''', (nuevo_valor, tenant_id))
+                elif campo == 'ubicacion':
+                    cur.execute('''
+                        UPDATE public.tenant_context 
+                        SET ubicacion = %s, updated_at = NOW()
+                        WHERE tenant_id = %s
+                    ''', (nuevo_valor, tenant_id))
+                elif campo == 'politicas':
+                    cur.execute('''
+                        UPDATE public.tenant_context 
+                        SET politicas = %s, updated_at = NOW()
+                        WHERE tenant_id = %s
+                    ''', (nuevo_valor, tenant_id))
+                elif campo == 'prompt_personalizado':
+                    cur.execute('''
+                        UPDATE public.tenant_context 
+                        SET prompt_personalizado = %s, updated_at = NOW()
+                        WHERE tenant_id = %s
+                    ''', (nuevo_valor, tenant_id))
+                
+                conn.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Campo "{campo}" actualizado (modo: {modo})',
+                    'nuevo_valor': nuevo_valor
+                })
+                
+    except Exception as e:
+        logger.error(f'Error actualizando contexto: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/contexto/limpiar', methods=['POST'])
+@login_required
+@tenant_owner_required
+def limpiar_contexto_tenant(tenant_id):
+    """Limpia completamente el contexto del tenant"""
+    try:
+        data = request.json
+        campos = data.get('campos', ['instrucciones', 'horario', 'ubicacion', 'politicas'])
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                updates = []
+                params = []
+                
+                if 'instrucciones' in campos:
+                    updates.append("instrucciones = ''")
+                if 'horario' in campos:
+                    updates.append("horario = ''")
+                if 'ubicacion' in campos:
+                    updates.append("ubicacion = ''")
+                if 'politicas' in campos:
+                    updates.append("politicas = ''")
+                
+                if updates:
+                    updates.append("updated_at = NOW()")
+                    query = f"UPDATE public.tenant_context SET {', '.join(updates)} WHERE tenant_id = %s"
+                    params.append(tenant_id)
+                    cur.execute(query, params)
+                    conn.commit()
+                
+                return jsonify({'success': True, 'message': f'Campos limpiados: {", ".join(campos)}'})
+                
+    except Exception as e:
+        logger.error(f'Error limpiando contexto: {e}')
+        return jsonify({'error': str(e)}), 500
+    
+# ====== Endpoint Adicional para Exportar Productos =======
+
+@app.route('/api/tenant/<tenant_id>/menu/exportar', methods=['GET'])
+@login_required
+@tenant_owner_required
+def exportar_productos(tenant_id):
+    """Exporta productos a CSV"""
+    try:
+        productos = schema_manager.get_menu(tenant_id)
+        
+        import csv
+        from io import StringIO
+        
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Nombre', 'Precio', 'Categoría', 'Disponible', 'Destacado'])
+        
+        for p in productos:
+            writer.writerow([p['nombre'], p['precio'], p['categoria'], p['disponible'], p['destacado']])
+        
+        response = make_response(output.getvalue())
+        response.headers['Content-Disposition'] = 'attachment; filename=productos.csv'
+        response.headers['Content-type'] = 'text/csv'
+        return response
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ==================== DEBUG ENDPOINTS ====================
 
