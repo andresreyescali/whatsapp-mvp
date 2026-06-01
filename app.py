@@ -830,16 +830,19 @@ def get_product_detail(tenant_id, product_id):
 @tenant_owner_required
 def train_ia(tenant_id):
     if request.method == 'GET':
-        return render_template('train.html', tenant_id=tenant_id)
+        tenant = tenant_repo.find_by_id(tenant_id)
+        return render_template('train.html', tenant_id=tenant_id, tenant=tenant)
     
     try:
         data = request.json
         tipo = data.get('tipo')
+        modo = data.get('modo', 'acumular')  # Modo de entrenamiento
         
+        # CORRECCIÓN: Pasar tenant_id como primer argumento
         if tipo == 'imagen':
-            resultado = trainer.procesar_imagen(data.get('imagen'))
+            resultado = trainer.procesar_imagen(tenant_id, data.get('imagen'))
         else:
-            resultado = trainer.procesar_texto(data.get('texto'))
+            resultado = trainer.procesar_texto(tenant_id, data.get('texto'))
         
         if not resultado:
             return jsonify({'error': 'No se pudo procesar'}), 500
@@ -892,21 +895,30 @@ def train_ia(tenant_id):
         if not isinstance(productos_nuevos, list):
             productos_nuevos = []
         
-        productos_combinados = {}
-        for p in productos_actuales:
-            if isinstance(p, dict) and p.get('nombre'):
-                productos_combinados[p.get('nombre')] = p
-        
-        for p in productos_nuevos:
-            if isinstance(p, dict) and p.get('nombre'):
-                nombre = p.get('nombre')
-                if nombre in productos_combinados:
-                    if p.get('precio'):
-                        productos_combinados[nombre]['precio'] = p.get('precio')
-                    if p.get('descripcion'):
-                        productos_combinados[nombre]['descripcion'] = p.get('descripcion')
-                else:
-                    productos_combinados[nombre] = p
+        # Aplicar modo de entrenamiento
+        if modo == 'reemplazar':
+            # Reemplazar completamente
+            productos_combinados = {}
+            for p in productos_nuevos:
+                if isinstance(p, dict) and p.get('nombre'):
+                    productos_combinados[p.get('nombre')] = p
+        else:
+            # Acumular (comportamiento por defecto)
+            productos_combinados = {}
+            for p in productos_actuales:
+                if isinstance(p, dict) and p.get('nombre'):
+                    productos_combinados[p.get('nombre')] = p
+            
+            for p in productos_nuevos:
+                if isinstance(p, dict) and p.get('nombre'):
+                    nombre = p.get('nombre')
+                    if nombre in productos_combinados:
+                        if p.get('precio'):
+                            productos_combinados[nombre]['precio'] = p.get('precio')
+                        if p.get('descripcion'):
+                            productos_combinados[nombre]['descripcion'] = p.get('descripcion')
+                    else:
+                        productos_combinados[nombre] = p
         
         productos_finales = list(productos_combinados.values())
         
@@ -914,27 +926,37 @@ def train_ia(tenant_id):
         instrucciones_actuales = contexto_actual.get('instrucciones', '')
         instrucciones_nuevas = resultado.get('instrucciones_adicionales', '')
         
-        if instrucciones_actuales and instrucciones_nuevas:
-            instrucciones_finales = f"{instrucciones_actuales}\n\n{instrucciones_nuevas}"
-        elif instrucciones_nuevas:
+        if modo == 'reemplazar':
             instrucciones_finales = instrucciones_nuevas
         else:
-            instrucciones_finales = instrucciones_actuales
+            if instrucciones_actuales and instrucciones_nuevas:
+                instrucciones_finales = f"{instrucciones_actuales}\n\n{instrucciones_nuevas}"
+            elif instrucciones_nuevas:
+                instrucciones_finales = instrucciones_nuevas
+            else:
+                instrucciones_finales = instrucciones_actuales
         
         # ========== COMBINAR POLÍTICAS ==========
         politicas_actuales = contexto_actual.get('politicas', '')
         politicas_nuevas = resultado.get('politicas', '')
         
-        if politicas_actuales and politicas_nuevas:
-            politicas_finales = f"{politicas_actuales}\n\n{politicas_nuevas}"
-        elif politicas_nuevas:
+        if modo == 'reemplazar':
             politicas_finales = politicas_nuevas
         else:
-            politicas_finales = politicas_actuales
+            if politicas_actuales and politicas_nuevas:
+                politicas_finales = f"{politicas_actuales}\n\n{politicas_nuevas}"
+            elif politicas_nuevas:
+                politicas_finales = politicas_nuevas
+            else:
+                politicas_finales = politicas_actuales
         
         # ========== HORARIO y UBICACIÓN ==========
-        horario_final = resultado.get('horario', '') or contexto_actual.get('horario', '')
-        ubicacion_final = resultado.get('ubicacion', '') or contexto_actual.get('ubicacion', '')
+        if modo == 'reemplazar':
+            horario_final = resultado.get('horario', '')
+            ubicacion_final = resultado.get('ubicacion', '')
+        else:
+            horario_final = resultado.get('horario', '') or contexto_actual.get('horario', '')
+            ubicacion_final = resultado.get('ubicacion', '') or contexto_actual.get('ubicacion', '')
         
         # ========== GENERAR PROMPT PERSONALIZADO ==========
         contexto_combinado = {
@@ -978,6 +1000,7 @@ def train_ia(tenant_id):
                     precio = int(producto.get('precio', 0))
                     descripcion = producto.get('descripcion', '')
                     categoria = producto.get('categoria', 'general')
+                    es_base = producto.get('es_base', True)
                     
                     with db_manager.get_connection(tenant_id) as conn:
                         with conn.cursor() as cur:
@@ -985,33 +1008,43 @@ def train_ia(tenant_id):
                             existing = cur.fetchone()
                             
                             if existing:
-                                cur.execute(f'''
-                                    UPDATE "{schema_name}".productos 
-                                    SET precio = %s, descripcion = %s, categoria = %s, 
-                                        disponible = true, updated_at = NOW()
-                                    WHERE nombre ILIKE %s
-                                ''', (precio, descripcion, categoria, nombre))
-                                productos_actualizados += 1
+                                # Actualizar precio si cambió
+                                existing_precio = existing[1]
+                                if existing_precio != precio:
+                                    cur.execute(f'''
+                                        UPDATE "{schema_name}".productos 
+                                        SET precio = %s, descripcion = %s, categoria = %s, 
+                                            disponible = true, updated_at = NOW()
+                                        WHERE nombre ILIKE %s
+                                    ''', (precio, descripcion, categoria, nombre))
+                                    productos_actualizados += 1
+                                    logger.info(f"🔄 [BD] Actualizado: {nombre} ${existing_precio} → ${precio}")
                             else:
                                 product_id = str(uuid.uuid4())
                                 cur.execute(f'''
                                     INSERT INTO "{schema_name}".productos 
-                                    (id, nombre, descripcion, precio, categoria, disponible)
-                                    VALUES (%s, %s, %s, %s, %s, true)
-                                ''', (product_id, nombre, descripcion, precio, categoria))
+                                    (id, nombre, descripcion, precio, categoria, disponible, es_base)
+                                    VALUES (%s, %s, %s, %s, %s, true, %s)
+                                ''', (product_id, nombre, descripcion, precio, categoria, es_base))
                                 productos_agregados += 1
+                                logger.info(f"➕ [BD] Nuevo producto: {nombre} - ${precio}")
                             conn.commit()
                 except Exception as e:
                     logger.warning(f'Error guardando producto {producto.get("nombre")}: {e}')
         
-        logger.info(f'Entrenamiento acumulativo completado: +{productos_agregados} / ~{productos_actualizados}')
+        logger.info(f'Entrenamiento completado: +{productos_agregados} nuevos, ~{productos_actualizados} actualizados')
         
         return jsonify({
             'status': 'ok',
             'contexto': contexto_combinado,
+            'productos': productos_nuevos,
             'productos_agregados': productos_agregados,
             'productos_actualizados': productos_actualizados,
-            'message': f'Entrenamiento acumulativo exitoso. {productos_agregados} productos agregados, {productos_actualizados} actualizados.'
+            'horario': horario_final,
+            'ubicacion': ubicacion_final,
+            'politicas': politicas_finales,
+            'instrucciones_adicionales': instrucciones_finales,
+            'message': f'✅ Entrenamiento exitoso. {productos_agregados} productos agregados, {productos_actualizados} actualizados.'
         })
         
     except Exception as e:
