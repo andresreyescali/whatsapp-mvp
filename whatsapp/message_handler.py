@@ -418,7 +418,7 @@ Responde en español, como un asistente amable.
             if adicionales and len(adicionales) > 0:
                 # Preguntar por los adicionales
                 mensaje = f"✅ *{producto['nombre']}* - ${producto['precio']:,}\n\n"
-                mensaje += "🎨 *Opciones adicionales disponibles:*\n\n"
+                mensaje += "🎨 *Opciones disponibles:*\n\n"
                 
                 for i, adic in enumerate(adicionales, 1):
                     precio_extra = adic.get('precio_extra', 0)
@@ -426,15 +426,15 @@ Responde en español, como un asistente amable.
                     multi_texto = " (puedes elegir varios)" if multiple else ""
                     
                     if precio_extra > 0:
-                        mensaje += f"{i}. {adic['nombre']} *(+${precio_extra:,})*{multi_texto}\n"
+                        mensaje += f"• {adic['nombre']} *(+${precio_extra:,})*{multi_texto}\n"
                     else:
-                        mensaje += f"{i}. {adic['nombre']} *(sin costo extra)*{multi_texto}\n"
+                        mensaje += f"• {adic['nombre']} *(sin costo extra)*{multi_texto}\n"
                 
-                mensaje += "\n📝 *Responde con el número de la opción que deseas*\n"
-                mensaje += "Ejemplo: *1* para seleccionar la primera opción\n"
-                mensaje += "Puedes elegir múltiples opciones si están permitidas\n"
-                mensaje += "Responde *ninguno* si no quieres adicionales\n"
-                mensaje += "O responde *siguiente* para continuar sin más adicionales"
+                mensaje += "\n📝 *Responde con:*\n"
+                mensaje += "• El *número* de la opción (ej: '5')\n"
+                mensaje += "• El *nombre* de lo que quieres (ej: 'torta negra')\n"
+                mensaje += "• *Ninguno* si no quieres adicionales\n"
+                mensaje += "• *Siguiente* para continuar"
                 
                 self._set_estado(numero, 'esperando_adicional')
                 return mensaje
@@ -447,7 +447,7 @@ Responde en español, como un asistente amable.
             return "❌ Error al procesar el producto"
     
     def _procesar_adicional(self, texto: str, tenant: dict, numero: str) -> str:
-        """Procesa la selección de adicionales"""
+        """Procesa la selección de adicionales usando IA para interpretar lenguaje natural"""
         try:
             producto_temp = self._producto_temporal.get(numero)
             if not producto_temp:
@@ -458,32 +458,92 @@ Responde en español, como un asistente amable.
             respuesta = texto.lower().strip()
             
             # Verificar si quiere continuar sin más adicionales
-            if respuesta in ['ninguno', 'ninguna', 'no', '0', 'siguiente', 'continuar']:
+            if respuesta in ['ninguno', 'ninguna', 'no', '0', 'siguiente', 'continuar', 'saltar']:
                 # Pasar a personalizaciones
                 return self._procesar_personalizaciones_producto(tenant['id'], numero)
             
-            # Verificar si es un número o lista de números
-            if ',' in respuesta or ' ' in respuesta:
-                partes = re.split(r'[, ]+', respuesta)
-                indices = []
-                for p in partes:
-                    try:
-                        idx = int(p) - 1
-                        if 0 <= idx < len(adicionales):
-                            indices.append(idx)
-                    except ValueError:
-                        pass
+            # ========== USAR IA PARA INTERPRETAR LA RESPUESTA ==========
+            if ai_client.client and adicionales:
+                # Construir prompt para la IA
+                opciones_texto = ""
+                for i, adic in enumerate(adicionales, 1):
+                    precio_extra = adic.get('precio_extra', 0)
+                    opciones_texto += f"{i}. {adic['nombre']} (+${precio_extra:,})\n"
                 
-                if indices:
-                    for idx in indices:
-                        adic = adicionales[idx]
-                        producto_temp['adicionales_seleccionados'].append(adic)
-                    return self._preguntar_si_mas_adicionales(tenant['id'], numero, producto_temp)
-                else:
-                    return self._opcion_invalida_adicional(adicionales)
+                prompt = f"""
+    Interpreta la respuesta del cliente y determina qué opción de adicional quiere elegir.
+
+    OPCIONES DISPONIBLES:
+    {opciones_texto}
+
+    RESPUESTA DEL CLIENTE: "{texto}"
+
+    INSTRUCCIONES:
+    1. Analiza qué opción está pidiendo el cliente basado en su mensaje
+    2. Si dice "torta negra", debe elegir la opción que contiene "Torta Negra"
+    3. Si dice "vainilla", debe elegir la opción con vainilla
+    4. Si dice "chocolate", debe elegir la opción con chocolate
+    5. Si dice "ninguno" o "no quiero", responde con "ninguno"
+    6. Si no está seguro, responde con "no_seguro"
+
+    Devuelve SOLO un JSON:
+    {{"opcion": "numero_del_1_al_N", "nombre": "nombre_de_la_opcion", "confianza": "alta|media|baja"}}
+    Si no quiere ninguno: {{"opcion": "ninguno"}}
+    Si no está seguro: {{"opcion": "no_seguro"}}
+    """
+                try:
+                    response = ai_client.client.chat.completions.create(
+                        model=ai_client.model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.2,
+                        max_tokens=200
+                    )
+                    contenido = response.choices[0].message.content
+                    contenido = contenido.replace('```json', '').replace('```', '').strip()
+                    resultado = json.loads(contenido)
+                    
+                    opcion = resultado.get('opcion')
+                    
+                    if opcion == 'ninguno':
+                        return self._procesar_personalizaciones_producto(tenant['id'], numero)
+                    
+                    if opcion != 'no_seguro' and opcion:
+                        try:
+                            opcion_idx = int(opcion) - 1
+                            if 0 <= opcion_idx < len(adicionales):
+                                adic = adicionales[opcion_idx]
+                                producto_temp['adicionales_seleccionados'].append(adic)
+                                logger.info(f"🤖 [IA] Mapeó '{texto}' a opción {opcion}: {adic['nombre']}")
+                                
+                                if adic.get('multiple', False):
+                                    return self._preguntar_si_mas_adicionales(tenant['id'], numero, producto_temp)
+                                else:
+                                    return self._procesar_personalizaciones_producto(tenant['id'], numero)
+                        except ValueError:
+                            pass
+                            
+                except Exception as e:
+                    logger.error(f'Error en IA para interpretar adicional: {e}')
             
-            # Selección única
-            try:
+            # ========== FALLBACK: intentar mapeo por palabras clave ==========
+            # Mapear respuestas de texto a opciones
+            for i, adic in enumerate(adicionales, 1):
+                nombre_adicional = adic['nombre'].lower()
+                # Buscar coincidencias de palabras clave
+                palabras_clave = nombre_adicional.replace('sabor a ', '').replace('o ', '').split()
+                for palabra in palabras_clave:
+                    if len(palabra) > 3 and palabra in respuesta:
+                        producto_temp['adicionales_seleccionados'].append(adic)
+                        logger.info(f"🔑 [KEYWORD] Mapeó '{texto}' a opción {i}: {adic['nombre']}")
+                        
+                        if adic.get('multiple', False):
+                            return self._preguntar_si_mas_adicionales(tenant['id'], numero, producto_temp)
+                        else:
+                            return self._procesar_personalizaciones_producto(tenant['id'], numero)
+            
+            # ========== ÚLTIMO RECURSO: intentar parsear número ==========
+            # Verificar si es un número
+            if respuesta.isdigit():
                 opcion_idx = int(respuesta) - 1
                 if 0 <= opcion_idx < len(adicionales):
                     adic = adicionales[opcion_idx]
@@ -493,15 +553,15 @@ Responde en español, como un asistente amable.
                         return self._preguntar_si_mas_adicionales(tenant['id'], numero, producto_temp)
                     else:
                         return self._procesar_personalizaciones_producto(tenant['id'], numero)
-                else:
-                    return self._opcion_invalida_adicional(adicionales)
-            except ValueError:
-                return self._opcion_invalida_adicional(adicionales)
-                
+            
+            # Si no se pudo interpretar, mostrar mensaje de ayuda
+            return self._opcion_invalida_adicional(adicionales)
+            
         except Exception as e:
             logger.error(f'Error procesando adicional: {e}')
             self._set_estado(numero, None)
             return "❌ Error al procesar tu selección. Por favor intenta de nuevo."
+        
     
     def _preguntar_si_mas_adicionales(self, tenant_id: str, numero: str, producto_temp: dict) -> str:
         """Pregunta si quiere agregar más adicionales"""
@@ -536,9 +596,22 @@ Responde en español, como un asistente amable.
     
     def _opcion_invalida_adicional(self, adicionales: list) -> str:
         """Mensaje de opción inválida para adicionales"""
-        mensaje = "❌ *Opción inválida*\n\n"
-        mensaje += "Por favor, elige un número del 1 al " + str(len(adicionales)) + "\n"
-        mensaje += "O responde *ninguno* si no quieres adicionales"
+        mensaje = "❌ *No entendí tu selección*\n\n"
+        mensaje += "Puedes responder de varias formas:\n"
+        mensaje += "• Con el *número* de la opción (ej: '5')\n"
+        mensaje += "• Con el *nombre* del sabor (ej: 'torta negra')\n"
+        mensaje += "• Con *ninguno* si no quieres adicionales\n\n"
+        mensaje += "📋 *Opciones disponibles:*\n"
+        
+        for i, adic in enumerate(adicionales, 1):
+            precio_extra = adic.get('precio_extra', 0)
+            nombre = adic['nombre']
+            if precio_extra > 0:
+                mensaje += f"{i}. {nombre} (+${precio_extra:,})\n"
+            else:
+                mensaje += f"{i}. {nombre} (sin costo extra)\n"
+        
+        mensaje += "\n¿Cuál prefieres? (escribe el número o el nombre)"
         return mensaje
     
     def _procesar_personalizaciones_producto(self, tenant_id: str, numero: str) -> str:
