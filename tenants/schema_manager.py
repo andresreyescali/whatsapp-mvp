@@ -506,16 +506,33 @@ class SchemaManager:
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
+                    # Verificar si la columna es_base existe
                     cur.execute(f"""
-                        SELECT id, nombre, descripcion, precio, categoria, disponible,
-                               imagen_url, tiempo_preparacion, destacado, metadata, es_base, created_at
-                        FROM "{schema_name}".productos 
-                        ORDER BY es_base DESC, destacado DESC, disponible DESC, categoria, nombre
-                    """)
+                        SELECT column_name FROM information_schema.columns 
+                        WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'es_base'
+                    """, (schema_name,))
+                    tiene_es_base = cur.fetchone() is not None
+                    
+                    # Construir SELECT según columnas existentes
+                    if tiene_es_base:
+                        cur.execute(f"""
+                            SELECT id, nombre, descripcion, precio, categoria, disponible,
+                                imagen_url, tiempo_preparacion, destacado, metadata, es_base, created_at
+                            FROM "{schema_name}".productos 
+                            ORDER BY destacado DESC, disponible DESC, categoria, nombre
+                        """)
+                    else:
+                        cur.execute(f"""
+                            SELECT id, nombre, descripcion, precio, categoria, disponible,
+                                imagen_url, tiempo_preparacion, destacado, metadata, created_at
+                            FROM "{schema_name}".productos 
+                            ORDER BY destacado DESC, disponible DESC, categoria, nombre
+                        """)
+                    
                     rows = cur.fetchall()
                     productos = []
                     for row in rows:
-                        metadata = row[9] if row[9] else {}
+                        metadata = row[9] if len(row) > 9 and row[9] else {}
                         if isinstance(metadata, str):
                             try:
                                 metadata = json.loads(metadata)
@@ -526,7 +543,7 @@ class SchemaManager:
                         if not metadata.get('adicionales'):
                             metadata['adicionales'] = []
                         
-                        productos.append({
+                        producto = {
                             'id': str(row[0]),
                             'nombre': row[1],
                             'descripcion': row[2] or '',
@@ -536,10 +553,17 @@ class SchemaManager:
                             'imagen_url': row[6],
                             'tiempo_preparacion': row[7],
                             'destacado': row[8] if row[8] is not None else False,
-                            'es_base': row[10] if len(row) > 10 and row[10] is not None else True,
                             'personalizaciones': metadata.get('personalizaciones', []),
                             'adicionales': metadata.get('adicionales', [])
-                        })
+                        }
+                        
+                        # Agregar es_base solo si existe la columna
+                        if tiene_es_base and len(row) > 10:
+                            producto['es_base'] = row[10] if row[10] is not None else True
+                        else:
+                            producto['es_base'] = True  # Default para tenants antiguos
+                        
+                        productos.append(producto)
                     return productos
         except Exception as e:
             logger.error(f'Error obteniendo menú: {e}')
