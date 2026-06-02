@@ -319,10 +319,17 @@ class IATrainer:
             logger.error("Cliente de IA no disponible")
             return {'productos': []}
         
-        # Intentar extraer productos manualmente primero (más confiable)
+        # Intentar extraer productos manualmente primero (más confiable para tablas)
         productos_manual = self._extraer_productos_manual(texto)
         if productos_manual:
             logger.info(f"✅ [MANUAL] Productos extraídos manualmente: {len(productos_manual)}")
+            
+            # Mostrar primeros 10 productos como ejemplo en logs
+            for i, p in enumerate(productos_manual[:10]):
+                logger.info(f"   📦 {i+1}. {p['nombre']}: ${p['precio']}")
+            if len(productos_manual) > 10:
+                logger.info(f"   ... y {len(productos_manual) - 10} productos más")
+            
             guardados = self._guardar_productos_en_bd(tenant_id, productos_manual)
             
             # También extraer contexto
@@ -340,31 +347,32 @@ class IATrainer:
             }
         
         # Si no se pudo extraer manualmente, usar IA
+        logger.info("🤖 [IA] Usando IA para extraer productos (fallback manual)")
         prompt = f"""
-    Extrae TODOS los productos y precios del siguiente texto.
+Extrae TODOS los productos y precios del siguiente texto.
 
-    TEXTO:
-    {texto[:4000]}
+TEXTO:
+{texto[:4000]}
 
-    REGLAS:
-    1. Busca patrones como "nombre: $precio", "nombre $precio", o "nombre - $precio"
-    2. Si un producto tiene múltiples tamaños (Porción, Cuarto, Media, Libra), crea una línea por cada tamaño
-    3. Normaliza precios: elimina puntos, comas, y símbolos. Ej: "$13,000" → 13000
-    4. Usa categorías: "tortas" para productos principales, "decoraciones" para adicionales
+REGLAS:
+1. Busca patrones como "nombre: $precio", "nombre $precio", o "nombre - $precio"
+2. Si un producto tiene múltiples tamaños (Porción, Cuarto, Media, Libra), crea una línea por cada tamaño
+3. Normaliza precios: elimina puntos, comas, y símbolos. Ej: "$13,000" → 13000
+4. Usa categorías: "tortas" para productos principales, "decoraciones" para adicionales
 
-    Devuelve SOLO UN JSON. Ejemplo exacto:
-    {{
-        "productos": [
-            {{"nombre": "Torta Negra Porción", "precio": 19000, "categoria": "tortas"}},
-            {{"nombre": "Torta Negra Libra", "precio": 177500, "categoria": "tortas"}}
-        ],
-        "horario": "Lunes a Domingo 8am-8pm",
-        "ubicacion": "Cali, Colombia",
-        "politicas": "Pedido con 24 horas de anticipación"
-    }}
+Devuelve SOLO UN JSON. Ejemplo exacto:
+{{
+    "productos": [
+        {{"nombre": "Torta Negra Porción", "precio": 19000, "categoria": "tortas"}},
+        {{"nombre": "Torta Negra Libra", "precio": 177500, "categoria": "tortas"}}
+    ],
+    "horario": "Lunes a Domingo 8am-8pm",
+    "ubicacion": "Cali, Colombia",
+    "politicas": "Pedido con 24 horas de anticipación"
+}}
 
-    Si no encuentras productos, devuelve {{"productos": []}}
-    """
+Si no encuentras productos, devuelve {{"productos": []}}
+"""
         
         try:
             response = ai_client.client.chat.completions.create(
@@ -386,6 +394,10 @@ class IATrainer:
                     nombre = p.get('nombre', '').strip()
                     precio = self._normalizar_precio(p.get('precio', 0))
                     if nombre and len(nombre) > 2 and precio > 0:
+                        # Limpiar nombre de caracteres extraños
+                        nombre = re.sub(r'[»«•*+_\-=~]', '', nombre)
+                        nombre = re.sub(r'\s+', ' ', nombre).strip()
+                        
                         productos_validos.append({
                             'nombre': nombre,
                             'precio': precio,
@@ -395,6 +407,7 @@ class IATrainer:
                         })
                 
                 if productos_validos:
+                    logger.info(f"🤖 [IA] Productos extraídos: {len(productos_validos)}")
                     guardados = self._guardar_productos_en_bd(tenant_id, productos_validos)
                     self._guardar_contexto_en_bd(tenant_id, resultado)
                     
@@ -408,6 +421,7 @@ class IATrainer:
                         'message': f"✅ Se procesaron {len(productos_validos)} productos"
                     }
             
+            logger.warning("⚠️ No se encontraron productos en el texto")
             return {'productos': [], 'message': 'No se encontraron productos en el texto'}
             
         except Exception as e:
@@ -416,39 +430,43 @@ class IATrainer:
             traceback.print_exc()
             return {'productos': []}
 
-
     def _extraer_productos_manual(self, texto: str) -> list:
-        """Extrae productos manualmente usando regex (fallback cuando la IA falla)"""
+        """Extrae productos manualmente usando regex - optimizado para tablas de precios"""
         productos = []
         
-        # Patrón para encontrar productos con precios
-        # Ejemplos: "Torta Negra Porción: $19,000" o "Torta Negra Libra 177500"
-        patrones = [
-            r'([A-Za-zÁÉÍÓÚáéíóúÑñ\s\-]+?)(?:[:|-]?\s*)\$?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\b',
-            r'([A-Za-zÁÉÍÓÚáéíóúÑñ\s\-]+?)\s+(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\b',
-        ]
+        # Limpiar el texto primero
+        texto = re.sub(r'\*', '', texto)  # Eliminar asteriscos
+        texto = re.sub(r'\s+', ' ', texto)  # Normalizar espacios
         
-        for patron in patrones:
-            matches = re.findall(patron, texto)
-            for match in matches:
-                nombre = match[0].strip()
-                precio_str = match[1]
-                
-                # Limpiar nombre
-                nombre = re.sub(r'[^\w\sÁÉÍÓÚáéíóúÑñ-]', '', nombre)
-                nombre = re.sub(r'\s+', ' ', nombre).strip()
-                
-                # Normalizar precio
+        # Dividir por líneas
+        lineas = texto.split('\n')
+        
+        # Patrón para detectar líneas con productos (formato tabla)
+        # Ejemplos: "TORTA DE VAINILLA-AREQUIPE (Porción) $ 13000"
+        #          "TORTA NEGRA (Libra) $ 177500"
+        patron_linea = r'([A-ZÁÉÍÓÚÜÑ\s\-]+?)\s*\(([^)]+)\)\s*\$?\s*([\d.,]+)'
+        
+        for linea in lineas:
+            linea = linea.strip()
+            if not linea or len(linea) < 5:
+                continue
+            
+            # Limpiar caracteres especiales
+            linea = re.sub(r'[»«•*+_=~]', '', linea)
+            
+            # Intentar extraer producto con formato (Nombre) (Tamaño) $Precio
+            match = re.search(patron_linea, linea, re.IGNORECASE)
+            if match:
+                nombre_base = match.group(1).strip()
+                tamanio = match.group(2).strip()
+                precio_str = match.group(3)
                 precio = self._normalizar_precio(precio_str)
                 
-                if nombre and len(nombre) > 3 and precio > 0:
-                    # Determinar categoría
-                    categoria = 'tortas'
-                    if any(p in nombre.lower() for p in ['drip', 'letrero', 'caja', 'flor', 'chocolate', 'decor']):
-                        categoria = 'decoraciones'
-                    elif any(p in nombre.lower() for p in ['porción', 'cuarto', 'media', 'libra']):
-                        categoria = 'tortas'
-                    
+                nombre = f"{nombre_base} {tamanio}"
+                nombre = re.sub(r'\s+', ' ', nombre).strip()
+                
+                if precio > 0 and len(nombre) > 3:
+                    categoria = self._detectar_categoria(nombre)
                     productos.append({
                         'nombre': nombre,
                         'precio': precio,
@@ -456,19 +474,70 @@ class IATrainer:
                         'es_base': True
                     })
         
-        # Eliminar duplicados por nombre
+        # También procesar el texto completo con regex global para capturar lo que se escapó
+        patron_global = r'([A-ZÁÉÍÓÚÜÑ\s\-]+?)\s*\(?(PORCIÓN|CUARTO|MEDIA|LIBRA|Porción|Cuarto|Media|Libra)\)?\s*\$?\s*([\d.,]+)'
+        matches = re.findall(patron_global, texto, re.IGNORECASE)
+        
+        for match in matches:
+            nombre_base = match[0].strip()
+            tamanio = match[1].strip()
+            precio_str = match[2]
+            precio = self._normalizar_precio(precio_str)
+            
+            nombre = f"{nombre_base} {tamanio}"
+            nombre = re.sub(r'\s+', ' ', nombre).strip()
+            
+            if precio > 0 and len(nombre) > 5:
+                # Verificar si ya existe
+                existe = False
+                for p in productos:
+                    if p['nombre'].lower() == nombre.lower():
+                        existe = True
+                        break
+                if not existe:
+                    categoria = self._detectar_categoria(nombre)
+                    productos.append({
+                        'nombre': nombre,
+                        'precio': precio,
+                        'categoria': categoria,
+                        'es_base': True
+                    })
+        
+        # Eliminar duplicados
         vistos = set()
         unicos = []
         for p in productos:
-            if p['nombre'] not in vistos:
-                vistos.add(p['nombre'])
+            key = f"{p['nombre'].lower()}_{p['precio']}"
+            if key not in vistos:
+                vistos.add(key)
                 unicos.append(p)
         
+        logger.info(f"✅ [MANUAL] Productos extraídos manualmente: {len(unicos)}")
         return unicos
 
+    def _detectar_categoria(self, nombre: str) -> str:
+        """Detecta la categoría del producto basado en el nombre"""
+        nombre_lower = nombre.lower()
+        
+        if any(p in nombre_lower for p in ['torta', 'ponque', 'pastel']):
+            return 'tortas'
+        elif any(p in nombre_lower for p in ['drip', 'base', 'glaze', 'dorada', 'fondant']):
+            return 'decoraciones'
+        elif any(p in nombre_lower for p in ['letrero', 'caja', 'maqueta']):
+            return 'empaques'
+        elif any(p in nombre_lower for p in ['flor', 'mariposa', 'perla']):
+            return 'adornos'
+        elif any(p in nombre_lower for p in ['chocolate', 'ferrero', 'kinder', 'chokis']):
+            return 'chocolates'
+        elif any(p in nombre_lower for p in ['impresion', 'comestible']):
+            return 'impresiones'
+        elif any(p in nombre_lower for p in ['galleta', 'brownie', 'dona']):
+            return 'postres_individuales'
+        else:
+            return 'adicionales'
 
     def _extraer_contexto_manual(self, texto: str) -> dict:
-        """Extrae contexto manualmente usando regex"""
+        """Extrae contexto manualmente usando regex mejorado"""
         contexto = {
             'horario': '',
             'ubicacion': '',
@@ -476,20 +545,49 @@ class IATrainer:
             'instrucciones_adicionales': ''
         }
         
-        # Buscar horario
-        horario_match = re.search(r'horario:?\s*([^.\n]+)', texto, re.IGNORECASE)
-        if horario_match:
-            contexto['horario'] = horario_match.group(1).strip()
+        # Buscar horario (más patrones)
+        patrones_horario = [
+            r'horario:?\s*([^.\n]+)',
+            r'lunes a [^.\n]+',
+            r'de\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+a\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)',
+            r'(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)'
+        ]
+        
+        for patron in patrones_horario:
+            match = re.search(patron, texto, re.IGNORECASE)
+            if match:
+                contexto['horario'] = match.group(0).strip()
+                break
         
         # Buscar ubicación
-        ubicacion_match = re.search(r'ubicaci[oó]n:?\s*([^.\n]+)', texto, re.IGNORECASE)
-        if ubicacion_match:
-            contexto['ubicacion'] = ubicacion_match.group(1).strip()
+        patrones_ubicacion = [
+            r'ubicaci[oó]n:?\s*([^.\n]+)',
+            r'direcci[oó]n:?\s*([^.\n]+)',
+            r'(?:calle|cra|carrera|transversal|diagonal)\s+\d+[^.\n]*',
+            r'popay[aá]n[^.\n]*',
+            r'cali[^.\n]*'
+        ]
+        
+        for patron in patrones_ubicacion:
+            match = re.search(patron, texto, re.IGNORECASE)
+            if match:
+                contexto['ubicacion'] = match.group(0).strip()
+                break
         
         # Buscar políticas
-        politicas_match = re.search(r'pol[ií]ticas:?\s*([^.\n]+)', texto, re.IGNORECASE)
-        if politicas_match:
-            contexto['politicas'] = politicas_match.group(1).strip()
+        patrones_politicas = [
+            r'pol[ií]ticas:?\s*([^.\n]+)',
+            r'pedido\s+(?:m[ií]nimo|con)\s+[^.\n]+',
+            r'anticipaci[oó]n[^.\n]+',
+            r'se[ñn]a\s+del\s+\d+%',
+            r'entrega\s+(?:gratuita|domicilio)[^.\n]*'
+        ]
+        
+        for patron in patrones_politicas:
+            match = re.search(patron, texto, re.IGNORECASE)
+            if match:
+                contexto['politicas'] = match.group(0).strip()
+                break
         
         return contexto
     
