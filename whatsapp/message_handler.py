@@ -58,7 +58,7 @@ class MessageHandler:
             logger.warning(f"⚠️ [RESPUESTA] Vacía para {numero}")
     
     def _obtener_menu(self, tenant_id: str) -> list:
-        """Obtiene el menú de productos (productos base con precios)"""
+        """Obtiene el menú completo de productos (sin filtrar por es_base)"""
         logger.info(f"📋 [MENU] Obteniendo menú para tenant {tenant_id}")
         try:
             schema_name = self._get_schema_name(tenant_id)
@@ -66,13 +66,13 @@ class MessageHandler:
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
+                    # Mostrar TODOS los productos disponibles
                     cur.execute(f"""
-                        SELECT id, nombre, descripcion, precio, categoria, disponible,
-                               imagen_url, tiempo_preparacion, destacado, es_base, metadata
+                        SELECT id, nombre, descripcion, precio, categoria, disponible
                         FROM "{schema_name}".productos 
-                        WHERE disponible = true AND es_base = true
+                        WHERE disponible = true
                         ORDER BY categoria, nombre
-                        LIMIT 100
+                        LIMIT 200
                     """)
                     rows = cur.fetchall()
                     logger.info(f"📋 [MENU] Productos encontrados: {len(rows)}")
@@ -95,7 +95,7 @@ class MessageHandler:
             return []
     
     def _obtener_contexto_tenant(self, tenant_id: str) -> dict:
-        """Obtiene el contexto entrenado para el tenant"""
+        """Obtiene el contexto entrenado para the tenant"""
         try:
             with db_manager.get_connection() as conn:
                 with conn.cursor() as cur:
@@ -131,7 +131,7 @@ class MessageHandler:
         except Exception as e:
             logger.error(f'Error guardando conversación: {e}')
     
-    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 10) -> list:
+    def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 20) -> list:
         """Obtiene el historial de conversación del cliente"""
         try:
             schema_name = self._get_schema_name(tenant_id)
@@ -190,7 +190,6 @@ class MessageHandler:
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Verificar si ya existe
                     cur.execute(f"""
                         SELECT id FROM "{schema_name}".carritos WHERE cliente_numero = %s
                     """, (cliente_numero,))
@@ -215,7 +214,6 @@ class MessageHandler:
                     conn.commit()
                     logger.info(f"✅ [GUARDAR] Carrito guardado exitosamente")
                     
-                    # Verificar post-guardado
                     cur.execute(f"""
                         SELECT items, total FROM "{schema_name}".carritos WHERE cliente_numero = %s
                     """, (cliente_numero,))
@@ -238,11 +236,9 @@ class MessageHandler:
         logger.info(f"🛒 [AGREGAR] Tenant: {tenant_id}")
         
         try:
-            # Cargar carrito actual
             carrito = self._cargar_carrito(tenant_id, cliente_numero)
             logger.info(f"🛒 [AGREGAR] Carrito actual: {len(carrito['items'])} items, total ${carrito['total']:,.0f}")
             
-            # Buscar si ya existe el mismo producto
             encontrado = False
             for i, item in enumerate(carrito['items']):
                 if item.get('nombre') == nombre:
@@ -264,11 +260,9 @@ class MessageHandler:
                 carrito['total'] += precio * cantidad
                 logger.info(f"🛒 [AGREGAR] Nuevo producto agregado: {nuevo_item}")
             
-            # Guardar carrito actualizado
             logger.info(f"🛒 [AGREGAR] Guardando carrito con {len(carrito['items'])} items, total ${carrito['total']:,.0f}")
             self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
             
-            # Verificación final
             verificacion = self._cargar_carrito(tenant_id, cliente_numero)
             logger.info(f"🛒 [AGREGAR] Verificación final: {len(verificacion['items'])} items, total ${verificacion['total']:,.0f}")
             logger.info(f"🛒 [AGREGAR] ===== FIN OK =====")
@@ -287,109 +281,120 @@ class MessageHandler:
         self._guardar_carrito(tenant_id, cliente_numero, [], 0)
         logger.info(f"✅ [LIMPIAR] Carrito limpiado")
     
+    # ==================== FUNCIONES AUXILIARES PARA PROMPT ====================
+    
+    def _formatear_historial_para_prompt(self, historial: list) -> str:
+        """Formatea el historial de la conversación para el prompt de IA"""
+        if not historial:
+            return ""
+        
+        texto = "\n📜 HISTORIAL DE LA CONVERSACIÓN (mensajes recientes):\n"
+        for h in historial[-15:]:
+            texto += f"Cliente: {h[0]}\nAsistente: {h[1]}\n"
+        
+        texto += "\n⚠️ IMPORTANTE: Usa esta información para NO repetir preguntas ya respondidas.\n"
+        return texto
+    
+    def _formatear_carrito_para_prompt(self, carrito: dict) -> str:
+        """Formatea el carrito actual para el prompt"""
+        if not carrito or not carrito.get('items'):
+            return ""
+        
+        texto = "\n🛒 PRODUCTOS ACTUALES EN EL CARRITO:\n"
+        for item in carrito['items']:
+            texto += f"- {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
+        texto += f"💰 Total actual en carrito: ${carrito.get('total', 0):,.0f}\n"
+        return texto
+    
+    def _formatear_menu_para_prompt(self, menu: list) -> str:
+        """Formatea el menú completo para el prompt de IA"""
+        if not menu:
+            return "No hay productos disponibles"
+        
+        texto = "\n📋 CATÁLOGO DE PRODUCTOS:\n"
+        for p in menu[:100]:
+            texto += f"- {p['nombre']}: ${p['precio']:,}\n"
+        
+        texto += "\n📌 El cliente puede pedir cualquier producto de esta lista. Busca el nombre más cercano en el catálogo.\n"
+        return texto
+    
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
     def _procesar_con_ia(self, tenant: dict, menu: list, numero: str, texto: str, contexto: dict) -> str:
-        """Procesa el mensaje usando IA con Function Calling"""
+        """Procesa el mensaje usando IA para entender lenguaje natural"""
         
-        logger.info(f"🤖 [IA] ===== INICIO PROCESAMIENTO =====")
-        logger.info(f"🤖 [IA] Cliente: {numero}")
-        logger.info(f"🤖 [IA] Mensaje: {texto}")
-        logger.info(f"🤖 [IA] Menú disponible: {len(menu)} productos")
+        logger.info(f"🤖 [IA] Procesando: {texto[:100]}...")
         
         if not ai_client.client:
-            logger.warning("⚠️ [IA] Cliente no disponible")
             return self._respuesta_fallback(tenant, menu)
         
-        # Obtener historial y carrito
-        historial = self._get_historial_conversacion(tenant['id'], numero, 10)
+        # ========== VERIFICAR CONFIRMACIÓN PRIMERO ==========
+        if self._es_confirmacion(texto):
+            logger.info(f"✅ [CONFIRMACION] Detectada para {numero}")
+            carrito_final = self._cargar_carrito(tenant['id'], numero)
+            
+            if carrito_final and carrito_final.get('items'):
+                logger.info(f"🛒 [CARRITO] Carrito con {len(carrito_final['items'])} items, total ${carrito_final['total']:,.0f}")
+                self._conversacion_activa[numero] = {
+                    'estado': 'confirmando_pedido',
+                    'productos': carrito_final['items'],
+                    'total': carrito_final['total']
+                }
+                return self._mostrar_resumen_pedido(carrito_final['items'], carrito_final['total'])
+            else:
+                logger.warning(f"⚠️ [CONFIRMACION] Carrito vacío para {numero}")
+                return "No hay productos en tu carrito. ¿Qué te gustaría ordenar? Por favor, primero dime qué producto deseas."
+        
+        # ========== VERIFICAR SI QUIERE VER EL CARRITO ==========
+        if any(p in texto.lower() for p in ['ver carrito', 'mi pedido', 'qué pedí', 'que tengo', 'resumen']):
+            carrito = self._cargar_carrito(tenant['id'], numero)
+            if carrito.get('items'):
+                return self._mostrar_resumen_pedido(carrito['items'], carrito['total'])
+            else:
+                return "🛒 Tu carrito está vacío. ¿Qué te gustaría ordenar?"
+        
+        # ========== OBTENER HISTORIAL Y CARRITO ==========
+        historial = self._get_historial_conversacion(tenant['id'], numero, 15)
+        historial_texto = self._formatear_historial_para_prompt(historial)
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
+        carrito_texto = self._formatear_carrito_para_prompt(carrito_actual)
         
-        logger.info(f"🤖 [IA] Carrito actual: {len(carrito_actual.get('items', []))} items, total ${carrito_actual.get('total', 0):,.0f}")
+        # Formatear menú completo
+        menu_texto = self._formatear_menu_para_prompt(menu)
         
-        # Formatear menú para el prompt
-        menu_texto = "\n".join([f"- {p['nombre']}: ${p['precio']:,}" for p in menu[:50]])
-        
-        # Preparar tools/function calling
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "agregar_producto_carrito",
-                    "description": "Agrega un producto al carrito del cliente. Usa esta función cuando el cliente pida un producto específico.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "nombre_producto": {
-                                "type": "string",
-                                "description": "El nombre exacto del producto según el menú"
-                            },
-                            "precio": {
-                                "type": "integer",
-                                "description": "El precio del producto"
-                            },
-                            "cantidad": {
-                                "type": "integer",
-                                "description": "La cantidad de productos (default: 1)",
-                                "default": 1
-                            }
-                        },
-                        "required": ["nombre_producto", "precio"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "ver_carrito",
-                    "description": "Muestra el contenido actual del carrito",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "confirmar_pedido",
-                    "description": "Confirma el pedido y procede a finalizarlo. Usa cuando el cliente dice 'si', 'confirmo' o similar.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                }
-            }
-        ]
+        # Si hay carrito, mostrar resumen
+        if carrito_actual and carrito_actual.get('items'):
+            return self._mostrar_resumen_pedido(carrito_actual['items'], carrito_actual['total'])
         
         system_prompt = f"""
-Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}.
+Eres un asistente de ventas conversacional para {tenant.get('nombre', 'el negocio')}.
 
-INFORMACIÓN:
+🏪 INFORMACIÓN:
 - Horario: {contexto.get('horario', 'No especificado')}
 - Ubicación: {contexto.get('ubicacion', 'No especificada')}
 - Políticas: {contexto.get('politicas', 'No especificadas')}
 
 {contexto.get('instrucciones', '')}
 
-MENÚ DE PRODUCTOS:
 {menu_texto}
 
-CARRITO ACTUAL:
-{json.dumps(carrito_actual.get('items', []), indent=2, ensure_ascii=False)}
-Total actual: ${carrito_actual.get('total', 0):,.0f}
+{carrito_texto}
 
-INSTRUCCIONES:
-1. Cuando el cliente pida un producto, usa la función 'agregar_producto_carrito'
-2. Cuando el cliente quiera ver su pedido, usa 'ver_carrito'
-3. Cuando el cliente confirme (diga "si", "confirmo"), usa 'confirmar_pedido'
-4. Responde de forma natural y amable en español
+{historial_texto}
+
+REGLAS IMPORTANTES:
+1. Responde de forma NATURAL y CONVERSACIONAL. NO uses listas numeradas.
+2. RECUERDA lo que el cliente ya ha dicho en el historial.
+3. Cuando el cliente pida un producto, BUSCA en el catálogo el nombre más cercano.
+4. Si el cliente pide algo, CONFIRMA el producto y su precio.
+5. Si falta información (tamaño, color, etc.), PREGUNTA amablemente.
+6. Para finalizar, el cliente debe decir "confirmo".
+7. Sé breve, cálido y útil.
+
+RESPONDE en español.
 """
         
         try:
-            logger.info("🤖 [IA] Enviando request a DeepSeek...")
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
                 messages=[
@@ -397,99 +402,33 @@ INSTRUCCIONES:
                     {"role": "user", "content": f"Cliente: {texto}"}
                 ],
                 temperature=0.7,
-                max_tokens=500,
-                tools=tools,
-                tool_choice="auto"
+                max_tokens=500
             )
             
-            message = response.choices[0].message
-            logger.info(f"🤖 [IA] Respuesta recibida - Contenido: {message.content if message.content else 'None'}")
-            logger.info(f"🤖 [IA] Tool calls: {len(message.tool_calls) if message.tool_calls else 0}")
+            respuesta = response.choices[0].message.content
+            logger.info(f"🤖 [IA] Respuesta generada: {respuesta[:100]}...")
             
-            # Procesar tool calls
-            if message.tool_calls:
-                for tool_call in message.tool_calls:
-                    function_name = tool_call.function.name
-                    arguments = json.loads(tool_call.function.arguments)
-                    logger.info(f"🔧 [TOOL] Función llamada: {function_name}")
-                    logger.info(f"🔧 [TOOL] Argumentos: {arguments}")
-                    
-                    if function_name == "agregar_producto_carrito":
-                        nombre = arguments.get("nombre_producto")
-                        precio = arguments.get("precio")
-                        cantidad = arguments.get("cantidad", 1)
-                        
-                        logger.info(f"🔧 [TOOL] Agregando producto: '{nombre}', ${precio}, x{cantidad}")
-                        
-                        # Buscar precio real en el menú si es necesario
-                        producto_real = None
-                        for p in menu:
-                            if p['nombre'].lower() == nombre.lower():
-                                producto_real = p
-                                break
-                        
-                        if producto_real:
-                            logger.info(f"🔧 [TOOL] Producto encontrado en menú: {producto_real['nombre']} - ${producto_real['precio']}")
-                            exito = self._agregar_producto_al_carrito(tenant['id'], numero, producto_real['nombre'], producto_real['precio'], cantidad)
-                            
-                            if exito:
-                                logger.info(f"✅ [TOOL] Producto agregado exitosamente al carrito")
-                                # Recargar carrito para mostrar
-                                carrito_actualizado = self._cargar_carrito(tenant['id'], numero)
-                                return f"""✅ *Agregado a tu pedido:*
-• {cantidad}x {producto_real['nombre']}: ${producto_real['precio'] * cantidad:,.0f}
-
-💰 *Total actual:* ${carrito_actualizado['total']:,.0f}
-
-¿Algo más o confirmamos el pedido?"""
-                            else:
-                                logger.error(f"❌ [TOOL] Error al agregar producto al carrito")
-                                return "❌ Hubo un error al agregar el producto. Por favor intenta de nuevo."
-                        else:
-                            logger.warning(f"⚠️ [TOOL] Producto '{nombre}' no encontrado en menú")
-                            return f"❌ No encontré '{nombre}' en nuestro menú. ¿Puedes verificar el nombre?"
-                    
-                    elif function_name == "ver_carrito":
-                        logger.info(f"🔧 [TOOL] Mostrando carrito")
-                        carrito = self._cargar_carrito(tenant['id'], numero)
-                        if not carrito['items']:
-                            return "🛒 *Tu carrito está vacío.* ¿Qué te gustaría ordenar?"
-                        
-                        items_texto = ""
-                        for item in carrito['items']:
-                            items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
-                        
-                        return f"""📋 *Tu pedido actual:*
-{items_texto}
-💰 *Total:* ${carrito['total']:,.0f}
-
-¿Algo más o confirmamos el pedido?"""
-                    
-                    elif function_name == "confirmar_pedido":
-                        logger.info(f"🔧 [TOOL] Confirmando pedido")
-                        carrito_final = self._cargar_carrito(tenant['id'], numero)
-                        if carrito_final and carrito_final.get('items'):
-                            self._conversacion_activa[numero] = {
-                                'estado': 'confirmando_pedido',
-                                'productos': carrito_final['items'],
-                                'total': carrito_final['total']
-                            }
-                            return self._mostrar_resumen_pedido(carrito_final['items'], carrito_final['total'])
-                        else:
-                            return "No hay productos en tu carrito para confirmar. ¿Qué te gustaría ordenar?"
+            # Guardar conversación
+            self._guardar_conversacion(tenant['id'], numero, texto, respuesta)
             
-            # Si no hay tool calls, devolver la respuesta normal
-            logger.info(f"🤖 [IA] Respuesta sin tool calls: {message.content}")
-            return message.content or self._respuesta_fallback(tenant, menu)
+            return respuesta
             
         except Exception as e:
-            logger.error(f'❌ [IA] Error: {e}')
-            import traceback
-            traceback.print_exc()
+            logger.error(f'Error en IA: {e}')
             return self._respuesta_fallback(tenant, menu)
+    
+    def _es_confirmacion(self, texto: str) -> bool:
+        """Detecta si el cliente quiere confirmar el pedido"""
+        confirmaciones = ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'confirmar', 
+                          'proceder', 'adelante', 'esta bien', 'está bien', 'confirmo pedido']
+        texto_lower = texto.lower().strip()
+        return texto_lower in confirmaciones or any(c in texto_lower for c in confirmaciones if len(c) > 2)
     
     def _mostrar_resumen_pedido(self, productos: list, total: int) -> str:
         """Muestra el resumen del pedido para confirmación"""
+        if not productos:
+            return "No tengo productos en tu pedido. ¿Qué te gustaría ordenar?"
+        
         items_texto = ""
         for p in productos:
             items_texto += f"• {p.get('cantidad', 1)}x {p.get('nombre')}: ${p.get('precio', 0) * p.get('cantidad', 1):,.0f}\n"
@@ -503,14 +442,7 @@ INSTRUCCIONES:
     
     def _procesar_confirmacion(self, texto: str, tenant: dict, numero: str, conv: dict) -> str:
         """Procesa la confirmación final del pedido"""
-        confirmaciones = ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'confirmar', 
-                          'proceder', 'adelante', 'esta bien', 'está bien']
-        texto_lower = texto.lower().strip()
-        es_confirmacion = texto_lower in confirmaciones or any(c in texto_lower for c in confirmaciones if len(c) > 2)
-        
-        logger.info(f"📌 [CONFIRMAR] Procesando confirmación: '{texto}' -> es_confirmacion={es_confirmacion}")
-        
-        if es_confirmacion:
+        if self._es_confirmacion(texto):
             productos = conv.get('productos', [])
             total = conv.get('total', 0)
             
@@ -521,8 +453,6 @@ INSTRUCCIONES:
             pedido_id = str(uuid.uuid4())
             schema_name = self._get_schema_name(tenant['id'])
             
-            logger.info(f"📦 [PEDIDO] Schema: {schema_name}")
-            
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f'SELECT COALESCE(MAX(secuencial), 0) + 1 FROM "{schema_name}".pedidos')
@@ -530,7 +460,6 @@ INSTRUCCIONES:
             
             fecha_str = datetime.now().strftime('%Y%m%d%H%M%S')
             numero_pedido = f"{tenant['nombre'][:3].upper()}-{fecha_str}-{str(uuid.uuid4())[:4].upper()}"
-            logger.info(f"📦 [PEDIDO] Número generado: {numero_pedido}")
             
             try:
                 with db_manager.get_connection(tenant['id']) as conn:
@@ -563,9 +492,7 @@ INSTRUCCIONES:
 📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*"""
                 
             except Exception as e:
-                logger.error(f'❌ [PEDIDO] Error creando pedido: {e}')
-                import traceback
-                traceback.print_exc()
+                logger.error(f'Error creando pedido: {e}')
                 return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
         else:
             return "¿Confirmas el pedido? Responde 'sí' para finalizar o dime qué más quieres agregar."
@@ -573,7 +500,9 @@ INSTRUCCIONES:
     def _respuesta_fallback(self, tenant: dict, menu: list) -> str:
         """Respuesta por si la IA no está disponible"""
         if menu:
-            return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿Qué te gustaría ordenar? Por ejemplo, 'quiero una torta negra de libra'."
+            primeros = menu[:3]
+            sugerencias = ", ".join([p['nombre'] for p in primeros])
+            return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿Te gustaría ordenar {sugerencias}? Escríbeme lo que deseas."
         return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte?"
 
 
