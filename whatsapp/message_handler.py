@@ -26,12 +26,14 @@ class MessageHandler:
         return f"tenant_{tenant_id.replace('-', '_')}"
     
     def process(self, phone_id: str, numero: str, texto: str):
-        logger.info(f'🟢 [PROCESS] Cliente: {numero}, Mensaje: {texto[:100]}')
+        logger.info(f'🟢 [PROCESS] Iniciando - Cliente: {numero}, Mensaje: {texto[:100]}')
         
         tenant = tenant_repo.find_by_phone_id(phone_id)
         if not tenant:
             logger.warning(f'⚠️ Tenant no encontrado para phone_id: {phone_id}')
             return
+        
+        logger.info(f"🏪 [TENANT] Encontrado: {tenant.get('nombre')} (ID: {tenant['id']})")
         
         schema_manager.ensure_schema(tenant['id'])
         
@@ -43,6 +45,7 @@ class MessageHandler:
         conv_activa = self._conversacion_activa.get(numero)
         
         if conv_activa and conv_activa.get('estado') == 'confirmando_pedido':
+            logger.info(f"📌 [ESTADO] Confirmando pedido para {numero}")
             respuesta = self._procesar_confirmacion(texto, tenant, numero, conv_activa)
         else:
             respuesta = self._procesar_con_ia(tenant, menu, numero, texto, contexto)
@@ -50,11 +53,17 @@ class MessageHandler:
         if respuesta:
             whatsapp_client.send_message(tenant, numero, respuesta)
             self._guardar_conversacion(tenant['id'], numero, texto, respuesta)
+            logger.info(f"✅ [RESPUESTA] Enviada a {numero}")
+        else:
+            logger.warning(f"⚠️ [RESPUESTA] Vacía para {numero}")
     
     def _obtener_menu(self, tenant_id: str) -> list:
         """Obtiene el menú de productos (productos base con precios)"""
+        logger.info(f"📋 [MENU] Obteniendo menú para tenant {tenant_id}")
         try:
             schema_name = self._get_schema_name(tenant_id)
+            logger.info(f"📋 [MENU] Schema: {schema_name}")
+            
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
@@ -63,8 +72,11 @@ class MessageHandler:
                         FROM "{schema_name}".productos 
                         WHERE disponible = true AND es_base = true
                         ORDER BY categoria, nombre
+                        LIMIT 100
                     """)
                     rows = cur.fetchall()
+                    logger.info(f"📋 [MENU] Productos encontrados: {len(rows)}")
+                    
                     productos = []
                     for row in rows:
                         productos.append({
@@ -77,7 +89,9 @@ class MessageHandler:
                         })
                     return productos
         except Exception as e:
-            logger.error(f'Error obteniendo menú: {e}')
+            logger.error(f'❌ [MENU] Error: {e}')
+            import traceback
+            traceback.print_exc()
             return []
     
     def _obtener_contexto_tenant(self, tenant_id: str) -> dict:
@@ -138,102 +152,160 @@ class MessageHandler:
     
     def _cargar_carrito(self, tenant_id: str, cliente_numero: str) -> dict:
         """Carga el carrito actual del cliente"""
+        logger.info(f"🛒 [CARGAR] Cargando carrito para {cliente_numero}")
         try:
             schema_name = self._get_schema_name(tenant_id)
+            logger.info(f"🛒 [CARGAR] Schema: {schema_name}")
+            
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
                         SELECT items, total FROM "{schema_name}".carritos WHERE cliente_numero = %s
                     """, (cliente_numero,))
                     row = cur.fetchone()
+                    
                     if row:
                         items = row[0] if isinstance(row[0], list) else json.loads(row[0]) if row[0] else []
-                        return {'items': items, 'total': row[1] or 0}
-                    return {'items': [], 'total': 0}
+                        total = row[1] or 0
+                        logger.info(f"🛒 [CARGAR] Carrito encontrado: {len(items)} items, total ${total:,.0f}")
+                        logger.info(f"🛒 [CARGAR] Items: {json.dumps(items, indent=2)}")
+                        return {'items': items, 'total': total}
+                    else:
+                        logger.info(f"🛒 [CARGAR] No hay carrito para {cliente_numero}, creando nuevo")
+                        return {'items': [], 'total': 0}
         except Exception as e:
-            logger.error(f'Error cargando carrito: {e}')
+            logger.error(f'❌ [CARGAR] Error: {e}')
+            import traceback
+            traceback.print_exc()
             return {'items': [], 'total': 0}
     
     def _guardar_carrito(self, tenant_id: str, cliente_numero: str, items: list, total: int):
         """Guarda el carrito en la base de datos"""
+        logger.info(f"💾 [GUARDAR] Guardando carrito para {cliente_numero}: {len(items)} items, total ${total:,.0f}")
+        logger.info(f"💾 [GUARDAR] Items: {json.dumps(items, indent=2)}")
+        
         try:
             schema_name = self._get_schema_name(tenant_id)
+            logger.info(f"💾 [GUARDAR] Schema: {schema_name}")
+            
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
+                    # Verificar si ya existe
                     cur.execute(f"""
                         SELECT id FROM "{schema_name}".carritos WHERE cliente_numero = %s
                     """, (cliente_numero,))
                     existing = cur.fetchone()
                     
+                    items_json = json.dumps(items)
+                    
                     if existing:
+                        logger.info(f"💾 [GUARDAR] Actualizando carrito existente (ID: {existing[0]})")
                         cur.execute(f"""
                             UPDATE "{schema_name}".carritos 
                             SET items = %s, total = %s, updated_at = NOW()
                             WHERE cliente_numero = %s
-                        """, (json.dumps(items), total, cliente_numero))
+                        """, (items_json, total, cliente_numero))
                     else:
+                        logger.info(f"💾 [GUARDAR] Creando nuevo carrito")
                         cur.execute(f"""
                             INSERT INTO "{schema_name}".carritos (cliente_numero, items, total, created_at, updated_at)
                             VALUES (%s, %s, %s, NOW(), NOW())
-                        """, (cliente_numero, json.dumps(items), total))
+                        """, (cliente_numero, items_json, total))
+                    
                     conn.commit()
-                    logger.info(f"💾 [CARRITO] Guardado para {cliente_numero}: {len(items)} items, ${total:,.0f}")
+                    logger.info(f"✅ [GUARDAR] Carrito guardado exitosamente")
+                    
+                    # Verificar post-guardado
+                    cur.execute(f"""
+                        SELECT items, total FROM "{schema_name}".carritos WHERE cliente_numero = %s
+                    """, (cliente_numero,))
+                    verif = cur.fetchone()
+                    if verif:
+                        logger.info(f"✅ [VERIFICACION] Post-guardado: {len(verif[0]) if verif[0] else 0} items, total ${verif[1]:,.0f}")
+                    
         except Exception as e:
-            logger.error(f'Error guardando carrito: {e}')
+            logger.error(f'❌ [GUARDAR] Error: {e}')
+            import traceback
+            traceback.print_exc()
     
     def _agregar_producto_al_carrito(self, tenant_id: str, cliente_numero: str, nombre: str, precio: int, cantidad: int = 1):
         """Agrega un producto al carrito directamente"""
+        logger.info(f"🛒 [AGREGAR] ===== INICIO =====")
+        logger.info(f"🛒 [AGREGAR] Producto: {nombre}")
+        logger.info(f"🛒 [AGREGAR] Precio: ${precio:,}")
+        logger.info(f"🛒 [AGREGAR] Cantidad: {cantidad}")
+        logger.info(f"🛒 [AGREGAR] Cliente: {cliente_numero}")
+        logger.info(f"🛒 [AGREGAR] Tenant: {tenant_id}")
+        
         try:
+            # Cargar carrito actual
             carrito = self._cargar_carrito(tenant_id, cliente_numero)
+            logger.info(f"🛒 [AGREGAR] Carrito actual: {len(carrito['items'])} items, total ${carrito['total']:,.0f}")
             
             # Buscar si ya existe el mismo producto
             encontrado = False
-            for item in carrito['items']:
+            for i, item in enumerate(carrito['items']):
                 if item.get('nombre') == nombre:
-                    item['cantidad'] = item.get('cantidad', 1) + cantidad
+                    vieja_cantidad = item.get('cantidad', 1)
+                    item['cantidad'] = vieja_cantidad + cantidad
                     carrito['total'] += precio * cantidad
+                    logger.info(f"🛒 [AGREGAR] Producto existente encontrado en índice {i}")
+                    logger.info(f"🛒 [AGREGAR] Cantidad anterior: {vieja_cantidad}, nueva: {item['cantidad']}")
                     encontrado = True
-                    logger.info(f"🛒 [ACTUALIZAR] Producto existente: {nombre}, nueva cantidad: {item['cantidad']}")
                     break
             
             if not encontrado:
-                carrito['items'].append({
+                nuevo_item = {
                     'nombre': nombre,
                     'precio': precio,
                     'cantidad': cantidad
-                })
+                }
+                carrito['items'].append(nuevo_item)
                 carrito['total'] += precio * cantidad
-                logger.info(f"🛒 [NUEVO] Producto agregado: {nombre} x{cantidad} - ${precio * cantidad:,}")
+                logger.info(f"🛒 [AGREGAR] Nuevo producto agregado: {nuevo_item}")
             
+            # Guardar carrito actualizado
+            logger.info(f"🛒 [AGREGAR] Guardando carrito con {len(carrito['items'])} items, total ${carrito['total']:,.0f}")
             self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
             
-            # Verificar que se guardó
+            # Verificación final
             verificacion = self._cargar_carrito(tenant_id, cliente_numero)
-            logger.info(f"🛒 [VERIFICACION] Carrito después de guardar: {len(verificacion['items'])} items, total ${verificacion['total']:,.0f}")
+            logger.info(f"🛒 [AGREGAR] Verificación final: {len(verificacion['items'])} items, total ${verificacion['total']:,.0f}")
+            logger.info(f"🛒 [AGREGAR] ===== FIN OK =====")
             
             return True
+            
         except Exception as e:
-            logger.error(f'Error agregando producto: {e}')
+            logger.error(f'❌ [AGREGAR] Error: {e}')
+            import traceback
+            traceback.print_exc()
             return False
     
     def _limpiar_carrito(self, tenant_id: str, cliente_numero: str):
         """Limpia el carrito del cliente"""
+        logger.info(f"🧹 [LIMPIAR] Limpiando carrito para {cliente_numero}")
         self._guardar_carrito(tenant_id, cliente_numero, [], 0)
-        logger.info(f"🧹 [CARRITO] Limpiado para {cliente_numero}")
+        logger.info(f"✅ [LIMPIAR] Carrito limpiado")
     
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
     def _procesar_con_ia(self, tenant: dict, menu: list, numero: str, texto: str, contexto: dict) -> str:
         """Procesa el mensaje usando IA con Function Calling"""
         
-        logger.info(f"🤖 [IA] Procesando: {texto[:100]}...")
+        logger.info(f"🤖 [IA] ===== INICIO PROCESAMIENTO =====")
+        logger.info(f"🤖 [IA] Cliente: {numero}")
+        logger.info(f"🤖 [IA] Mensaje: {texto}")
+        logger.info(f"🤖 [IA] Menú disponible: {len(menu)} productos")
         
         if not ai_client.client:
+            logger.warning("⚠️ [IA] Cliente no disponible")
             return self._respuesta_fallback(tenant, menu)
         
         # Obtener historial y carrito
         historial = self._get_historial_conversacion(tenant['id'], numero, 10)
         carrito_actual = self._cargar_carrito(tenant['id'], numero)
+        
+        logger.info(f"🤖 [IA] Carrito actual: {len(carrito_actual.get('items', []))} items, total ${carrito_actual.get('total', 0):,.0f}")
         
         # Formatear menú para el prompt
         menu_texto = "\n".join([f"- {p['nombre']}: ${p['precio']:,}" for p in menu[:50]])
@@ -309,9 +381,6 @@ CARRITO ACTUAL:
 {json.dumps(carrito_actual.get('items', []), indent=2, ensure_ascii=False)}
 Total actual: ${carrito_actual.get('total', 0):,.0f}
 
-HISTORIAL RECIENTE:
-{self._formatear_historial_simple(historial)}
-
 INSTRUCCIONES:
 1. Cuando el cliente pida un producto, usa la función 'agregar_producto_carrito'
 2. Cuando el cliente quiera ver su pedido, usa 'ver_carrito'
@@ -320,6 +389,7 @@ INSTRUCCIONES:
 """
         
         try:
+            logger.info("🤖 [IA] Enviando request a DeepSeek...")
             response = ai_client.client.chat.completions.create(
                 model=ai_client.model,
                 messages=[
@@ -333,17 +403,23 @@ INSTRUCCIONES:
             )
             
             message = response.choices[0].message
+            logger.info(f"🤖 [IA] Respuesta recibida - Contenido: {message.content if message.content else 'None'}")
+            logger.info(f"🤖 [IA] Tool calls: {len(message.tool_calls) if message.tool_calls else 0}")
             
             # Procesar tool calls
             if message.tool_calls:
                 for tool_call in message.tool_calls:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments)
+                    logger.info(f"🔧 [TOOL] Función llamada: {function_name}")
+                    logger.info(f"🔧 [TOOL] Argumentos: {arguments}")
                     
                     if function_name == "agregar_producto_carrito":
                         nombre = arguments.get("nombre_producto")
                         precio = arguments.get("precio")
                         cantidad = arguments.get("cantidad", 1)
+                        
+                        logger.info(f"🔧 [TOOL] Agregando producto: '{nombre}', ${precio}, x{cantidad}")
                         
                         # Buscar precio real en el menú si es necesario
                         producto_real = None
@@ -353,18 +429,28 @@ INSTRUCCIONES:
                                 break
                         
                         if producto_real:
-                            self._agregar_producto_al_carrito(tenant['id'], numero, producto_real['nombre'], producto_real['precio'], cantidad)
+                            logger.info(f"🔧 [TOOL] Producto encontrado en menú: {producto_real['nombre']} - ${producto_real['precio']}")
+                            exito = self._agregar_producto_al_carrito(tenant['id'], numero, producto_real['nombre'], producto_real['precio'], cantidad)
                             
-                            # Recargar carrito para mostrar
-                            carrito_actualizado = self._cargar_carrito(tenant['id'], numero)
-                            return f"""✅ *Agregado a tu pedido:*
+                            if exito:
+                                logger.info(f"✅ [TOOL] Producto agregado exitosamente al carrito")
+                                # Recargar carrito para mostrar
+                                carrito_actualizado = self._cargar_carrito(tenant['id'], numero)
+                                return f"""✅ *Agregado a tu pedido:*
 • {cantidad}x {producto_real['nombre']}: ${producto_real['precio'] * cantidad:,.0f}
 
 💰 *Total actual:* ${carrito_actualizado['total']:,.0f}
 
 ¿Algo más o confirmamos el pedido?"""
+                            else:
+                                logger.error(f"❌ [TOOL] Error al agregar producto al carrito")
+                                return "❌ Hubo un error al agregar el producto. Por favor intenta de nuevo."
+                        else:
+                            logger.warning(f"⚠️ [TOOL] Producto '{nombre}' no encontrado en menú")
+                            return f"❌ No encontré '{nombre}' en nuestro menú. ¿Puedes verificar el nombre?"
                     
                     elif function_name == "ver_carrito":
+                        logger.info(f"🔧 [TOOL] Mostrando carrito")
                         carrito = self._cargar_carrito(tenant['id'], numero)
                         if not carrito['items']:
                             return "🛒 *Tu carrito está vacío.* ¿Qué te gustaría ordenar?"
@@ -380,6 +466,7 @@ INSTRUCCIONES:
 ¿Algo más o confirmamos el pedido?"""
                     
                     elif function_name == "confirmar_pedido":
+                        logger.info(f"🔧 [TOOL] Confirmando pedido")
                         carrito_final = self._cargar_carrito(tenant['id'], numero)
                         if carrito_final and carrito_final.get('items'):
                             self._conversacion_activa[numero] = {
@@ -392,23 +479,14 @@ INSTRUCCIONES:
                             return "No hay productos en tu carrito para confirmar. ¿Qué te gustaría ordenar?"
             
             # Si no hay tool calls, devolver la respuesta normal
+            logger.info(f"🤖 [IA] Respuesta sin tool calls: {message.content}")
             return message.content or self._respuesta_fallback(tenant, menu)
             
         except Exception as e:
-            logger.error(f'Error en IA: {e}')
+            logger.error(f'❌ [IA] Error: {e}')
             import traceback
             traceback.print_exc()
             return self._respuesta_fallback(tenant, menu)
-    
-    def _formatear_historial_simple(self, historial: list) -> str:
-        """Formatea el historial de forma simple"""
-        if not historial:
-            return "Sin historial previo"
-        
-        texto = ""
-        for h in historial[-8:]:
-            texto += f"Cliente: {h[0]}\nAsistente: {h[1]}\n"
-        return texto
     
     def _mostrar_resumen_pedido(self, productos: list, total: int) -> str:
         """Muestra el resumen del pedido para confirmación"""
@@ -430,15 +508,20 @@ INSTRUCCIONES:
         texto_lower = texto.lower().strip()
         es_confirmacion = texto_lower in confirmaciones or any(c in texto_lower for c in confirmaciones if len(c) > 2)
         
+        logger.info(f"📌 [CONFIRMAR] Procesando confirmación: '{texto}' -> es_confirmacion={es_confirmacion}")
+        
         if es_confirmacion:
             productos = conv.get('productos', [])
             total = conv.get('total', 0)
             
             logger.info(f"✅ [FINAL] Confirmando pedido para {numero}: {len(productos)} items, total ${total:,.0f}")
+            logger.info(f"📦 [FINAL] Productos: {json.dumps(productos, indent=2)}")
             
             # Crear pedido
             pedido_id = str(uuid.uuid4())
             schema_name = self._get_schema_name(tenant['id'])
+            
+            logger.info(f"📦 [PEDIDO] Schema: {schema_name}")
             
             with db_manager.get_connection(tenant['id']) as conn:
                 with conn.cursor() as cur:
@@ -447,6 +530,7 @@ INSTRUCCIONES:
             
             fecha_str = datetime.now().strftime('%Y%m%d%H%M%S')
             numero_pedido = f"{tenant['nombre'][:3].upper()}-{fecha_str}-{str(uuid.uuid4())[:4].upper()}"
+            logger.info(f"📦 [PEDIDO] Número generado: {numero_pedido}")
             
             try:
                 with db_manager.get_connection(tenant['id']) as conn:
@@ -457,6 +541,8 @@ INSTRUCCIONES:
                             VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                         """, (pedido_id, numero, numero_pedido, secuencial, json.dumps(productos), total, 'nuevo'))
                     conn.commit()
+                
+                logger.info(f"✅ [PEDIDO] Pedido creado: {pedido_id}")
                 
                 # Limpiar carrito después de crear pedido
                 self._limpiar_carrito(tenant['id'], numero)
@@ -477,7 +563,9 @@ INSTRUCCIONES:
 📌 *Cuando completes el pago, avísame para empezar a preparar tu pedido.*"""
                 
             except Exception as e:
-                logger.error(f'Error creando pedido: {e}')
+                logger.error(f'❌ [PEDIDO] Error creando pedido: {e}')
+                import traceback
+                traceback.print_exc()
                 return "❌ Hubo un error procesando tu pedido. Por favor intenta de nuevo."
         else:
             return "¿Confirmas el pedido? Responde 'sí' para finalizar o dime qué más quieres agregar."
