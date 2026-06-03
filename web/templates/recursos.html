@@ -191,6 +191,37 @@
         border-radius: 20px;
         font-size: 0.7rem;
     }
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+    }
+    .empty-message {
+        text-align: center;
+        padding: 40px;
+        color: #999;
+        font-style: italic;
+    }
+    .btn-icon {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.2rem;
+        padding: 5px;
+        border-radius: 6px;
+    }
+    .btn-icon.edit:hover {
+        background: #e0e7ff;
+        color: #4f46e5;
+    }
+    .btn-icon.delete:hover {
+        background: #fee2e2;
+        color: #ef4444;
+    }
+    .text-muted {
+        color: #6b7280;
+        font-size: 0.75rem;
+    }
 </style>
 
 <script>
@@ -231,7 +262,6 @@
             const activoClass = r.activo ? 'badge-activo' : 'badge-inactivo';
             const activoText = r.activo ? 'Activo' : 'Inactivo';
             
-            // Vista previa para imágenes
             let previewHtml = '';
             if (r.tipo === 'imagen' && r.url) {
                 previewHtml = `<div class="recurso-preview"><img src="${r.url}" onerror="this.style.display='none'"></div>`;

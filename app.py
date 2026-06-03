@@ -2256,6 +2256,21 @@ def delete_recurso_visual(tenant_id, recurso_id):
         logger.error(f'Error eliminando recurso: {e}')
         return jsonify({'error': str(e)}), 500
     
+
+    @app.route('/admin/recursos', methods=['GET'])
+    @login_required
+    @tenant_owner_required_from_args
+    def admin_recursos():
+        tenant_id = request.args.get('tenant_id')
+        if not tenant_id:
+            return redirect('/dashboard')
+        
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if not tenant:
+            return redirect('/dashboard')
+        
+        return render_template('admin/recursos.html', tenant=tenant)
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
