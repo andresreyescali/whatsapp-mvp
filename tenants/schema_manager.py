@@ -43,7 +43,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 2. Tabla de productos (productos base + adicionales)
+                # 2. Tabla de productos
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".productos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -101,7 +101,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 6. TABLA DE CONFIGURACIÓN DE PERSONALIZACIÓN (NUEVA)
+                # 6. Tabla de configuración de personalización
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".configuracion_personalizacion (
                     id SERIAL PRIMARY KEY,
@@ -114,7 +114,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 7. TABLA DE ATRIBUTOS PERSONALIZABLES (NUEVA)
+                # 7. Tabla de atributos personalizables
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".atributos_personalizacion (
                     id SERIAL PRIMARY KEY,
@@ -132,7 +132,23 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 8. Tabla de pedidos
+                # 8. Tabla de recursos visuales (NUEVA)
+                cur.execute(f'''
+                CREATE TABLE IF NOT EXISTS "{schema_name}".recursos_visuales (
+                    id SERIAL PRIMARY KEY,
+                    nombre TEXT NOT NULL,
+                    descripcion TEXT,
+                    tipo TEXT NOT NULL CHECK (tipo IN ('imagen', 'pdf', 'multiple')),
+                    archivos JSONB,
+                    url TEXT,
+                    orden INTEGER DEFAULT 0,
+                    activo BOOLEAN DEFAULT true,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+                ''')
+                
+                # 9. Tabla de pedidos
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".pedidos (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -153,7 +169,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 9. Tabla de conversaciones
+                # 10. Tabla de conversaciones
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".conversaciones (
                     id SERIAL PRIMARY KEY,
@@ -166,7 +182,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 10. Tabla de carritos
+                # 11. Tabla de carritos
                 cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}".carritos (
                     id SERIAL PRIMARY KEY,
@@ -178,7 +194,7 @@ class SchemaManager:
                 )
                 ''')
                 
-                # 11. Tabla de reservas (específica para hotel y viajes)
+                # 12. Tabla de reservas (específica para hotel y viajes)
                 if tipo_negocio in ['hotel', 'agencia_viajes']:
                     cur.execute(f'''
                     CREATE TABLE IF NOT EXISTS "{schema_name}".reservas (
@@ -211,6 +227,8 @@ class SchemaManager:
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_es_base ON "{schema_name}".productos(es_base)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_config_activo ON "{schema_name}".configuracion_personalizacion(activo)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_atributos_config ON "{schema_name}".atributos_personalizacion(config_id)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_recursos_nombre ON "{schema_name}".recursos_visuales(nombre)')
+                cur.execute(f'CREATE INDEX IF NOT EXISTS idx_recursos_activo ON "{schema_name}".recursos_visuales(activo)')
                 
                 if tipo_negocio in ['hotel', 'agencia_viajes']:
                     cur.execute(f'CREATE INDEX IF NOT EXISTS idx_reservas_cliente ON "{schema_name}".reservas(cliente_id)')
@@ -219,7 +237,7 @@ class SchemaManager:
                 # Insertar productos de ejemplo
                 self._insert_default_products(cur, schema_name, tipo_negocio)
                 
-                # Insertar configuraciones de ejemplo según tipo de negocio
+                # Insertar configuraciones de ejemplo
                 self._insert_default_personalizacion_configs(cur, schema_name, tipo_negocio)
                 
             conn.commit()
@@ -236,7 +254,6 @@ class SchemaManager:
             return
         
         if tipo_negocio == "pasteleria":
-            # Configuración para tortas personalizadas
             cursor.execute(f'''
             INSERT INTO "{schema_name}".configuracion_personalizacion (nombre, descripcion, instrucciones_ia) VALUES (
                 'tortas',
@@ -246,7 +263,6 @@ class SchemaManager:
             ''')
             config_id = cursor.fetchone()[0]
             
-            # Atributos para tortas
             cursor.execute(f'''
             INSERT INTO "{schema_name}".atributos_personalizacion (config_id, nombre, tipo, opciones, pregunta, requerido, precio_extra, orden) VALUES
                 ({config_id}, 'sabor', 'select', '["Vainilla Arequipe", "Amapola", "Naranja-Vainilla", "Chocolate/Milky Way", "Red Velvet", "Ponque Tradicional", "Torta Negra", "Manzana y Nueces", "Cookies & Cream"]', '¿Qué sabor te gustaría?', true, '{{"Vainilla Arequipe": 13000, "Amapola": 14000, "Naranja-Vainilla": 12000, "Chocolate/Milky Way": 14000, "Red Velvet": 14000, "Ponque Tradicional": 17500, "Torta Negra": 19000, "Manzana y Nueces": 17500, "Cookies & Cream": 14000}}', 1),
@@ -258,7 +274,6 @@ class SchemaManager:
             ''')
         
         elif tipo_negocio == "restaurante":
-            # Configuración para arepas personalizadas
             cursor.execute(f'''
             INSERT INTO "{schema_name}".configuracion_personalizacion (nombre, descripcion, instrucciones_ia) VALUES (
                 'arepas',
@@ -277,7 +292,6 @@ class SchemaManager:
             ''')
         
         elif tipo_negocio == "venta_autos":
-            # Configuración para autos personalizados
             cursor.execute(f'''
             INSERT INTO "{schema_name}".configuracion_personalizacion (nombre, descripcion, instrucciones_ia) VALUES (
                 'carros',
@@ -314,7 +328,6 @@ class SchemaManager:
     
     def _add_missing_columns(self, schema_name: str, cur):
         """Agrega columnas faltantes a la tabla productos si es necesario (migración)"""
-        # Verificar y agregar columna imagen_url
         cur.execute(f"""
             SELECT column_name FROM information_schema.columns 
             WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'imagen_url'
@@ -323,7 +336,6 @@ class SchemaManager:
             logger.info(f"Agregando columna imagen_url a {schema_name}.productos")
             cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN imagen_url TEXT')
         
-        # Verificar y agregar columna tiempo_preparacion
         cur.execute(f"""
             SELECT column_name FROM information_schema.columns 
             WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'tiempo_preparacion'
@@ -332,7 +344,6 @@ class SchemaManager:
             logger.info(f"Agregando columna tiempo_preparacion a {schema_name}.productos")
             cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN tiempo_preparacion INTEGER')
         
-        # Verificar y agregar columna destacado
         cur.execute(f"""
             SELECT column_name FROM information_schema.columns 
             WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'destacado'
@@ -342,7 +353,6 @@ class SchemaManager:
             cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN destacado BOOLEAN DEFAULT false')
             cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_destacado ON "{schema_name}".productos(destacado) WHERE destacado = true')
         
-        # Verificar y agregar columna metadata
         cur.execute(f"""
             SELECT column_name FROM information_schema.columns 
             WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'metadata'
@@ -352,7 +362,6 @@ class SchemaManager:
             cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN metadata JSONB DEFAULT \'{{"personalizaciones": [], "adicionales": []}}\'::jsonb')
             cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_metadata ON "{schema_name}".productos USING gin(metadata)')
         
-        # Verificar y agregar columna es_base
         cur.execute(f"""
             SELECT column_name FROM information_schema.columns 
             WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'es_base'
@@ -362,7 +371,6 @@ class SchemaManager:
             cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN es_base BOOLEAN DEFAULT true')
             cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_es_base ON "{schema_name}".productos(es_base)')
         
-        # Verificar y agregar columna updated_at
         cur.execute(f"""
             SELECT column_name FROM information_schema.columns 
             WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'updated_at'
@@ -374,7 +382,6 @@ class SchemaManager:
     def _add_new_tables(self, schema_name: str, cur):
         """Agrega nuevas tablas si no existen (migración)"""
         
-        # Tabla producto_adicionales
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS "{schema_name}".producto_adicionales (
                 id SERIAL PRIMARY KEY,
@@ -388,7 +395,6 @@ class SchemaManager:
             )
         """)
         
-        # Tabla personalizaciones
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS "{schema_name}".personalizaciones (
                 id SERIAL PRIMARY KEY,
@@ -401,7 +407,6 @@ class SchemaManager:
             )
         """)
         
-        # Tabla producto_personalizaciones
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS "{schema_name}".producto_personalizaciones (
                 id SERIAL PRIMARY KEY,
@@ -413,7 +418,6 @@ class SchemaManager:
             )
         """)
         
-        # Tabla configuracion_personalizacion (NUEVA)
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS "{schema_name}".configuracion_personalizacion (
                 id SERIAL PRIMARY KEY,
@@ -426,7 +430,6 @@ class SchemaManager:
             )
         """)
         
-        # Tabla atributos_personalizacion (NUEVA)
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS "{schema_name}".atributos_personalizacion (
                 id SERIAL PRIMARY KEY,
@@ -444,12 +447,30 @@ class SchemaManager:
             )
         """)
         
+        # Tabla recursos_visuales (NUEVA)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS "{schema_name}".recursos_visuales (
+                id SERIAL PRIMARY KEY,
+                nombre TEXT NOT NULL,
+                descripcion TEXT,
+                tipo TEXT NOT NULL CHECK (tipo IN ('imagen', 'pdf', 'multiple')),
+                archivos JSONB,
+                url TEXT,
+                orden INTEGER DEFAULT 0,
+                activo BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
         # Índices para nuevas tablas
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_prod_adic_producto ON "{schema_name}".producto_adicionales(producto_id)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_prod_adic_adicional ON "{schema_name}".producto_adicionales(adicional_id)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_prod_perso_producto ON "{schema_name}".producto_personalizaciones(producto_id)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_config_activo ON "{schema_name}".configuracion_personalizacion(activo)')
         cur.execute(f'CREATE INDEX IF NOT EXISTS idx_atributos_config ON "{schema_name}".atributos_personalizacion(config_id)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_recursos_nombre ON "{schema_name}".recursos_visuales(nombre)')
+        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_recursos_activo ON "{schema_name}".recursos_visuales(activo)')
     
     def _ensure_tables_exist(self, schema_name: str, cur):
         """Verifica y crea las tablas necesarias si no existen"""
@@ -546,11 +567,10 @@ class SchemaManager:
         cursor.execute(f'SELECT COUNT(*) FROM "{schema_name}".productos')
         count = cursor.fetchone()[0]
         if count > 0:
-            logger.info(f"Ya existen {count} productos en {schema_name}, omitiendo inserción de productos de ejemplo")
+            logger.info(f"Ya existen {count} productos en {schema_name}, omitiendo inserción")
             return
         
         if tipo_negocio == "pasteleria":
-            # Productos base (tortas)
             cursor.execute(f'''
             INSERT INTO "{schema_name}".productos (id, nombre, descripcion, precio, categoria, destacado, es_base, tiempo_preparacion, metadata) VALUES
                 (gen_random_uuid(), 'Torta de Chocolate', 'Deliciosa torta de chocolate con cobertura', 45000, 'tortas', true, true, 120, '{{"personalizaciones": [], "adicionales": []}}'),
@@ -558,7 +578,6 @@ class SchemaManager:
                 (gen_random_uuid(), 'Torta Red Velvet', 'Torta de terciopelo rojo con queso crema', 55000, 'tortas', true, true, 120, '{{"personalizaciones": [], "adicionales": []}}')
             ''')
             
-            # Adicionales
             cursor.execute(f'''
             INSERT INTO "{schema_name}".productos (id, nombre, descripcion, precio, categoria, disponible, es_base, metadata) VALUES
                 (gen_random_uuid(), 'Fondant', 'Cobertura de fondant', 15000, 'adicionales', true, false, '{{"personalizaciones": [], "adicionales": []}}'),
@@ -568,7 +587,6 @@ class SchemaManager:
                 (gen_random_uuid(), 'Velas', 'Set de velas de colores', 3000, 'adicionales', true, false, '{{"personalizaciones": [], "adicionales": []}}')
             ''')
             
-            # Personalizaciones
             cursor.execute(f'''
             INSERT INTO "{schema_name}".personalizaciones (nombre, tipo, opciones, requerido) VALUES
                 ('Color del fondant', 'select', '["Rojo","Azul","Verde","Rosado","Amarillo"]'::jsonb, false),
@@ -576,7 +594,6 @@ class SchemaManager:
                 ('Tipo de letra', 'select', '["Cursiva","Redonda","Manuscrita","Impronta"]'::jsonb, false)
             ''')
             
-            # Relaciones producto-adicional
             cursor.execute(f'''
             DO $$
             DECLARE
@@ -635,7 +652,7 @@ class SchemaManager:
                 ('Adicional 2', 'Otro complemento', 2500, 'adicionales', false, 0, false, '{{"personalizaciones": [], "adicionales": []}}')
             ''')
     
-    # ==================== MÉTODOS EXISTENTES (MANTENIDOS) ====================
+    # ==================== MÉTODOS EXISTENTES ====================
     
     def get_menu(self, tenant_id: str):
         """Obtiene el menú completo del tenant con todos los campos incluyendo metadata"""
@@ -644,14 +661,12 @@ class SchemaManager:
             
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    # Verificar si la columna es_base existe
                     cur.execute(f"""
                         SELECT column_name FROM information_schema.columns 
                         WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'es_base'
                     """, (schema_name,))
                     tiene_es_base = cur.fetchone() is not None
                     
-                    # Construir SELECT según columnas existentes
                     if tiene_es_base:
                         cur.execute(f"""
                             SELECT id, nombre, descripcion, precio, categoria, disponible,
@@ -695,7 +710,6 @@ class SchemaManager:
                             'adicionales': metadata.get('adicionales', [])
                         }
                         
-                        # Agregar es_base solo si existe la columna
                         if tiene_es_base and len(row) > 10:
                             producto['es_base'] = row[10] if row[10] is not None else True
                         else:
@@ -708,7 +722,6 @@ class SchemaManager:
             return []
     
     def get_product(self, tenant_id: str, product_id: str):
-        """Obtiene un producto específico por ID con todos los campos incluyendo metadata"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -750,7 +763,6 @@ class SchemaManager:
                     categoria: str = "general", imagen_url: str = None, 
                     tiempo_preparacion: int = None, destacado: bool = False,
                     es_base: bool = True, personalizaciones: list = None, adicionales: list = None):
-        """Agrega un producto al menú con personalizaciones y adicionales"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             product_id = str(uuid.uuid4())
@@ -798,7 +810,6 @@ class SchemaManager:
                       precio: int = None, categoria: str = None, disponible: bool = None,
                       imagen_url: str = None, tiempo_preparacion: int = None, destacado: bool = None,
                       es_base: bool = None, personalizaciones: list = None, adicionales: list = None):
-        """Actualiza un producto existente con todos los campos incluyendo metadata"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             updates = []
@@ -872,7 +883,6 @@ class SchemaManager:
             raise
     
     def delete_product(self, tenant_id: str, product_id: str):
-        """Elimina un producto del menú"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -889,7 +899,6 @@ class SchemaManager:
             raise
     
     def get_featured_products(self, tenant_id: str, limit: int = 10):
-        """Obtiene los productos destacados del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             
@@ -930,10 +939,9 @@ class SchemaManager:
             logger.error(f'Error obteniendo productos destacados: {e}')
             return []
     
-    # ==================== NUEVOS MÉTODOS PARA CONFIGURACIÓN DE PERSONALIZACIÓN ====================
+    # ==================== MÉTODOS PARA CONFIGURACIÓN DE PERSONALIZACIÓN ====================
     
     def get_configuraciones_personalizacion(self, tenant_id: str, solo_activos: bool = True) -> list:
-        """Obtiene todas las configuraciones de personalización del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -960,7 +968,6 @@ class SchemaManager:
             return []
     
     def get_configuracion_personalizacion(self, tenant_id: str, config_id: int) -> dict:
-        """Obtiene una configuración de personalización por ID"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -988,7 +995,6 @@ class SchemaManager:
     
     def create_configuracion_personalizacion(self, tenant_id: str, nombre: str, descripcion: str = None, 
                                               instrucciones_ia: str = None) -> int:
-        """Crea una nueva configuración de personalización"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -1010,7 +1016,6 @@ class SchemaManager:
     def update_configuracion_personalizacion(self, tenant_id: str, config_id: int, 
                                              nombre: str = None, descripcion: str = None,
                                              activo: bool = None, instrucciones_ia: str = None) -> bool:
-        """Actualiza una configuración de personalización"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             updates = []
@@ -1051,7 +1056,6 @@ class SchemaManager:
             raise
     
     def delete_configuracion_personalizacion(self, tenant_id: str, config_id: int) -> bool:
-        """Elimina una configuración de personalización (y sus atributos por CASCADE)"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -1070,10 +1074,9 @@ class SchemaManager:
             logger.error(f'Error eliminando configuración {config_id}: {e}')
             raise
     
-    # ==================== NUEVOS MÉTODOS PARA ATRIBUTOS DE PERSONALIZACIÓN ====================
+    # ==================== MÉTODOS PARA ATRIBUTOS DE PERSONALIZACIÓN ====================
     
     def get_atributos_personalizacion(self, tenant_id: str, config_id: int = None, solo_activos: bool = True) -> list:
-        """Obtiene los atributos de personalización, opcionalmente filtrados por config_id"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -1120,7 +1123,6 @@ class SchemaManager:
     def create_atributo_personalizacion(self, tenant_id: str, config_id: int, nombre: str, tipo: str,
                                         pregunta: str, opciones: list = None, requerido: bool = True,
                                         precio_extra: dict = None, orden: int = 0) -> int:
-        """Crea un nuevo atributo de personalización"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -1141,7 +1143,6 @@ class SchemaManager:
             raise
     
     def update_atributo_personalizacion(self, tenant_id: str, attr_id: int, **kwargs) -> bool:
-        """Actualiza un atributo de personalización"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             allowed_fields = ['nombre', 'tipo', 'opciones', 'pregunta', 'requerido', 'precio_extra', 'orden', 'activo']
@@ -1177,7 +1178,6 @@ class SchemaManager:
             raise
     
     def delete_atributo_personalizacion(self, tenant_id: str, attr_id: int) -> bool:
-        """Elimina un atributo de personalización"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -1197,7 +1197,6 @@ class SchemaManager:
             raise
     
     def get_configuracion_completa(self, tenant_id: str, config_nombre: str) -> dict:
-        """Obtiene una configuración completa con todos sus atributos"""
         try:
             configs = self.get_configuraciones_personalizacion(tenant_id, solo_activos=True)
             config = next((c for c in configs if c['nombre'].lower() == config_nombre.lower()), None)
@@ -1212,6 +1211,138 @@ class SchemaManager:
         except Exception as e:
             logger.error(f'Error obteniendo configuración completa: {e}')
             return None
+    
+    # ==================== NUEVOS MÉTODOS PARA RECURSOS VISUALES ====================
+    
+    def get_recursos_visuales(self, tenant_id: str, nombre: str = None) -> list:
+        """Obtiene los recursos visuales del tenant (imágenes, PDFs)"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    if nombre:
+                        cur.execute(f"""
+                            SELECT id, nombre, descripcion, tipo, archivos, url, orden, activo, created_at
+                            FROM "{schema_name}".recursos_visuales
+                            WHERE nombre = %s AND activo = true
+                            ORDER BY orden
+                        """, (nombre,))
+                    else:
+                        cur.execute(f"""
+                            SELECT id, nombre, descripcion, tipo, archivos, url, orden, activo, created_at
+                            FROM "{schema_name}".recursos_visuales
+                            WHERE activo = true
+                            ORDER BY orden
+                        """)
+                    rows = cur.fetchall()
+                    return [{
+                        'id': row[0],
+                        'nombre': row[1],
+                        'descripcion': row[2] or '',
+                        'tipo': row[3],
+                        'archivos': row[4] if row[4] else [],
+                        'url': row[5],
+                        'orden': row[6],
+                        'activo': row[7],
+                        'created_at': row[8]
+                    } for row in rows]
+        except Exception as e:
+            logger.error(f'Error obteniendo recursos visuales: {e}')
+            return []
+    
+    def agregar_recurso_visual(self, tenant_id: str, nombre: str, tipo: str, 
+                               url: str = None, archivos: list = None, 
+                               descripcion: str = None, orden: int = 0) -> int:
+        """Agrega un recurso visual (imagen, PDF o múltiples imágenes)"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        INSERT INTO "{schema_name}".recursos_visuales 
+                        (nombre, descripcion, tipo, url, archivos, orden, activo, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, true, NOW(), NOW())
+                        RETURNING id
+                    """, (nombre, descripcion, tipo, url, json.dumps(archivos) if archivos else None, orden))
+                    recurso_id = cur.fetchone()[0]
+                conn.commit()
+                logger.info(f"✅ Recurso visual agregado: {nombre} (id: {recurso_id})")
+                return recurso_id
+        except Exception as e:
+            logger.error(f'Error agregando recurso visual: {e}')
+            raise
+    
+    def update_recurso_visual(self, tenant_id: str, recurso_id: int, 
+                              nombre: str = None, descripcion: str = None,
+                              tipo: str = None, url: str = None, 
+                              archivos: list = None, orden: int = None,
+                              activo: bool = None) -> bool:
+        """Actualiza un recurso visual"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            updates = []
+            params = []
+            
+            if nombre is not None:
+                updates.append("nombre = %s")
+                params.append(nombre)
+            if descripcion is not None:
+                updates.append("descripcion = %s")
+                params.append(descripcion)
+            if tipo is not None:
+                updates.append("tipo = %s")
+                params.append(tipo)
+            if url is not None:
+                updates.append("url = %s")
+                params.append(url)
+            if archivos is not None:
+                updates.append("archivos = %s")
+                params.append(json.dumps(archivos))
+            if orden is not None:
+                updates.append("orden = %s")
+                params.append(orden)
+            if activo is not None:
+                updates.append("activo = %s")
+                params.append(activo)
+            
+            if not updates:
+                return False
+            
+            updates.append("updated_at = NOW()")
+            params.append(recurso_id)
+            
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        UPDATE "{schema_name}".recursos_visuales
+                        SET {', '.join(updates)}
+                        WHERE id = %s
+                    """, params)
+                    updated = cur.rowcount
+                conn.commit()
+            
+            logger.info(f"✅ Recurso visual actualizado: id {recurso_id}")
+            return updated > 0
+        except Exception as e:
+            logger.error(f'Error actualizando recurso visual: {e}')
+            raise
+    
+    def eliminar_recurso_visual(self, tenant_id: str, recurso_id: int) -> bool:
+        """Elimina un recurso visual"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f'DELETE FROM "{schema_name}".recursos_visuales WHERE id = %s', (recurso_id,))
+                    deleted = cur.rowcount
+                conn.commit()
+            
+            if deleted > 0:
+                logger.info(f'✅ Recurso visual eliminado: id {recurso_id}')
+            return deleted > 0
+        except Exception as e:
+            logger.error(f'Error eliminando recurso visual: {e}')
+            raise
 
 
 # Instancia global
