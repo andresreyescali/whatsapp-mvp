@@ -302,7 +302,6 @@ class MessageHandler:
         return texto
     
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
-    
     def _procesar_con_ia(self, tenant: dict, menu: list, numero: str, texto: str, contexto: dict) -> str:
         """Procesa el mensaje usando IA con Function Calling"""
         
@@ -345,13 +344,13 @@ class MessageHandler:
         # Formatear menú completo
         menu_texto = self._formatear_menu_para_prompt(menu)
         
-        # Tools para Function Calling
+        # Tools para Function Calling - AGREGADA función personalizada
         tools = [
             {
                 "type": "function",
                 "function": {
                     "name": "agregar_producto_carrito",
-                    "description": "Agrega un producto al carrito del cliente. Usa esta función cuando el cliente pida un producto específico.",
+                    "description": "Agrega un producto estándar al carrito del cliente. Usa esta función cuando el cliente pida un producto normal del menú.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -376,6 +375,57 @@ class MessageHandler:
             {
                 "type": "function",
                 "function": {
+                    "name": "agregar_producto_personalizado",
+                    "description": "Agrega un producto personalizado al carrito. Usa esta función cuando el cliente personalice un producto (elige sabor, tamaño, decoraciones, etc.).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "nombre_base": {
+                                "type": "string",
+                                "description": "El nombre base del producto (ej: Torta, Pastel)"
+                            },
+                            "precio": {
+                                "type": "integer",
+                                "description": "El precio total calculado del producto personalizado"
+                            },
+                            "sabor": {
+                                "type": "string",
+                                "description": "El sabor elegido por el cliente (ej: Red Velvet, Vainilla, Chocolate)"
+                            },
+                            "tamanio": {
+                                "type": "string",
+                                "description": "El tamaño elegido (ej: Porción, Cuarto, Media, Libra)"
+                            },
+                            "decoraciones": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Lista de decoraciones adicionales (ej: ['Fondant', 'Letrero', 'Flores'])"
+                            },
+                            "cantidad": {
+                                "type": "integer",
+                                "description": "La cantidad",
+                                "default": 1
+                            }
+                        },
+                        "required": ["nombre_base", "precio"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "ver_carrito",
+                    "description": "Muestra el contenido actual del carrito",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "confirmar_pedido",
                     "description": "Confirma el pedido. Usa cuando el cliente dice 'si', 'confirmo'.",
                     "parameters": {
@@ -388,29 +438,37 @@ class MessageHandler:
         ]
         
         system_prompt = f"""
-Eres un asistente de ventas conversacional para {tenant.get('nombre', 'el negocio')}.
+    Eres un asistente de ventas conversacional para {tenant.get('nombre', 'el negocio')}.
 
-🏪 INFORMACIÓN:
-- Horario: {contexto.get('horario', 'No especificado')}
-- Ubicación: {contexto.get('ubicacion', 'No especificada')}
-- Políticas: {contexto.get('politicas', 'No especificadas')}
+    🏪 INFORMACIÓN:
+    - Horario: {contexto.get('horario', 'No especificado')}
+    - Ubicación: {contexto.get('ubicacion', 'No especificada')}
+    - Políticas: {contexto.get('politicas', 'No especificadas')}
 
-{contexto.get('instrucciones', '')}
+    {contexto.get('instrucciones', '')}
 
-{menu_texto}
+    {menu_texto}
 
-{carrito_texto}
+    {carrito_texto}
 
-{historial_texto}
+    {historial_texto}
 
-INSTRUCCIONES IMPORTANTES:
-1. Cuando el cliente pida un producto, usa la función 'agregar_producto_carrito'
-2. Cuando el cliente confirme (diga "si", "confirmo"), usa la función 'confirmar_pedido'
-3. Responde de forma natural y amable en español
-4. NO uses listas numeradas para opciones
+    FUNCIONES DISPONIBLES:
+    1. agregar_producto_carrito(nombre_producto, precio, cantidad) - Para productos estándar del menú
+    2. agregar_producto_personalizado(nombre_base, precio, sabor, tamanio, decoraciones, cantidad) - Para productos personalizados
+    3. ver_carrito() - Para mostrar el carrito
+    4. confirmar_pedido() - Cuando el cliente confirma
 
-RESPONDE en español.
-"""
+    INSTRUCCIONES IMPORTANTES:
+    1. Cuando el cliente pida un producto del menú, usa 'agregar_producto_carrito'
+    2. Cuando el cliente personalice un producto (elige sabor, tamaño, decoraciones), usa 'agregar_producto_personalizado'
+    3. Cuando el cliente quiera ver su pedido, usa 'ver_carrito'
+    4. Cuando el cliente confirme (diga "si", "confirmo"), usa 'confirmar_pedido'
+    5. Responde de forma natural y amable en español
+    6. NO uses listas numeradas para opciones
+
+    RESPONDE en español.
+    """
         
         try:
             response = ai_client.client.chat.completions.create(
@@ -440,6 +498,8 @@ RESPONDE en español.
                         precio = arguments.get("precio")
                         cantidad = arguments.get("cantidad", 1)
                         
+                        logger.info(f"🔧 [TOOL] Agregando producto estándar: '{nombre}', ${precio}, x{cantidad}")
+                        
                         # Buscar el producto en el menú
                         producto_real = None
                         for p in menu:
@@ -451,11 +511,11 @@ RESPONDE en español.
                             self._agregar_producto_al_carrito(tenant['id'], numero, producto_real['nombre'], producto_real['precio'], cantidad)
                             carrito_actualizado = self._cargar_carrito(tenant['id'], numero)
                             return f"""✅ *Agregado a tu pedido:*
-• {cantidad}x {producto_real['nombre']}: ${producto_real['precio'] * cantidad:,.0f}
+    • {cantidad}x {producto_real['nombre']}: ${producto_real['precio'] * cantidad:,.0f}
 
-💰 *Total actual:* ${carrito_actualizado['total']:,.0f}
+    💰 *Total actual:* ${carrito_actualizado['total']:,.0f}
 
-¿Algo más o confirmamos el pedido? (responde "confirmo")"""
+    ¿Algo más o confirmamos el pedido? (responde "confirmo")"""
                         else:
                             # Buscar coincidencia parcial
                             for p in menu:
@@ -463,15 +523,83 @@ RESPONDE en español.
                                     self._agregar_producto_al_carrito(tenant['id'], numero, p['nombre'], p['precio'], cantidad)
                                     carrito_actualizado = self._cargar_carrito(tenant['id'], numero)
                                     return f"""✅ *Agregado a tu pedido:*
-• {cantidad}x {p['nombre']}: ${p['precio'] * cantidad:,.0f}
+    • {cantidad}x {p['nombre']}: ${p['precio'] * cantidad:,.0f}
 
-💰 *Total actual:* ${carrito_actualizado['total']:,.0f}
+    💰 *Total actual:* ${carrito_actualizado['total']:,.0f}
 
-¿Algo más o confirmamos el pedido? (responde "confirmo")"""
+    ¿Algo más o confirmamos el pedido? (responde "confirmo")"""
                             
                             return f"❌ No encontré '{nombre}' en nuestro catálogo. ¿Puedes verificar el nombre?"
                     
+                    elif function_name == "agregar_producto_personalizado":
+                        nombre_base = arguments.get("nombre_base", "Producto")
+                        precio = arguments.get("precio")
+                        sabor = arguments.get("sabor")
+                        tamanio = arguments.get("tamanio")
+                        decoraciones = arguments.get("decoraciones", [])
+                        cantidad = arguments.get("cantidad", 1)
+                        
+                        logger.info(f"🔧 [TOOL] Agregando producto personalizado:")
+                        logger.info(f"   - Base: {nombre_base}")
+                        logger.info(f"   - Precio: ${precio}")
+                        logger.info(f"   - Sabor: {sabor}")
+                        logger.info(f"   - Tamaño: {tamanio}")
+                        logger.info(f"   - Decoraciones: {decoraciones}")
+                        
+                        # Construir nombre para mostrar
+                        nombre_mostrar = nombre_base
+                        if sabor:
+                            nombre_mostrar = f"{sabor} {nombre_base}"
+                        if tamanio:
+                            nombre_mostrar = f"{nombre_mostrar} ({tamanio})"
+                        
+                        self._agregar_producto_personalizado_al_carrito(
+                            tenant['id'], numero, nombre_mostrar, precio, 
+                            sabor, tamanio, decoraciones, cantidad
+                        )
+                        carrito_actualizado = self._cargar_carrito(tenant['id'], numero)
+                        
+                        # Generar detalle de la personalización
+                        detalle = ""
+                        if sabor:
+                            detalle += f"\n   └─ Sabor: {sabor}"
+                        if tamanio:
+                            detalle += f"\n   └─ Tamaño: {tamanio}"
+                        if decoraciones:
+                            detalle += f"\n   └─ Decoraciones: {', '.join(decoraciones)}"
+                        
+                        return f"""✅ *Agregado a tu pedido (Personalizado):*
+    • {cantidad}x {nombre_mostrar}: ${precio * cantidad:,.0f}{detalle}
+
+    💰 *Total actual:* ${carrito_actualizado['total']:,.0f}
+
+    ¿Algo más o confirmamos el pedido? (responde "confirmo")"""
+                    
+                    elif function_name == "ver_carrito":
+                        logger.info(f"🔧 [TOOL] Mostrando carrito")
+                        carrito = self._cargar_carrito(tenant['id'], numero)
+                        if not carrito['items']:
+                            return "🛒 *Tu carrito está vacío.* ¿Qué te gustaría ordenar?"
+                        
+                        items_texto = ""
+                        for item in carrito['items']:
+                            items_texto += f"• {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
+                            # Mostrar detalles de personalización si existen
+                            if item.get('sabor'):
+                                items_texto += f"     └─ Sabor: {item.get('sabor')}\n"
+                            if item.get('tamanio'):
+                                items_texto += f"     └─ Tamaño: {item.get('tamanio')}\n"
+                            if item.get('decoraciones'):
+                                items_texto += f"     └─ Decoraciones: {', '.join(item.get('decoraciones'))}\n"
+                        
+                        return f"""📋 *Tu pedido actual:*
+    {items_texto}
+    💰 *Total:* ${carrito['total']:,.0f}
+
+    ¿Algo más o confirmamos el pedido?"""
+                    
                     elif function_name == "confirmar_pedido":
+                        logger.info(f"🔧 [TOOL] Confirmando pedido")
                         carrito_final = self._cargar_carrito(tenant['id'], numero)
                         if carrito_final and carrito_final.get('items'):
                             self._conversacion_activa[numero] = {
@@ -490,6 +618,8 @@ RESPONDE en español.
             
         except Exception as e:
             logger.error(f'Error en IA: {e}')
+            import traceback
+            traceback.print_exc()
             return self._respuesta_fallback(tenant, menu)
     
     def _es_confirmacion(self, texto: str) -> bool:
@@ -580,6 +710,55 @@ RESPONDE en español.
             return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿Te gustaría ordenar {sugerencias}? Escríbeme lo que deseas."
         return f"Hola! Soy el asistente de {tenant.get('nombre', 'mi negocio')}. ¿En qué puedo ayudarte?"
 
+    def _agregar_producto_personalizado_al_carrito(self, tenant_id: str, cliente_numero: str, 
+                                                nombre: str, precio: int, 
+                                                sabor: str = None, tamanio: str = None,
+                                                decoraciones: list = None,
+                                                cantidad: int = 1):
+        """Agrega un producto personalizado al carrito con todos sus detalles"""
+        logger.info(f"🛒 [PERSONALIZADO] ==== INICIO ====")
+        logger.info(f"🛒 [PERSONALIZADO] Nombre: {nombre}")
+        logger.info(f"🛒 [PERSONALIZADO] Precio: ${precio:,}")
+        logger.info(f"🛒 [PERSONALIZADO] Sabor: {sabor}")
+        logger.info(f"🛒 [PERSONALIZADO] Tamaño: {tamanio}")
+        logger.info(f"🛒 [PERSONALIZADO] Decoraciones: {decoraciones}")
+        logger.info(f"🛒 [PERSONALIZADO] Cliente: {cliente_numero}")
+        
+        try:
+            # Construir nombre detallado
+            nombre_detallado = nombre
+            if sabor:
+                nombre_detallado = f"{sabor} - {nombre}"
+            if tamanio:
+                nombre_detallado = f"{nombre_detallado} ({tamanio})"
+            if decoraciones:
+                nombre_detallado = f"{nombre_detallado} + {', '.join(decoraciones)}"
+            
+            carrito = self._cargar_carrito(tenant_id, cliente_numero)
+            
+            # Crear item con detalles de personalización
+            nuevo_item = {
+                'nombre': nombre_detallado,
+                'nombre_base': nombre,
+                'precio': precio,
+                'cantidad': cantidad,
+                'personalizado': True,
+                'sabor': sabor,
+                'tamanio': tamanio,
+                'decoraciones': decoraciones or []
+            }
+            
+            carrito['items'].append(nuevo_item)
+            carrito['total'] += precio * cantidad
+            
+            self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
+            logger.info(f"✅ [PERSONALIZADO] Producto agregado. Total items: {len(carrito['items'])}, Total: ${carrito['total']:,.0f}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f'❌ [PERSONALIZADO] Error: {e}')
+            return False
 
 # Instancia global
 message_handler = MessageHandler()
