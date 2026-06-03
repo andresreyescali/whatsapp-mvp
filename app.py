@@ -42,7 +42,9 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 # Configurar CORS
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
+    # En producción, restringir a dominios específicos
+    allowed_origins = os.environ.get('ALLOWED_ORIGINS', '*')
+    response.headers.add('Access-Control-Allow-Origin', allowed_origins)
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
     return response
@@ -76,12 +78,12 @@ def _get_schema_name(tenant_id: str) -> str:
 
 # ==================== Formatear Telefono ====================
 
-def validar_email(self, email: str) -> bool:
+def validar_email(email: str) -> bool:
     """Valida formato de email"""
     patron = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(patron, email) is not None
 
-def formatear_telefono(self, telefono: str) -> str:
+def formatear_telefono(telefono: str) -> str:
     """Formatea el número de teléfono para WhatsApp"""
     if not telefono:
         return None
@@ -328,15 +330,6 @@ def api_auth_login():
 def api_auth_logout():
     session.clear()
     return jsonify({'success': True})
-
-@app.route('/api/negocio/<tenant_id>/configuracion', methods=['POST'])
-@login_required
-@tenant_required
-def guardar_configuracion(tenant_id):
-    data = request.get_json()
-    usar_ia = data.get('usar_ia', False)
-    result = tenant_repo.guardar_configuracion_ia(tenant_id, usar_ia)
-    return jsonify(result)
 
 @app.route('/api/negocios/usuario', methods=['GET'])
 @login_required
@@ -2255,21 +2248,21 @@ def delete_recurso_visual(tenant_id, recurso_id):
     except Exception as e:
         logger.error(f'Error eliminando recurso: {e}')
         return jsonify({'error': str(e)}), 500
-    
 
-    @app.route('/admin/recursos', methods=['GET'])
-    @login_required
-    @tenant_owner_required_from_args
-    def admin_recursos():
-        tenant_id = request.args.get('tenant_id')
-        if not tenant_id:
-            return redirect('/dashboard')
-        
-        tenant = tenant_repo.find_by_id(tenant_id)
-        if not tenant:
-            return redirect('/dashboard')
-        
-        return render_template('admin/recursos.html', tenant=tenant)
+
+@app.route('/admin/recursos', methods=['GET'])
+@login_required
+@tenant_owner_required_from_args
+def admin_recursos():
+    tenant_id = request.args.get('tenant_id')
+    if not tenant_id:
+        return redirect('/dashboard')
+    
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if not tenant:
+        return redirect('/dashboard')
+    
+    return render_template('admin/recursos.html', tenant=tenant)
 
 # ==================== DEBUG ENDPOINTS ====================
 
