@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+
+{% block title %}Recursos Visuales - {{ tenant.nombre if tenant else 'WhatsApp Bot SaaS' }}{% endblock %}
+
+{% block content %}
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-menu">
+            <div class="sidebar-item">
+                <a href="/dashboard" class="sidebar-link">
+                    <span class="icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/admin/menu?tenant_id={{ tenant.id }}" class="sidebar-link">
+                    <span class="icon">📋</span>
+                    <span>Gestión de Menú</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/admin/personalizacion?tenant_id={{ tenant.id }}" class="sidebar-link">
+                    <span class="icon">🎨</span>
+                    <span>Personalización</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/admin/recursos?tenant_id={{ tenant.id }}" class="sidebar-link active">
+                    <span class="icon">🖼️</span>
+                    <span>Recursos Visuales</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/admin/train?tenant_id={{ tenant.id }}" class="sidebar-link">
+                    <span class="icon">🤖</span>
+                    <span>Entrenar IA</span>
+                </a>
+            </div>
+            <div class="sidebar-item">
+                <a href="/panel/{{ tenant.id }}" class="sidebar-link">
+                    <span class="icon">🏪</span>
+                    <span>Mi Negocio</span>
+                </a>
+            </div>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div id="alertContainer"></div>
+
+        <div class="d-flex justify-between align-center mb-4">
+            <h2>🖼️ Recursos Visuales - {{ tenant.nombre }}</h2>
+            <button class="btn btn-primary" onclick="abrirModalRecurso()">➕ Agregar Recurso</button>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">📁 Imágenes, PDFs y Catálogos</h3>
+                <span class="badge badge-info" id="recursosCount">0 recursos</span>
+            </div>
+            <div id="recursosContainer" class="loading">Cargando recursos...</div>
+        </div>
+    </main>
+</div>
+
+<!-- Modal para Recurso -->
+<div id="recursoModal" class="modal">
+    <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-header">
+            <h3 id="modalTitle">➕ Agregar Recurso</h3>
+            <button class="modal-close" onclick="cerrarModalRecurso()">&times;</button>
+        </div>
+        <form id="formRecurso">
+            <input type="hidden" id="recursoId">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Nombre del recurso *</label>
+                    <input type="text" id="recursoNombre" class="form-control" required 
+                           placeholder="Ej: menu, catalogo, ejemplos, promociones">
+                    <small class="text-muted">El cliente usará este nombre para pedirlo (ej: "ver menú")</small>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Descripción</label>
+                    <input type="text" id="recursoDescripcion" class="form-control" 
+                           placeholder="Breve descripción del recurso">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Tipo *</label>
+                    <select id="recursoTipo" class="form-control" onchange="cambiarTipoRecurso()">
+                        <option value="imagen">📷 Imagen individual</option>
+                        <option value="multiple">🖼️ Múltiples imágenes (galería)</option>
+                        <option value="pdf">📄 PDF</option>
+                    </select>
+                </div>
+                
+                <div id="urlGroup" class="form-group">
+                    <label class="form-label">URL del archivo</label>
+                    <input type="text" id="recursoUrl" class="form-control" 
+                           placeholder="/static/images/menu.jpg">
+                    <small class="text-muted">Puedes usar rutas locales o URLs externas</small>
+                </div>
+                
+                <div id="archivosGroup" class="form-group" style="display: none;">
+                    <label class="form-label">URLs de las imágenes (una por línea)</label>
+                    <textarea id="recursoArchivos" class="form-control" rows="5" 
+                              placeholder="/static/images/ejemplo1.jpg&#10;/static/images/ejemplo2.jpg&#10;https://ejemplo.com/imagen3.jpg"></textarea>
+                    <small class="text-muted">Una URL por línea</small>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Orden</label>
+                    <input type="number" id="recursoOrden" class="form-control" value="0" min="0">
+                </div>
+                
+                <div class="form-check">
+                    <label class="d-flex align-center gap-2">
+                        <input type="checkbox" id="recursoActivo" checked>
+                        <span>✅ Activo</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="cerrarModalRecurso()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .recurso-card {
+        background: white;
+        border-radius: 12px;
+        margin-bottom: 15px;
+        padding: 15px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .recurso-info {
+        flex: 1;
+    }
+    .recurso-nombre {
+        font-weight: 600;
+        font-size: 1.1rem;
+        margin-bottom: 5px;
+    }
+    .recurso-tipo {
+        font-size: 0.75rem;
+        color: #666;
+        margin-bottom: 5px;
+    }
+    .recurso-descripcion {
+        font-size: 0.85rem;
+        color: #888;
+    }
+    .recurso-preview {
+        width: 60px;
+        height: 60px;
+        background: #f5f5f5;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 15px;
+        overflow: hidden;
+    }
+    .recurso-preview img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: cover;
+    }
+    .recurso-actions {
+        display: flex;
+        gap: 8px;
+    }
+    .badge-activo {
+        background: #d1fae5;
+        color: #065f46;
+        padding: 2px 8px;
+        border-radius: 20px;
+        font-size: 0.7rem;
+    }
+    .badge-inactivo {
+        background: #fee2e2;
+        color: #991b1b;
+        padding: 2px 8px;
+        border-radius: 20px;
+        font-size: 0.7rem;
+    }
+</style>
+
+<script>
+    const tenantId = '{{ tenant.id }}';
+    let recursos = [];
+
+    async function cargarRecursos() {
+        const container = document.getElementById('recursosContainer');
+        container.innerHTML = '<div class="loading">Cargando recursos...</div>';
+        
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/recursos`, {
+                credentials: 'include'
+            });
+            
+            if (!response.ok) throw new Error('Error ' + response.status);
+            
+            recursos = await response.json();
+            document.getElementById('recursosCount').innerHTML = recursos.length + ' recursos';
+            renderRecursos();
+        } catch (error) {
+            console.error('Error:', error);
+            container.innerHTML = '<div class="alert alert-error">❌ Error al cargar los recursos</div>';
+        }
+    }
+
+    function renderRecursos() {
+        const container = document.getElementById('recursosContainer');
+        
+        if (!recursos || recursos.length === 0) {
+            container.innerHTML = '<div class="empty-message">📭 No hay recursos visuales. Agrega tu primer recurso.</div>';
+            return;
+        }
+        
+        let html = '';
+        for (const r of recursos) {
+            const tipoIcono = r.tipo === 'imagen' ? '📷' : (r.tipo === 'multiple' ? '🖼️' : '📄');
+            const activoClass = r.activo ? 'badge-activo' : 'badge-inactivo';
+            const activoText = r.activo ? 'Activo' : 'Inactivo';
+            
+            // Vista previa para imágenes
+            let previewHtml = '';
+            if (r.tipo === 'imagen' && r.url) {
+                previewHtml = `<div class="recurso-preview"><img src="${r.url}" onerror="this.style.display='none'"></div>`;
+            } else if (r.tipo === 'multiple' && r.archivos && r.archivos.length > 0) {
+                previewHtml = `<div class="recurso-preview">📸 x${r.archivos.length}</div>`;
+            } else {
+                previewHtml = `<div class="recurso-preview">${tipoIcono}</div>`;
+            }
+            
+            html += `
+                <div class="recurso-card" id="recurso-${r.id}">
+                    ${previewHtml}
+                    <div class="recurso-info">
+                        <div class="recurso-nombre">${escapeHtml(r.nombre)}</div>
+                        <div class="recurso-tipo">${tipoIcono} ${r.tipo} ${r.archivos ? `(${r.archivos.length} imágenes)` : ''}</div>
+                        ${r.descripcion ? `<div class="recurso-descripcion">${escapeHtml(r.descripcion)}</div>` : ''}
+                        <div><span class="${activoClass}">${activoText}</span> <span class="text-muted">Orden: ${r.orden}</span></div>
+                    </div>
+                    <div class="recurso-actions">
+                        <button class="btn-icon edit" onclick="editarRecurso(${r.id})" title="Editar">✏️</button>
+                        <button class="btn-icon delete" onclick="eliminarRecurso(${r.id}, '${escapeHtml(r.nombre)}')" title="Eliminar">🗑️</button>
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+    }
+
+    function cambiarTipoRecurso() {
+        const tipo = document.getElementById('recursoTipo').value;
+        const urlGroup = document.getElementById('urlGroup');
+        const archivosGroup = document.getElementById('archivosGroup');
+        
+        if (tipo === 'multiple') {
+            urlGroup.style.display = 'none';
+            archivosGroup.style.display = 'block';
+        } else {
+            urlGroup.style.display = 'block';
+            archivosGroup.style.display = 'none';
+        }
+    }
+
+    function abrirModalRecurso(recurso) {
+        const modal = document.getElementById('recursoModal');
+        const title = document.getElementById('modalTitle');
+        
+        if (recurso) {
+            title.textContent = '✏️ Editar Recurso';
+            document.getElementById('recursoId').value = recurso.id;
+            document.getElementById('recursoNombre').value = recurso.nombre;
+            document.getElementById('recursoDescripcion').value = recurso.descripcion || '';
+            document.getElementById('recursoTipo').value = recurso.tipo;
+            document.getElementById('recursoUrl').value = recurso.url || '';
+            if (recurso.archivos && recurso.archivos.length) {
+                document.getElementById('recursoArchivos').value = recurso.archivos.join('\n');
+            } else {
+                document.getElementById('recursoArchivos').value = '';
+            }
+            document.getElementById('recursoOrden').value = recurso.orden || 0;
+            document.getElementById('recursoActivo').checked = recurso.activo === true;
+        } else {
+            title.textContent = '➕ Agregar Recurso';
+            document.getElementById('formRecurso').reset();
+            document.getElementById('recursoId').value = '';
+            document.getElementById('recursoTipo').value = 'imagen';
+            document.getElementById('recursoActivo').checked = true;
+        }
+        cambiarTipoRecurso();
+        modal.classList.add('active');
+    }
+
+    function cerrarModalRecurso() {
+        document.getElementById('recursoModal').classList.remove('active');
+    }
+
+    async function editarRecurso(recursoId) {
+        const recurso = recursos.find(r => r.id === recursoId);
+        if (recurso) {
+            abrirModalRecurso(recurso);
+        }
+    }
+
+    async function eliminarRecurso(recursoId, nombre) {
+        if (!confirm(`¿Eliminar el recurso "${nombre}"?`)) return;
+        
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/recursos/${recursoId}`, {
+                method: 'DELETE',
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                showAlert(`✅ Recurso "${nombre}" eliminado`, 'success');
+                cargarRecursos();
+            } else {
+                showAlert('❌ Error al eliminar', 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('❌ Error de conexión', 'error');
+        }
+    }
+
+    document.getElementById('formRecurso').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const recursoId = document.getElementById('recursoId').value;
+        const tipo = document.getElementById('recursoTipo').value;
+        
+        let data = {
+            nombre: document.getElementById('recursoNombre').value,
+            descripcion: document.getElementById('recursoDescripcion').value,
+            tipo: tipo,
+            orden: parseInt(document.getElementById('recursoOrden').value) || 0,
+            activo: document.getElementById('recursoActivo').checked
+        };
+        
+        if (tipo === 'multiple') {
+            const archivosText = document.getElementById('recursoArchivos').value;
+            data.archivos = archivosText.split('\n').filter(line => line.trim());
+        } else {
+            data.url = document.getElementById('recursoUrl').value;
+        }
+        
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Guardando...';
+        
+        try {
+            let url, method;
+            if (recursoId) {
+                url = `/api/tenant/${tenantId}/recursos/${recursoId}`;
+                method = 'PUT';
+            } else {
+                url = `/api/tenant/${tenantId}/recursos`;
+                method = 'POST';
+            }
+            
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                showAlert(recursoId ? '✅ Recurso actualizado' : '✅ Recurso agregado', 'success');
+                cerrarModalRecurso();
+                cargarRecursos();
+            } else {
+                const error = await response.json();
+                showAlert('❌ Error: ' + (error.error || 'No se pudo guardar'), 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('❌ Error de conexión', 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Guardar';
+        }
+    });
+
+    function showAlert(message, type) {
+        const container = document.getElementById('alertContainer');
+        if (!container) return;
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type}`;
+        alertDiv.innerHTML = message + '<button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.25rem;" onclick="this.parentElement.remove()">×</button>';
+        container.appendChild(alertDiv);
+        setTimeout(() => alertDiv.remove(), 5000);
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    window.abrirModalRecurso = abrirModalRecurso;
+    window.cerrarModalRecurso = cerrarModalRecurso;
+    window.cargarRecursos = cargarRecursos;
+    window.cambiarTipoRecurso = cambiarTipoRecurso;
+
+    cargarRecursos();
+</script>
+{% endblock %}

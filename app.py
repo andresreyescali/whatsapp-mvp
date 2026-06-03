@@ -2167,6 +2167,95 @@ def exportar_productos(tenant_id):
         logger.error(f'Error exportando productos: {e}')
         return jsonify({'error': str(e)}), 500
 
+# ================= Recursos Visuales =====================
+# ==================== RECURSOS VISUALES ====================
+
+@app.route('/api/tenant/<tenant_id>/recursos', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_recursos_visuales(tenant_id):
+    """Obtiene todos los recursos visuales del tenant"""
+    try:
+        recursos = schema_manager.get_recursos_visuales(tenant_id)
+        return jsonify(recursos)
+    except Exception as e:
+        logger.error(f'Error obteniendo recursos: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/recursos', methods=['POST'])
+@login_required
+@tenant_owner_required
+def add_recurso_visual(tenant_id):
+    """Agrega un nuevo recurso visual"""
+    try:
+        data = request.json
+        nombre = data.get('nombre')
+        tipo = data.get('tipo')
+        
+        if not nombre or not tipo:
+            return jsonify({'error': 'nombre y tipo son requeridos'}), 400
+        
+        recurso_id = schema_manager.agregar_recurso_visual(
+            tenant_id=tenant_id,
+            nombre=nombre,
+            tipo=tipo,
+            url=data.get('url'),
+            archivos=data.get('archivos'),
+            descripcion=data.get('descripcion'),
+            orden=data.get('orden', 0)
+        )
+        
+        return jsonify({'success': True, 'id': recurso_id, 'message': 'Recurso agregado'})
+    except Exception as e:
+        logger.error(f'Error agregando recurso: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/recursos/<int:recurso_id>', methods=['PUT'])
+@login_required
+@tenant_owner_required
+def update_recurso_visual(tenant_id, recurso_id):
+    """Actualiza un recurso visual"""
+    try:
+        data = request.json
+        success = schema_manager.update_recurso_visual(
+            tenant_id=tenant_id,
+            recurso_id=recurso_id,
+            nombre=data.get('nombre'),
+            descripcion=data.get('descripcion'),
+            tipo=data.get('tipo'),
+            url=data.get('url'),
+            archivos=data.get('archivos'),
+            orden=data.get('orden'),
+            activo=data.get('activo')
+        )
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Recurso actualizado'})
+        else:
+            return jsonify({'error': 'No se pudo actualizar'}), 400
+    except Exception as e:
+        logger.error(f'Error actualizando recurso: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/recursos/<int:recurso_id>', methods=['DELETE'])
+@login_required
+@tenant_owner_required
+def delete_recurso_visual(tenant_id, recurso_id):
+    """Elimina un recurso visual"""
+    try:
+        success = schema_manager.eliminar_recurso_visual(tenant_id, recurso_id)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Recurso eliminado'})
+        else:
+            return jsonify({'error': 'No se pudo eliminar'}), 400
+    except Exception as e:
+        logger.error(f'Error eliminando recurso: {e}')
+        return jsonify({'error': str(e)}), 500
+    
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
