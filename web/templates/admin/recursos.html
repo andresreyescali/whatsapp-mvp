@@ -7,7 +7,7 @@
     <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
         <h1 class="h2">Recursos Visuales</h1>
         <div class="btn-toolbar mb-2 mb-md-0">
-            <button type="button" class="btn btn-sm btn-primary" onclick="agregarRecurso()">
+            <button type="button" class="btn btn-primary" onclick="agregarRecurso()">
                 <i class="fas fa-plus"></i> Agregar Recurso
             </button>
         </div>
@@ -15,32 +15,32 @@
 
     <div class="row" id="recursos-container">
         <div class="col-12 text-center">
-            <div class="spinner-border" role="status">
+            <div class="spinner-border text-success" role="status">
                 <span class="visually-hidden">Cargando...</span>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Modal para enviar por WhatsApp -->
-<div class="modal fade" id="enviarWhatsAppModal" tabindex="-1">
+<!-- Modal de Bootstrap para enviar por WhatsApp -->
+<div class="modal fade" id="whatsappModal" tabindex="-1" aria-labelledby="whatsappModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Enviar por WhatsApp</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h5 class="modal-title" id="whatsappModalLabel">
+                    <i class="fab fa-whatsapp text-success"></i> Enviar por WhatsApp
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <div id="recurso-info"></div>
+                <div id="recurso-info" class="alert alert-success mb-3"></div>
                 <div class="mb-3">
                     <label for="numero-cliente" class="form-label">Número de teléfono del cliente:</label>
                     <input type="tel" class="form-control" id="numero-cliente" 
                            placeholder="Ej: 573001234567">
-                    <small class="text-muted">Formato: Código país + número (Ej: 573001234567)</small>
+                    <div class="form-text">Formato: Código país + número (Ej: 573001234567 para Colombia)</div>
                 </div>
-                <div id="mensaje-envio" class="alert alert-info" style="display:none">
-                    <span id="mensaje-texto"></span>
-                </div>
+                <div id="mensaje-envio" style="display:none;"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -51,6 +51,30 @@
         </div>
     </div>
 </div>
+
+<style>
+.card {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    transition: transform 0.2s;
+}
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+.card-body {
+    padding: 15px;
+}
+.btn-sm {
+    padding: 5px 10px;
+    margin: 2px;
+    font-size: 12px;
+}
+.btn-sm i {
+    margin-right: 5px;
+}
+</style>
 
 <script>
 const tenantId = '{{ tenant.id }}';
@@ -67,7 +91,8 @@ async function cargarRecursos() {
             container.innerHTML = `
                 <div class="col-12">
                     <div class="alert alert-info text-center">
-                        No hay recursos visuales agregados. Haz clic en "Agregar Recurso" para comenzar.
+                        <i class="fas fa-info-circle"></i> No hay recursos visuales agregados. 
+                        Haz clic en "Agregar Recurso" para comenzar.
                     </div>
                 </div>
             `;
@@ -81,11 +106,13 @@ async function cargarRecursos() {
                         <h5 class="card-title">${getTipoEmoji(recurso.tipo)} ${escapeHtml(recurso.nombre)}</h5>
                         <p class="card-text">${escapeHtml(recurso.descripcion || 'Sin descripción')}</p>
                         <p><strong>Tipo:</strong> ${recurso.tipo}</p>
-                        ${recurso.url ? `<a href="${escapeHtml(recurso.url)}" target="_blank" class="btn btn-sm btn-info">Ver recurso</a>` : ''}
+                        ${recurso.url ? `<a href="${escapeHtml(recurso.url)}" target="_blank" class="btn btn-sm btn-info"><i class="fas fa-eye"></i> Ver recurso</a>` : ''}
                         <button class="btn btn-sm btn-success" onclick="abrirModalEnviar(${recurso.id}, '${escapeHtml(recurso.nombre)}')">
                             <i class="fab fa-whatsapp"></i> Enviar por WhatsApp
                         </button>
-                        <button class="btn btn-sm btn-danger" onclick="eliminarRecurso(${recurso.id})">Eliminar</button>
+                        <button class="btn btn-sm btn-danger" onclick="eliminarRecurso(${recurso.id})">
+                            <i class="fas fa-trash"></i> Eliminar
+                        </button>
                     </div>
                 </div>
             </div>
@@ -114,14 +141,13 @@ function getTipoEmoji(tipo) {
 function abrirModalEnviar(recursoId, recursoNombre) {
     recursoSeleccionado = { id: recursoId, nombre: recursoNombre };
     document.getElementById('recurso-info').innerHTML = `
-        <div class="alert alert-success">
-            <strong>Recurso seleccionado:</strong> ${escapeHtml(recursoNombre)}
-        </div>
+        <i class="fas fa-check-circle"></i> <strong>Recurso seleccionado:</strong> ${escapeHtml(recursoNombre)}
     `;
     document.getElementById('numero-cliente').value = '';
     document.getElementById('mensaje-envio').style.display = 'none';
     
-    const modal = new bootstrap.Modal(document.getElementById('enviarWhatsAppModal'));
+    // Abrir modal usando Bootstrap
+    const modal = new bootstrap.Modal(document.getElementById('whatsappModal'));
     modal.show();
 }
 
@@ -133,13 +159,13 @@ async function enviarRecurso() {
         return;
     }
     
-    // Validar formato básico
     if (!numeroCliente.match(/^[0-9]{10,15}$/)) {
         mostrarMensaje('error', 'Formato inválido. Usa solo números (código país + número)');
         return;
     }
     
-    const btnEnviar = document.querySelector('#enviarWhatsAppModal .btn-success');
+    const btnEnviar = document.querySelector('#whatsappModal .btn-success');
+    const textoOriginal = btnEnviar.innerHTML;
     btnEnviar.disabled = true;
     btnEnviar.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Enviando...';
     
@@ -155,8 +181,10 @@ async function enviarRecurso() {
         if (data.success) {
             mostrarMensaje('success', data.message);
             setTimeout(() => {
-                const modal = bootstrap.Modal.getInstance(document.getElementById('enviarWhatsAppModal'));
+                // Cerrar modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('whatsappModal'));
                 modal.hide();
+                document.getElementById('numero-cliente').value = '';
             }, 2000);
         } else {
             mostrarMensaje('error', data.error || 'Error al enviar');
@@ -166,16 +194,14 @@ async function enviarRecurso() {
         mostrarMensaje('error', 'Error de conexión');
     } finally {
         btnEnviar.disabled = false;
-        btnEnviar.innerHTML = '<i class="fab fa-whatsapp"></i> Enviar';
+        btnEnviar.innerHTML = textoOriginal;
     }
 }
 
 function mostrarMensaje(tipo, texto) {
     const mensajeDiv = document.getElementById('mensaje-envio');
-    const mensajeTexto = document.getElementById('mensaje-texto');
-    
-    mensajeDiv.className = tipo === 'success' ? 'alert alert-success' : 'alert alert-danger';
-    mensajeTexto.textContent = texto;
+    mensajeDiv.className = tipo === 'success' ? 'alert alert-success mt-3' : 'alert alert-danger mt-3';
+    mensajeDiv.innerHTML = (tipo === 'success' ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-exclamation-triangle"></i> ') + texto;
     mensajeDiv.style.display = 'block';
     
     setTimeout(() => {
@@ -208,13 +234,14 @@ function agregarRecurso() {
     .then(data => {
         if (data.success) {
             cargarRecursos();
+            showAlert('Recurso agregado correctamente', 'success');
         } else {
-            alert('Error: ' + (data.error || 'No se pudo agregar'));
+            showAlert('Error: ' + (data.error || 'No se pudo agregar'), 'danger');
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('Error al agregar recurso');
+        showAlert('Error al agregar recurso', 'danger');
     });
 }
 
@@ -228,32 +255,18 @@ function eliminarRecurso(recursoId) {
     .then(data => {
         if (data.success) {
             cargarRecursos();
+            showAlert('Recurso eliminado correctamente', 'success');
         } else {
-            alert('Error: ' + (data.error || 'No se pudo eliminar'));
+            showAlert('Error: ' + (data.error || 'No se pudo eliminar'), 'danger');
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('Error al eliminar recurso');
+        showAlert('Error al eliminar recurso', 'danger');
     });
 }
 
+// Cargar recursos al iniciar
 cargarRecursos();
 </script>
-
-<style>
-.btn-success i, .btn-success .fab {
-    margin-right: 5px;
-}
-.btn-sm {
-    margin: 2px;
-}
-.card {
-    transition: transform 0.2s;
-}
-.card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-</style>
 {% endblock %}
