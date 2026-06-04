@@ -2264,6 +2264,7 @@ def admin_recursos():
     
     return render_template('admin/recursos.html', tenant=tenant)
 
+ 
 @app.route('/api/recursos/compartir/<tenant_id>/<int:recurso_id>', methods=['POST'])
 @login_required
 @tenant_owner_required
@@ -2276,6 +2277,7 @@ def compartir_recurso_whatsapp(tenant_id, recurso_id):
         if not numero_cliente:
             return jsonify({'error': 'Número de teléfono requerido'}), 400
         
+        # Obtener el recurso
         recursos = schema_manager.get_recursos_visuales(tenant_id)
         recurso = next((r for r in recursos if r['id'] == recurso_id), None)
         
@@ -2286,25 +2288,48 @@ def compartir_recurso_whatsapp(tenant_id, recurso_id):
         if not tenant:
             return jsonify({'error': 'Negocio no encontrado'}), 404
         
-        emojis = {'imagen': '🖼️', 'video': '🎥', 'pdf': '📄', 'documento': '📁', 'enlace': '🔗'}
-        emoji = emojis.get(recurso.get('tipo', 'enlace'), '📎')
-        
-        mensaje = f"{emoji} *{recurso['nombre']}*\n\n"
-        if recurso.get('descripcion'):
-            mensaje += f"{recurso['descripcion']}\n\n"
-        mensaje += f"🔗 {recurso['url']}"
-        
         from whatsapp.client import whatsapp_client
-        enviado = whatsapp_client.send_message(tenant, numero_cliente, mensaje)
+        
+        tipo = recurso.get('tipo', 'enlace')
+        url = recurso['url']
+        nombre = recurso['nombre']
+        descripcion = recurso.get('descripcion', '')
+        
+        enviado = False
+        
+        # Para imágenes: enviar como imagen directamente
+        if tipo == 'imagen':
+            # Construir caption
+            caption = f"📷 *{nombre}*"
+            if descripcion:
+                caption += f"\n\n{descripcion}"
+            
+            enviado = whatsapp_client.send_image(tenant, numero_cliente, url, caption)
+        
+        # Para otros tipos: enviar como texto con link
+        else:
+            emojis = {'video': '🎥', 'pdf': '📄', 'documento': '📁', 'enlace': '🔗'}
+            emoji = emojis.get(tipo, '📎')
+            mensaje = f"{emoji} *{nombre}*\n\n"
+            if descripcion:
+                mensaje += f"{descripcion}\n\n"
+            mensaje += f"🔗 {url}"
+            enviado = whatsapp_client.send_message(tenant, numero_cliente, mensaje)
         
         if enviado:
-            return jsonify({'success': True, 'message': f'Recurso enviado a {numero_cliente}'})
+            from whatsapp.message_handler import message_handler
+            message_handler._guardar_conversacion(
+                tenant_id, numero_cliente, 
+                f"📎 Enviado: {recurso['nombre']} ({tipo})", 
+                "Recurso compartido"
+            )
+            return jsonify({'success': True, 'message': f'Imagen "{recurso["nombre"]}" enviada a {numero_cliente}'})
         
-        return jsonify({'error': 'No se pudo enviar'}), 500
+        return jsonify({'error': 'No se pudo enviar la imagen'}), 500
         
     except Exception as e:
-        logger.error(f'Error: {e}')
-        return jsonify({'error': str(e)}), 500
+        logger.error(f'Error compartiendo recurso: {e}')
+        return jsonify({'error': str(e)}), 500 
 
 def formatear_mensaje_recurso(recurso):
     """Formatea el mensaje según el tipo de recurso"""
