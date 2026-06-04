@@ -4,60 +4,181 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}WhatsApp Bot SaaS{% endblock %}</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome para iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Tu CSS personalizado (debe ir después de Bootstrap para sobrescribir si es necesario) -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
     {% block extra_css %}{% endblock %}
-</head>
-<body>
-    <!-- Loader -->
-    <div id="loaderOverlay" class="loader-overlay">
-        <div class="loader"></div>
-    </div>
-
-    <!-- Navbar -->
-    {% if not hide_navbar %}
-    <nav class="navbar">
-        <div class="navbar-container">
-            <div class="navbar-brand">
-                <div class="logo-icon">🤖</div>
-                WhatsApp Bot SaaS
-                <span class="badge">Beta</span>
-            </div>
-            <div class="navbar-menu">
-                {% if session.usuario_id %}
-                <a href="/dashboard">Dashboard</a>
-                <div class="user-info">
-                    <span>{{ session.nombre or session.email }}</span>
-                    <button class="btn btn-sm btn-outline" onclick="cerrarSesion()">Salir</button>
-                </div>
-                {% else %}
-                <div class="nav-buttons">
-                    <a href="/" class="nav-link">Inicio</a>
-                    <button class="nav-link-btn" onclick="irAFormulario('login')">Iniciar Sesión</button>
-                    <button class="nav-link-btn-primary" onclick="irAFormulario('register')">Registrarse</button>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-    </nav>
-    {% endif %}
-
-    <!-- Alert Container -->
-    <div id="alertContainer" class="container mt-3"></div>
-
-    <!-- Main Content -->
-    <main>
-        {% block content %}{% endblock %}
-    </main>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            <p>¿Tienes preguntas? <a href="mailto:soporte@whatsappbotsaas.com">soporte@whatsappbotsaas.com</a></p>
-            <p style="margin-top: 1rem;">© 2024 WhatsApp Bot SaaS - Todos los derechos reservados</p>
-        </div>
-    </footer>
-
+    
     <style>
+        /* Asegurar que el navbar y footer mantengan su estilo original */
+        .navbar {
+            background: linear-gradient(135deg, #075E54, #128C7E);
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .navbar-brand {
+            font-size: 1.5rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .logo-icon {
+            font-size: 1.8rem;
+        }
+        
+        .badge {
+            background: #25D366;
+            color: #075E54;
+            padding: 0.2rem 0.5rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            margin-left: 0.5rem;
+        }
+        
+        .navbar-menu {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .navbar-menu a {
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            transition: all 0.2s;
+        }
+        
+        .navbar-menu a:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            background: rgba(255,255,255,0.1);
+            padding: 0.3rem 1rem;
+            border-radius: 2rem;
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 1px solid white;
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+        }
+        
+        .btn-outline:hover {
+            background: white;
+            color: #075E54;
+        }
+        
+        .footer {
+            background: #075E54;
+            color: white;
+            text-align: center;
+            padding: 2rem;
+            margin-top: 3rem;
+        }
+        
+        .footer a {
+            color: #25D366;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        
+        .loader-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        
+        .loader-overlay.active {
+            display: flex;
+        }
+        
+        .loader {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #25D366;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+        
+        .container-fluid {
+            width: 100%;
+            padding: 0 1rem;
+        }
+        
+        .alert {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        
         .nav-buttons {
             display: flex;
             gap: 0.5rem;
@@ -109,6 +230,59 @@
             transform: translateY(-1px);
         }
     </style>
+</head>
+<body>
+    <!-- Loader -->
+    <div id="loaderOverlay" class="loader-overlay">
+        <div class="loader"></div>
+    </div>
+
+    <!-- Navbar -->
+    {% if not hide_navbar %}
+    <nav class="navbar">
+        <div class="navbar-container" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div class="navbar-brand">
+                <div class="logo-icon">🤖</div>
+                WhatsApp Bot SaaS
+                <span class="badge">Beta</span>
+            </div>
+            <div class="navbar-menu">
+                {% if session.usuario_id %}
+                <a href="/dashboard">Dashboard</a>
+                <div class="user-info">
+                    <span>{{ session.nombre or session.email }}</span>
+                    <button class="btn-outline" onclick="cerrarSesion()">Salir</button>
+                </div>
+                {% else %}
+                <div class="nav-buttons">
+                    <a href="/" class="nav-link">Inicio</a>
+                    <button class="nav-link-btn" onclick="irAFormulario('login')">Iniciar Sesión</button>
+                    <button class="nav-link-btn-primary" onclick="irAFormulario('register')">Registrarse</button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+
+    <!-- Alert Container -->
+    <div id="alertContainer" class="container mt-3"></div>
+
+    <!-- Main Content -->
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>¿Tienes preguntas? <a href="mailto:soporte@whatsappbotsaas.com">soporte@whatsappbotsaas.com</a></p>
+            <p style="margin-top: 1rem;">© 2024 WhatsApp Bot SaaS - Todos los derechos reservados</p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS (requerido para el modal) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
         // Función para mostrar loader
