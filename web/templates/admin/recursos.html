@@ -22,8 +22,39 @@
     </div>
 </div>
 
+<!-- Modal para enviar por WhatsApp -->
+<div class="modal fade" id="enviarWhatsAppModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Enviar por WhatsApp</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="recurso-info"></div>
+                <div class="mb-3">
+                    <label for="numero-cliente" class="form-label">Número de teléfono del cliente:</label>
+                    <input type="tel" class="form-control" id="numero-cliente" 
+                           placeholder="Ej: 573001234567">
+                    <small class="text-muted">Formato: Código país + número (Ej: 573001234567)</small>
+                </div>
+                <div id="mensaje-envio" class="alert alert-info" style="display:none">
+                    <span id="mensaje-texto"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-success" onclick="enviarRecurso()">
+                    <i class="fab fa-whatsapp"></i> Enviar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 const tenantId = '{{ tenant.id }}';
+let recursoSeleccionado = null;
 
 async function cargarRecursos() {
     try {
@@ -47,10 +78,13 @@ async function cargarRecursos() {
             <div class="col-md-4 mb-3">
                 <div class="card h-100">
                     <div class="card-body">
-                        <h5 class="card-title">${escapeHtml(recurso.nombre)}</h5>
+                        <h5 class="card-title">${getTipoEmoji(recurso.tipo)} ${escapeHtml(recurso.nombre)}</h5>
                         <p class="card-text">${escapeHtml(recurso.descripcion || 'Sin descripción')}</p>
                         <p><strong>Tipo:</strong> ${recurso.tipo}</p>
                         ${recurso.url ? `<a href="${escapeHtml(recurso.url)}" target="_blank" class="btn btn-sm btn-info">Ver recurso</a>` : ''}
+                        <button class="btn btn-sm btn-success" onclick="abrirModalEnviar(${recurso.id}, '${escapeHtml(recurso.nombre)}')">
+                            <i class="fab fa-whatsapp"></i> Enviar por WhatsApp
+                        </button>
                         <button class="btn btn-sm btn-danger" onclick="eliminarRecurso(${recurso.id})">Eliminar</button>
                     </div>
                 </div>
@@ -66,6 +100,89 @@ async function cargarRecursos() {
     }
 }
 
+function getTipoEmoji(tipo) {
+    const emojis = {
+        'imagen': '🖼️',
+        'video': '🎥',
+        'pdf': '📄',
+        'documento': '📁',
+        'enlace': '🔗'
+    };
+    return emojis[tipo] || '📎';
+}
+
+function abrirModalEnviar(recursoId, recursoNombre) {
+    recursoSeleccionado = { id: recursoId, nombre: recursoNombre };
+    document.getElementById('recurso-info').innerHTML = `
+        <div class="alert alert-success">
+            <strong>Recurso seleccionado:</strong> ${escapeHtml(recursoNombre)}
+        </div>
+    `;
+    document.getElementById('numero-cliente').value = '';
+    document.getElementById('mensaje-envio').style.display = 'none';
+    
+    const modal = new bootstrap.Modal(document.getElementById('enviarWhatsAppModal'));
+    modal.show();
+}
+
+async function enviarRecurso() {
+    const numeroCliente = document.getElementById('numero-cliente').value.trim();
+    
+    if (!numeroCliente) {
+        mostrarMensaje('error', 'Por favor ingresa un número de teléfono');
+        return;
+    }
+    
+    // Validar formato básico
+    if (!numeroCliente.match(/^[0-9]{10,15}$/)) {
+        mostrarMensaje('error', 'Formato inválido. Usa solo números (código país + número)');
+        return;
+    }
+    
+    const btnEnviar = document.querySelector('#enviarWhatsAppModal .btn-success');
+    btnEnviar.disabled = true;
+    btnEnviar.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Enviando...';
+    
+    try {
+        const response = await fetch(`/api/recursos/compartir/${tenantId}/${recursoSeleccionado.id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ numero: numeroCliente })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            mostrarMensaje('success', data.message);
+            setTimeout(() => {
+                const modal = bootstrap.Modal.getInstance(document.getElementById('enviarWhatsAppModal'));
+                modal.hide();
+            }, 2000);
+        } else {
+            mostrarMensaje('error', data.error || 'Error al enviar');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        mostrarMensaje('error', 'Error de conexión');
+    } finally {
+        btnEnviar.disabled = false;
+        btnEnviar.innerHTML = '<i class="fab fa-whatsapp"></i> Enviar';
+    }
+}
+
+function mostrarMensaje(tipo, texto) {
+    const mensajeDiv = document.getElementById('mensaje-envio');
+    const mensajeTexto = document.getElementById('mensaje-texto');
+    
+    mensajeDiv.className = tipo === 'success' ? 'alert alert-success' : 'alert alert-danger';
+    mensajeTexto.textContent = texto;
+    mensajeDiv.style.display = 'block';
+    
+    setTimeout(() => {
+        mensajeDiv.style.display = 'none';
+    }, 3000);
+}
+
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -77,7 +194,7 @@ function agregarRecurso() {
     const nombre = prompt('Nombre del recurso:');
     if (!nombre) return;
     
-    const tipo = prompt('Tipo (imagen, video, pdf, etc.):');
+    const tipo = prompt('Tipo (imagen, video, pdf, documento, enlace):');
     if (!tipo) return;
     
     const url = prompt('URL del recurso:');
@@ -102,7 +219,7 @@ function agregarRecurso() {
 }
 
 function eliminarRecurso(recursoId) {
-    if (!confirm('¿Eliminar este recurso?')) return;
+    if (!confirm('¿Eliminar este recurso? Esta acción no se puede deshacer.')) return;
     
     fetch(`/api/tenant/${tenantId}/recursos/${recursoId}`, {
         method: 'DELETE'
@@ -123,4 +240,20 @@ function eliminarRecurso(recursoId) {
 
 cargarRecursos();
 </script>
+
+<style>
+.btn-success i, .btn-success .fab {
+    margin-right: 5px;
+}
+.btn-sm {
+    margin: 2px;
+}
+.card {
+    transition: transform 0.2s;
+}
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+</style>
 {% endblock %}

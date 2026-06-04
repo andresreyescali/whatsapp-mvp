@@ -2264,6 +2264,85 @@ def admin_recursos():
     
     return render_template('admin/recursos.html', tenant=tenant)
 
+@app.route('/api/recursos/compartir/<tenant_id>/<int:recurso_id>', methods=['POST'])
+@login_required
+@tenant_owner_required
+def compartir_recurso_whatsapp(tenant_id, recurso_id):
+    """Comparte un recurso visual por WhatsApp con un cliente"""
+    try:
+        data = request.json
+        numero_cliente = data.get('numero')
+        
+        if not numero_cliente:
+            return jsonify({'error': 'Número de teléfono requerido'}), 400
+        
+        # Obtener el recurso
+        recursos = schema_manager.get_recursos_visuales(tenant_id)
+        recurso = next((r for r in recursos if r['id'] == recurso_id), None)
+        
+        if not recurso:
+            return jsonify({'error': 'Recurso no encontrado'}), 404
+        
+        # Obtener el tenant
+        tenant = tenant_repo.find_by_id(tenant_id)
+        if not tenant:
+            return jsonify({'error': 'Negocio no encontrado'}), 404
+        
+        # Formatear mensaje según el tipo de recurso
+        mensaje = formatear_mensaje_recurso(recurso)
+        
+        # Enviar por WhatsApp
+        from whatsapp.client import whatsapp_client
+        enviado = whatsapp_client.send_message(tenant, numero_cliente, mensaje)
+        
+        if enviado:
+            # Guardar en conversación
+            from whatsapp.message_handler import message_handler
+            message_handler._guardar_conversacion(
+                tenant_id, 
+                numero_cliente, 
+                f"📎 Enviado: {recurso['nombre']} - {recurso['url']}", 
+                "Recurso compartido manualmente"
+            )
+            
+            return jsonify({
+                'success': True, 
+                'message': f'Recurso "{recurso["nombre"]}" enviado a {numero_cliente}'
+            })
+        else:
+            return jsonify({'error': 'No se pudo enviar el mensaje'}), 500
+            
+    except Exception as e:
+        logger.error(f'Error compartiendo recurso: {e}')
+        return jsonify({'error': str(e)}), 500
+
+def formatear_mensaje_recurso(recurso):
+    """Formatea el mensaje según el tipo de recurso"""
+    nombre = recurso['nombre']
+    url = recurso['url']
+    descripcion = recurso.get('descripcion', '')
+    
+    # Emoji según tipo
+    emojis = {
+        'imagen': '🖼️',
+        'video': '🎥',
+        'pdf': '📄',
+        'documento': '📁',
+        'enlace': '🔗'
+    }
+    emoji = emojis.get(recurso.get('tipo', 'enlace'), '📎')
+    
+    # Construir mensaje
+    mensaje = f"{emoji} *{nombre}*\n\n"
+    
+    if descripcion:
+        mensaje += f"{descripcion}\n\n"
+    
+    mensaje += f"🔗 {url}\n\n"
+    mensaje += "_Recurso compartido desde el panel de administración._"
+    
+    return mensaje
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
