@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Recursos Visuales - {{ tenant.nombre }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">Recursos Visuales</h1>
+        <div class="btn-toolbar mb-2 mb-md-0">
+            <button type="button" class="btn btn-sm btn-primary" onclick="agregarRecurso()">
+                <i class="fas fa-plus"></i> Agregar Recurso
+            </button>
+        </div>
+    </div>
+
+    <div class="row" id="recursos-container">
+        <div class="col-12 text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const tenantId = '{{ tenant.id }}';
+
+async function cargarRecursos() {
+    try {
+        const response = await fetch(`/api/tenant/${tenantId}/recursos`);
+        const recursos = await response.json();
+        
+        const container = document.getElementById('recursos-container');
+        
+        if (recursos.length === 0) {
+            container.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-info text-center">
+                        No hay recursos visuales agregados. Haz clic en "Agregar Recurso" para comenzar.
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = recursos.map(recurso => `
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">${escapeHtml(recurso.nombre)}</h5>
+                        <p class="card-text">${escapeHtml(recurso.descripcion || 'Sin descripción')}</p>
+                        <p><strong>Tipo:</strong> ${recurso.tipo}</p>
+                        ${recurso.url ? `<a href="${escapeHtml(recurso.url)}" target="_blank" class="btn btn-sm btn-info">Ver recurso</a>` : ''}
+                        <button class="btn btn-sm btn-danger" onclick="eliminarRecurso(${recurso.id})">Eliminar</button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error cargando recursos:', error);
+        document.getElementById('recursos-container').innerHTML = `
+            <div class="col-12">
+                <div class="alert alert-danger">Error al cargar los recursos</div>
+            </div>
+        `;
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function agregarRecurso() {
+    const nombre = prompt('Nombre del recurso:');
+    if (!nombre) return;
+    
+    const tipo = prompt('Tipo (imagen, video, pdf, etc.):');
+    if (!tipo) return;
+    
+    const url = prompt('URL del recurso:');
+    
+    fetch(`/api/tenant/${tenantId}/recursos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, tipo, url })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            cargarRecursos();
+        } else {
+            alert('Error: ' + (data.error || 'No se pudo agregar'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al agregar recurso');
+    });
+}
+
+function eliminarRecurso(recursoId) {
+    if (!confirm('¿Eliminar este recurso?')) return;
+    
+    fetch(`/api/tenant/${tenantId}/recursos/${recursoId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            cargarRecursos();
+        } else {
+            alert('Error: ' + (data.error || 'No se pudo eliminar'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al eliminar recurso');
+    });
+}
+
+cargarRecursos();
+</script>
+{% endblock %}
