@@ -44,15 +44,16 @@ class WhatsAppClient:
             logger.info(f"Enviando imagen a {to_number}: {image_url}")
             response = requests.post(url, headers=headers, json=payload)
             
-            if response.status_code == 201:
-                logger.info(f"Imagen enviada exitosamente a {to_number}")
+            # WhatsApp API devuelve 200 OK o 201 Created
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ Imagen enviada exitosamente a {to_number}")
                 return True
             else:
-                logger.error(f"Error enviando imagen: {response.status_code} - {response.text}")
+                logger.error(f"❌ Error enviando imagen: {response.status_code} - {response.text}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error en send_image: {e}")
+            logger.error(f"❌ Error en send_image: {e}")
             return False
     
     def send_message(self, tenant, to_number, message):
