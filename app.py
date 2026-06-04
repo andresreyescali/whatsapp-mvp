@@ -2638,6 +2638,94 @@ def check_session():
         })
     return jsonify({'authenticated': False}), 401
 
+@app.route('/debug/migrar_recursos_visuales', methods=['GET'])
+def migrar_recursos_visuales():
+    """Agrega la columna updated_at a la tabla recursos_visuales de todos los tenants"""
+    if session.get('rol_sistema') != 'super_admin':
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    tenants = tenant_repo.get_all()
+    resultados = []
+    
+    for tenant in tenants:
+        tenant_id = tenant['id']
+        schema_name = tenant.get('schema_name')
+        if not schema_name:
+            schema_name = f"tenant_{tenant_id.replace('-', '_')}"
+        
+        try:
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    # Verificar si la tabla recursos_visuales existe
+                    cur.execute(f"""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables 
+                            WHERE table_schema = '{schema_name}' 
+                            AND table_name = 'recursos_visuales'
+                        )
+                    """)
+                    tabla_existe = cur.fetchone()[0]
+                    
+                    if not tabla_existe:
+                        resultados.append({
+                            'tenant': tenant_id, 
+                            'status': 'tabla no existe, omitiendo'
+                        })
+                        continue
+                    
+                    # Verificar si la columna updated_at existe
+                    cur.execute(f"""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_schema = '{schema_name}' 
+                            AND table_name = 'recursos_visuales' 
+                            AND column_name = 'updated_at'
+                        )
+                    """)
+                    columna_existe = cur.fetchone()[0]
+                    
+                    if not columna_existe:
+                        cur.execute(f"""
+                            ALTER TABLE "{schema_name}".recursos_visuales 
+                            ADD COLUMN updated_at TIMESTAMP DEFAULT NOW()
+                        """)
+                        conn.commit()
+                        resultados.append({
+                            'tenant': tenant_id, 
+                            'nombre': tenant.get('nombre'),
+                            'status': '✅ columna updated_at agregada'
+                        })
+                    else:
+                        resultados.append({
+                            'tenant': tenant_id, 
+                            'nombre': tenant.get('nombre'),
+                            'status': 'ℹ️ columna ya existe'
+                        })
+        except Exception as e:
+            resultados.append({
+                'tenant': tenant_id, 
+                'nombre': tenant.get('nombre'),
+                'status': '❌ error', 
+                'error': str(e)
+            })
+    
+    # Resumen
+    agregadas = sum(1 for r in resultados if 'agregada' in r.get('status', ''))
+    existentes = sum(1 for r in resultados if 'ya existe' in r.get('status', ''))
+    errores = sum(1 for r in resultados if 'error' in r.get('status', ''))
+    omitidas = sum(1 for r in resultados if 'omitindo' in r.get('status', ''))
+    
+    return jsonify({
+        'resumen': {
+            'total_tenants': len(tenants),
+            'columnas_agregadas': agregadas,
+            'columnas_existentes': existentes,
+            'errores': errores,
+            'omitidas': omitidas
+        },
+        'detalles': resultados
+    })
+
 if __name__ == '__main__':
     logger.info(f'Iniciando en puerto {config.port}')
     app.run(host='0.0.0.0', port=config.port)
