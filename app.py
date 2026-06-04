@@ -10,6 +10,7 @@ from core.config import config
 from core.database import db_manager
 from core.logger import setup_logging, logger
 from whatsapp.webhook import register_webhook_routes
+from whatsapp.client import whatsapp_client
 from tenants.onboarding import register_new_tenant
 from tenants.repository import tenant_repo
 from tenants.schema_manager import schema_manager
