@@ -2276,44 +2276,34 @@ def compartir_recurso_whatsapp(tenant_id, recurso_id):
         if not numero_cliente:
             return jsonify({'error': 'Número de teléfono requerido'}), 400
         
-        # Obtener el recurso
         recursos = schema_manager.get_recursos_visuales(tenant_id)
         recurso = next((r for r in recursos if r['id'] == recurso_id), None)
         
         if not recurso:
             return jsonify({'error': 'Recurso no encontrado'}), 404
         
-        # Obtener el tenant
         tenant = tenant_repo.find_by_id(tenant_id)
         if not tenant:
             return jsonify({'error': 'Negocio no encontrado'}), 404
         
-        # Formatear mensaje según el tipo de recurso
-        mensaje = formatear_mensaje_recurso(recurso)
+        emojis = {'imagen': '🖼️', 'video': '🎥', 'pdf': '📄', 'documento': '📁', 'enlace': '🔗'}
+        emoji = emojis.get(recurso.get('tipo', 'enlace'), '📎')
         
-        # Enviar por WhatsApp
+        mensaje = f"{emoji} *{recurso['nombre']}*\n\n"
+        if recurso.get('descripcion'):
+            mensaje += f"{recurso['descripcion']}\n\n"
+        mensaje += f"🔗 {recurso['url']}"
+        
         from whatsapp.client import whatsapp_client
         enviado = whatsapp_client.send_message(tenant, numero_cliente, mensaje)
         
         if enviado:
-            # Guardar en conversación
-            from whatsapp.message_handler import message_handler
-            message_handler._guardar_conversacion(
-                tenant_id, 
-                numero_cliente, 
-                f"📎 Enviado: {recurso['nombre']} - {recurso['url']}", 
-                "Recurso compartido manualmente"
-            )
-            
-            return jsonify({
-                'success': True, 
-                'message': f'Recurso "{recurso["nombre"]}" enviado a {numero_cliente}'
-            })
-        else:
-            return jsonify({'error': 'No se pudo enviar el mensaje'}), 500
-            
+            return jsonify({'success': True, 'message': f'Recurso enviado a {numero_cliente}'})
+        
+        return jsonify({'error': 'No se pudo enviar'}), 500
+        
     except Exception as e:
-        logger.error(f'Error compartiendo recurso: {e}')
+        logger.error(f'Error: {e}')
         return jsonify({'error': str(e)}), 500
 
 def formatear_mensaje_recurso(recurso):

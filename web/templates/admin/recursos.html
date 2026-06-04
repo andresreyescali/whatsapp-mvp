@@ -22,32 +22,31 @@
     </div>
 </div>
 
-<!-- Modal de Bootstrap para enviar por WhatsApp -->
-<div class="modal fade" id="whatsappModal" tabindex="-1" aria-labelledby="whatsappModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="whatsappModalLabel">
-                    <i class="fab fa-whatsapp text-success"></i> Enviar por WhatsApp
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<!-- Modal con CSS puro (sin Bootstrap) -->
+<div id="whatsappModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;">
+    <div style="background: white; border-radius: 8px; width: 90%; max-width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <div style="padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0; color: #075E54;">
+                <i class="fab fa-whatsapp" style="color: #25D366;"></i> Enviar por WhatsApp
+            </h3>
+            <button onclick="cerrarModal()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+        </div>
+        <div style="padding: 20px;">
+            <div id="recurso-info" style="background: #d4edda; padding: 12px; border-radius: 6px; margin-bottom: 20px; color: #155724;">
+                <i class="fas fa-check-circle"></i> <strong>Recurso seleccionado:</strong> <span id="recurso-nombre"></span>
             </div>
-            <div class="modal-body">
-                <div id="recurso-info" class="alert alert-success mb-3"></div>
-                <div class="mb-3">
-                    <label for="numero-cliente" class="form-label">Número de teléfono del cliente:</label>
-                    <input type="tel" class="form-control" id="numero-cliente" 
-                           placeholder="Ej: 573001234567">
-                    <div class="form-text">Formato: Código país + número (Ej: 573001234567 para Colombia)</div>
-                </div>
-                <div id="mensaje-envio" style="display:none;"></div>
+            <div style="margin-bottom: 20px;">
+                <label for="numero-cliente" style="display: block; margin-bottom: 8px; font-weight: 500;">Número de teléfono del cliente:</label>
+                <input type="tel" id="numero-cliente" class="form-control" placeholder="Ej: 573001234567" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px;">
+                <small style="color: #666; display: block; margin-top: 5px;">Formato: Código país + número (Ej: 573001234567 para Colombia)</small>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-success" onclick="enviarRecurso()">
-                    <i class="fab fa-whatsapp"></i> Enviar
-                </button>
-            </div>
+            <div id="mensaje-envio" style="display: none; padding: 10px; border-radius: 4px; margin-top: 10px;"></div>
+        </div>
+        <div style="padding: 15px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="cerrarModal()" style="padding: 8px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancelar</button>
+            <button onclick="enviarRecurso()" style="padding: 8px 20px; background: #25D366; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                <i class="fab fa-whatsapp"></i> Enviar
+            </button>
         </div>
     </div>
 </div>
@@ -58,10 +57,11 @@
     border-radius: 8px;
     margin-bottom: 20px;
     transition: transform 0.2s;
+    background: white;
 }
 .card:hover {
     transform: translateY(-5px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 .card-body {
     padding: 15px;
@@ -70,8 +70,38 @@
     padding: 5px 10px;
     margin: 2px;
     font-size: 12px;
+    display: inline-block;
+    border-radius: 4px;
+    text-decoration: none;
+    cursor: pointer;
 }
 .btn-sm i {
+    margin-right: 5px;
+}
+.btn-info {
+    background: #17a2b8;
+    color: white;
+    border: none;
+}
+.btn-success {
+    background: #28a745;
+    color: white;
+    border: none;
+}
+.btn-danger {
+    background: #dc3545;
+    color: white;
+    border: none;
+}
+.btn-primary {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.btn-primary i {
     margin-right: 5px;
 }
 </style>
@@ -106,11 +136,11 @@ async function cargarRecursos() {
                         <h5 class="card-title">${getTipoEmoji(recurso.tipo)} ${escapeHtml(recurso.nombre)}</h5>
                         <p class="card-text">${escapeHtml(recurso.descripcion || 'Sin descripción')}</p>
                         <p><strong>Tipo:</strong> ${recurso.tipo}</p>
-                        ${recurso.url ? `<a href="${escapeHtml(recurso.url)}" target="_blank" class="btn btn-sm btn-info"><i class="fas fa-eye"></i> Ver recurso</a>` : ''}
-                        <button class="btn btn-sm btn-success" onclick="abrirModalEnviar(${recurso.id}, '${escapeHtml(recurso.nombre)}')">
+                        ${recurso.url ? `<a href="${escapeHtml(recurso.url)}" target="_blank" class="btn-sm btn-info"><i class="fas fa-eye"></i> Ver recurso</a>` : ''}
+                        <button class="btn-sm btn-success" onclick="abrirModalEnviar(${recurso.id}, '${escapeHtml(recurso.nombre)}')">
                             <i class="fab fa-whatsapp"></i> Enviar por WhatsApp
                         </button>
-                        <button class="btn btn-sm btn-danger" onclick="eliminarRecurso(${recurso.id})">
+                        <button class="btn-sm btn-danger" onclick="eliminarRecurso(${recurso.id})">
                             <i class="fas fa-trash"></i> Eliminar
                         </button>
                     </div>
@@ -140,15 +170,16 @@ function getTipoEmoji(tipo) {
 
 function abrirModalEnviar(recursoId, recursoNombre) {
     recursoSeleccionado = { id: recursoId, nombre: recursoNombre };
-    document.getElementById('recurso-info').innerHTML = `
-        <i class="fas fa-check-circle"></i> <strong>Recurso seleccionado:</strong> ${escapeHtml(recursoNombre)}
-    `;
+    document.getElementById('recurso-nombre').innerHTML = escapeHtml(recursoNombre);
     document.getElementById('numero-cliente').value = '';
     document.getElementById('mensaje-envio').style.display = 'none';
     
-    // Abrir modal usando Bootstrap
-    const modal = new bootstrap.Modal(document.getElementById('whatsappModal'));
-    modal.show();
+    // Mostrar modal
+    document.getElementById('whatsappModal').style.display = 'flex';
+}
+
+function cerrarModal() {
+    document.getElementById('whatsappModal').style.display = 'none';
 }
 
 async function enviarRecurso() {
@@ -164,7 +195,7 @@ async function enviarRecurso() {
         return;
     }
     
-    const btnEnviar = document.querySelector('#whatsappModal .btn-success');
+    const btnEnviar = document.querySelector('#whatsappModal button[onclick="enviarRecurso()"]');
     const textoOriginal = btnEnviar.innerHTML;
     btnEnviar.disabled = true;
     btnEnviar.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Enviando...';
@@ -181,9 +212,7 @@ async function enviarRecurso() {
         if (data.success) {
             mostrarMensaje('success', data.message);
             setTimeout(() => {
-                // Cerrar modal
-                const modal = bootstrap.Modal.getInstance(document.getElementById('whatsappModal'));
-                modal.hide();
+                cerrarModal();
                 document.getElementById('numero-cliente').value = '';
             }, 2000);
         } else {
@@ -200,7 +229,9 @@ async function enviarRecurso() {
 
 function mostrarMensaje(tipo, texto) {
     const mensajeDiv = document.getElementById('mensaje-envio');
-    mensajeDiv.className = tipo === 'success' ? 'alert alert-success mt-3' : 'alert alert-danger mt-3';
+    mensajeDiv.style.backgroundColor = tipo === 'success' ? '#d4edda' : '#f8d7da';
+    mensajeDiv.style.color = tipo === 'success' ? '#155724' : '#721c24';
+    mensajeDiv.style.border = tipo === 'success' ? '1px solid #c3e6cb' : '1px solid #f5c6cb';
     mensajeDiv.innerHTML = (tipo === 'success' ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-exclamation-triangle"></i> ') + texto;
     mensajeDiv.style.display = 'block';
     
@@ -224,6 +255,7 @@ function agregarRecurso() {
     if (!tipo) return;
     
     const url = prompt('URL del recurso:');
+    if (!url) return;
     
     fetch(`/api/tenant/${tenantId}/recursos`, {
         method: 'POST',
