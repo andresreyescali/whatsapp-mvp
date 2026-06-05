@@ -98,6 +98,176 @@ class WhatsAppClient:
             logger.error(f"Error en send_message: {e}")
             return False
     
+    def send_document(self, tenant, to_number, document_url, filename, caption=""):
+        """
+        Envía un documento (PDF, Word, Excel, etc.) por WhatsApp
+        
+        Args:
+            tenant: Diccionario con información del tenant (phone_id, token)
+            to_number: Número de teléfono del destinatario
+            document_url: URL pública del documento
+            filename: Nombre del archivo (ej: "menu.pdf")
+            caption: Texto opcional que acompaña el documento
+        """
+        try:
+            phone_id = tenant['phone_id']
+            token = tenant['token']
+            
+            url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            formatted_number = self._format_phone_number(to_number)
+            
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": formatted_number,
+                "type": "document",
+                "document": {
+                    "link": document_url,
+                    "filename": filename,
+                    "caption": caption[:200] if caption else ""
+                }
+            }
+            
+            logger.info(f"Enviando documento a {to_number}: {filename}")
+            response = requests.post(url, headers=headers, json=payload)
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ Documento enviado exitosamente a {to_number}")
+                return True
+            else:
+                logger.error(f"❌ Error enviando documento: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en send_document: {e}")
+            return False
+    
+    def send_video(self, tenant, to_number, video_url, caption=""):
+        """
+        Envía un video por WhatsApp
+        
+        Args:
+            tenant: Diccionario con información del tenant (phone_id, token)
+            to_number: Número de teléfono del destinatario
+            video_url: URL pública del video
+            caption: Texto opcional que acompaña el video
+        """
+        try:
+            phone_id = tenant['phone_id']
+            token = tenant['token']
+            
+            url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            formatted_number = self._format_phone_number(to_number)
+            
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": formatted_number,
+                "type": "video",
+                "video": {
+                    "link": video_url,
+                    "caption": caption[:200] if caption else ""
+                }
+            }
+            
+            logger.info(f"Enviando video a {to_number}: {video_url}")
+            response = requests.post(url, headers=headers, json=payload)
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ Video enviado exitosamente a {to_number}")
+                return True
+            else:
+                logger.error(f"❌ Error enviando video: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en send_video: {e}")
+            return False
+    
+    def send_audio(self, tenant, to_number, audio_url):
+        """
+        Envía un audio por WhatsApp
+        
+        Args:
+            tenant: Diccionario con información del tenant (phone_id, token)
+            to_number: Número de teléfono del destinatario
+            audio_url: URL pública del audio
+        """
+        try:
+            phone_id = tenant['phone_id']
+            token = tenant['token']
+            
+            url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            formatted_number = self._format_phone_number(to_number)
+            
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": formatted_number,
+                "type": "audio",
+                "audio": {
+                    "link": audio_url
+                }
+            }
+            
+            logger.info(f"Enviando audio a {to_number}: {audio_url}")
+            response = requests.post(url, headers=headers, json=payload)
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ Audio enviado exitosamente a {to_number}")
+                return True
+            else:
+                logger.error(f"❌ Error enviando audio: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error en send_audio: {e}")
+            return False
+    
+    def send_media_message(self, tenant, to_number, media_type, media_url, filename=None, caption=""):
+        """
+        Envía cualquier tipo de medio (imagen, video, documento) por WhatsApp
+        Método unificado para enviar diferentes tipos de medios
+        
+        Args:
+            tenant: Diccionario con información del tenant
+            to_number: Número del destinatario
+            media_type: 'image', 'video', 'document', 'audio'
+            media_url: URL del archivo
+            filename: Nombre del archivo (solo para documentos)
+            caption: Texto opcional
+        """
+        if media_type == 'image':
+            return self.send_image(tenant, to_number, media_url, caption)
+        elif media_type == 'video':
+            return self.send_video(tenant, to_number, media_url, caption)
+        elif media_type == 'document':
+            doc_filename = filename or 'documento.pdf'
+            return self.send_document(tenant, to_number, media_url, doc_filename, caption)
+        elif media_type == 'audio':
+            return self.send_audio(tenant, to_number, media_url)
+        else:
+            logger.error(f"Tipo de medio no soportado: {media_type}")
+            return False
+    
     def _format_phone_number(self, number):
         """
         Formatea el número de teléfono para WhatsApp API
@@ -120,6 +290,7 @@ class WhatsAppClient:
             number = '+' + number
         
         return number
+
 
 # Instancia global para usar en toda la aplicación
 whatsapp_client = WhatsAppClient()

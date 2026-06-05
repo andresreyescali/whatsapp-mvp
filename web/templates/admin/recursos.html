@@ -7,9 +7,20 @@
     <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
         <h1 class="h2">Recursos Visuales</h1>
         <div class="btn-toolbar mb-2 mb-md-0">
-            <button type="button" class="btn btn-primary" onclick="agregarRecurso()">
+            <button type="button" class="btn btn-primary" onclick="abrirModalAgregar()">
                 <i class="fas fa-plus"></i> Agregar Recurso
             </button>
+        </div>
+    </div>
+
+    <!-- Filtros por tipo -->
+    <div class="mb-3">
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-sm btn-outline-secondary active" onclick="filtrarRecursos('todos')">Todos</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="filtrarRecursos('imagen')">🖼️ Imágenes</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="filtrarRecursos('video')">🎥 Videos</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="filtrarRecursos('pdf')">📄 PDFs</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="filtrarRecursos('documento')">📁 Documentos</button>
         </div>
     </div>
 
@@ -22,7 +33,55 @@
     </div>
 </div>
 
-<!-- Modal con CSS puro (sin Bootstrap) -->
+<!-- Modal para agregar recurso -->
+<div id="agregarModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;">
+    <div style="background: white; border-radius: 8px; width: 90%; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <div style="padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0; color: #075E54;">
+                <i class="fas fa-plus-circle"></i> Agregar Recurso
+            </h3>
+            <button onclick="cerrarModalAgregar()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+        </div>
+        <div style="padding: 20px;">
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Nombre del recurso:</label>
+                <input type="text" id="recurso-nombre-input" class="form-control" placeholder="Ej: Menú del día" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Tipo de recurso:</label>
+                <select id="recurso-tipo-input" class="form-control" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px;" onchange="mostrarAyudaTipo()">
+                    <option value="imagen">🖼️ Imagen (JPG, PNG, GIF)</option>
+                    <option value="video">🎥 Video (MP4, MOV)</option>
+                    <option value="pdf">📄 PDF Documento</option>
+                    <option value="documento">📁 Documento (Word, Excel)</option>
+                    <option value="enlace">🔗 Enlace web</option>
+                </select>
+                <small id="ayuda-tipo" style="color: #666; display: block; margin-top: 5px;">
+                    La imagen se mostrará directamente en el chat del cliente.
+                </small>
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">URL del recurso:</label>
+                <input type="url" id="recurso-url-input" class="form-control" placeholder="https://ejemplo.com/mi-recurso.jpg" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Descripción (opcional):</label>
+                <textarea id="recurso-descripcion-input" rows="3" class="form-control" placeholder="Descripción del recurso..." style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px;"></textarea>
+            </div>
+            <div id="preview-container" style="margin-top: 10px; display: none; text-align: center;">
+                <div id="preview-content"></div>
+            </div>
+        </div>
+        <div style="padding: 15px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="cerrarModalAgregar()" style="padding: 8px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancelar</button>
+            <button onclick="agregarRecurso()" style="padding: 8px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                <i class="fas fa-save"></i> Guardar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para enviar por WhatsApp -->
 <div id="whatsappModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;">
     <div style="background: white; border-radius: 8px; width: 90%; max-width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
         <div style="padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
@@ -40,6 +99,7 @@
                 <input type="tel" id="numero-cliente" class="form-control" placeholder="Ej: 573001234567" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px;">
                 <small style="color: #666; display: block; margin-top: 5px;">Formato: Código país + número (Ej: 573001234567 para Colombia)</small>
             </div>
+            <div id="preview-recurso" style="margin-top: 10px; display: none; text-align: center;"></div>
             <div id="mensaje-envio" style="display: none; padding: 10px; border-radius: 4px; margin-top: 10px;"></div>
         </div>
         <div style="padding: 15px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px;">
@@ -104,49 +164,56 @@
 .btn-primary i {
     margin-right: 5px;
 }
+.btn-group .btn-outline-secondary {
+    background: transparent;
+    border: 1px solid #6c757d;
+    color: #6c757d;
+    padding: 5px 12px;
+    cursor: pointer;
+}
+.btn-group .btn-outline-secondary.active {
+    background: #007bff;
+    border-color: #007bff;
+    color: white;
+}
+.btn-group .btn-outline-secondary:hover {
+    background: #6c757d;
+    color: white;
+}
+.preview-img {
+    max-width: 100%;
+    max-height: 150px;
+    border-radius: 8px;
+}
+.preview-video {
+    max-width: 100%;
+    max-height: 150px;
+}
+.badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+.badge-imagen { background: #e3f2fd; color: #1565c0; }
+.badge-video { background: #fce4ec; color: #c2185b; }
+.badge-pdf { background: #ffebee; color: #c62828; }
+.badge-documento { background: #e8f5e9; color: #2e7d32; }
+.badge-enlace { background: #fff3e0; color: #ef6c00; }
 </style>
 
 <script>
 const tenantId = '{{ tenant.id }}';
 let recursoSeleccionado = null;
+let recursosGlobal = [];
+let filtroActual = 'todos';
 
 async function cargarRecursos() {
     try {
         const response = await fetch(`/api/tenant/${tenantId}/recursos`);
-        const recursos = await response.json();
-        
-        const container = document.getElementById('recursos-container');
-        
-        if (recursos.length === 0) {
-            container.innerHTML = `
-                <div class="col-12">
-                    <div class="alert alert-info text-center">
-                        <i class="fas fa-info-circle"></i> No hay recursos visuales agregados. 
-                        Haz clic en "Agregar Recurso" para comenzar.
-                    </div>
-                </div>
-            `;
-            return;
-        }
-        
-        container.innerHTML = recursos.map(recurso => `
-            <div class="col-md-4 mb-3">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <h5 class="card-title">${getTipoEmoji(recurso.tipo)} ${escapeHtml(recurso.nombre)}</h5>
-                        <p class="card-text">${escapeHtml(recurso.descripcion || 'Sin descripción')}</p>
-                        <p><strong>Tipo:</strong> ${recurso.tipo}</p>
-                        ${recurso.url ? `<a href="${escapeHtml(recurso.url)}" target="_blank" class="btn-sm btn-info"><i class="fas fa-eye"></i> Ver recurso</a>` : ''}
-                        <button class="btn-sm btn-success" onclick="abrirModalEnviar(${recurso.id}, '${escapeHtml(recurso.nombre)}')">
-                            <i class="fab fa-whatsapp"></i> Enviar por WhatsApp
-                        </button>
-                        <button class="btn-sm btn-danger" onclick="eliminarRecurso(${recurso.id})">
-                            <i class="fas fa-trash"></i> Eliminar
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `).join('');
+        recursosGlobal = await response.json();
+        aplicarFiltro();
     } catch (error) {
         console.error('Error cargando recursos:', error);
         document.getElementById('recursos-container').innerHTML = `
@@ -155,6 +222,74 @@ async function cargarRecursos() {
             </div>
         `;
     }
+}
+
+function aplicarFiltro() {
+    let recursosFiltrados = recursosGlobal;
+    
+    if (filtroActual !== 'todos') {
+        recursosFiltrados = recursosGlobal.filter(r => r.tipo === filtroActual);
+    }
+    
+    mostrarRecursos(recursosFiltrados);
+}
+
+function mostrarRecursos(recursos) {
+    const container = document.getElementById('recursos-container');
+    
+    if (recursos.length === 0) {
+        container.innerHTML = `
+            <div class="col-12">
+                <div class="alert alert-info text-center">
+                    <i class="fas fa-info-circle"></i> No hay recursos visuales de este tipo.
+                    Haz clic en "Agregar Recurso" para comenzar.
+                </div>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = recursos.map(recurso => `
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <h5 class="card-title">${getTipoEmoji(recurso.tipo)} ${escapeHtml(recurso.nombre)}</h5>
+                        <span class="badge badge-${recurso.tipo}">${recurso.tipo}</span>
+                    </div>
+                    <p class="card-text">${escapeHtml(recurso.descripcion || 'Sin descripción')}</p>
+                    <div class="mt-2">
+                        ${recurso.tipo === 'imagen' && recurso.url ? 
+                            `<img src="${escapeHtml(recurso.url)}" style="max-width: 100%; max-height: 100px; border-radius: 4px; margin-bottom: 10px;">` : ''}
+                        ${recurso.tipo === 'video' && recurso.url ? 
+                            `<video style="max-width: 100%; max-height: 100px; border-radius: 4px; margin-bottom: 10px;" controls><source src="${escapeHtml(recurso.url)}"></video>` : ''}
+                        ${recurso.tipo === 'pdf' && recurso.url ? 
+                            `<div style="background: #f5f5f5; padding: 10px; border-radius: 4px; margin-bottom: 10px; text-align: center;">
+                                <i class="fas fa-file-pdf" style="font-size: 40px; color: #dc3545;"></i>
+                                <small><br>PDF Documento</small>
+                             </div>` : ''}
+                    </div>
+                    ${recurso.url ? `<a href="${escapeHtml(recurso.url)}" target="_blank" class="btn-sm btn-info" style="display: inline-block; text-decoration: none;"><i class="fas fa-eye"></i> Ver recurso</a>` : ''}
+                    <button class="btn-sm btn-success" onclick="abrirModalEnviar(${recurso.id}, '${escapeHtml(recurso.nombre)}', '${recurso.tipo}', '${escapeHtml(recurso.url || '')}')">
+                        <i class="fab fa-whatsapp"></i> Enviar por WhatsApp
+                    </button>
+                    <button class="btn-sm btn-danger" onclick="eliminarRecurso(${recurso.id})">
+                        <i class="fas fa-trash"></i> Eliminar
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function filtrarRecursos(tipo) {
+    filtroActual = tipo;
+    // Actualizar estilos de botones
+    document.querySelectorAll('.btn-group .btn-outline-secondary').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
+    aplicarFiltro();
 }
 
 function getTipoEmoji(tipo) {
@@ -168,13 +303,62 @@ function getTipoEmoji(tipo) {
     return emojis[tipo] || '📎';
 }
 
-function abrirModalEnviar(recursoId, recursoNombre) {
-    recursoSeleccionado = { id: recursoId, nombre: recursoNombre };
-    document.getElementById('recurso-nombre').innerHTML = escapeHtml(recursoNombre);
+function getTipoIcono(tipo) {
+    const iconos = {
+        'imagen': '<i class="fas fa-image"></i>',
+        'video': '<i class="fas fa-video"></i>',
+        'pdf': '<i class="fas fa-file-pdf"></i>',
+        'documento': '<i class="fas fa-file-alt"></i>',
+        'enlace': '<i class="fas fa-link"></i>'
+    };
+    return iconos[tipo] || '<i class="fas fa-file"></i>';
+}
+
+function mostrarAyudaTipo() {
+    const tipo = document.getElementById('recurso-tipo-input').value;
+    const ayuda = document.getElementById('ayuda-tipo');
+    const ayudas = {
+        'imagen': 'La imagen se mostrará directamente en el chat del cliente. Formatos: JPG, PNG, GIF, WEBP',
+        'video': 'El video se reproducirá dentro del chat. Formatos: MP4, MOV, AVI',
+        'pdf': 'El PDF se abrirá como documento. El cliente podrá descargarlo o verlo',
+        'documento': 'Documento Word o Excel. El cliente podrá descargarlo',
+        'enlace': 'Se enviará como un enlace de texto'
+    };
+    ayuda.innerHTML = ayudas[tipo] || '';
+}
+
+function abrirModalAgregar() {
+    document.getElementById('recurso-nombre-input').value = '';
+    document.getElementById('recurso-url-input').value = '';
+    document.getElementById('recurso-descripcion-input').value = '';
+    document.getElementById('recurso-tipo-input').value = 'imagen';
+    document.getElementById('preview-container').style.display = 'none';
+    mostrarAyudaTipo();
+    document.getElementById('agregarModal').style.display = 'flex';
+}
+
+function cerrarModalAgregar() {
+    document.getElementById('agregarModal').style.display = 'none';
+}
+
+function abrirModalEnviar(recursoId, recursoNombre, recursoTipo, recursoUrl) {
+    recursoSeleccionado = { id: recursoId, nombre: recursoNombre, tipo: recursoTipo, url: recursoUrl };
+    document.getElementById('recurso-nombre').innerHTML = `${getTipoIcono(recursoTipo)} ${escapeHtml(recursoNombre)}`;
     document.getElementById('numero-cliente').value = '';
     document.getElementById('mensaje-envio').style.display = 'none';
     
-    // Mostrar modal
+    // Mostrar previsualización
+    const previewDiv = document.getElementById('preview-recurso');
+    if (recursoUrl && recursoTipo === 'imagen') {
+        previewDiv.innerHTML = `<img src="${escapeHtml(recursoUrl)}" style="max-width: 100%; max-height: 150px; border-radius: 8px;">`;
+        previewDiv.style.display = 'block';
+    } else if (recursoUrl && recursoTipo === 'video') {
+        previewDiv.innerHTML = `<video style="max-width: 100%; max-height: 150px;" controls><source src="${escapeHtml(recursoUrl)}"></video>`;
+        previewDiv.style.display = 'block';
+    } else {
+        previewDiv.style.display = 'none';
+    }
+    
     document.getElementById('whatsappModal').style.display = 'flex';
 }
 
@@ -182,14 +366,49 @@ function cerrarModal() {
     document.getElementById('whatsappModal').style.display = 'none';
 }
 
-// En admin/recursos.html, agregar previsualización
-function mostrarPrevisualizacion(url) {
-    const previewDiv = document.getElementById('preview-imagen');
-    if (url.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
-        previewDiv.innerHTML = `<img src="${url}" style="max-width: 100%; max-height: 150px; border-radius: 8px;">`;
-        previewDiv.style.display = 'block';
-    } else {
-        previewDiv.style.display = 'none';
+async function agregarRecurso() {
+    const nombre = document.getElementById('recurso-nombre-input').value.trim();
+    const tipo = document.getElementById('recurso-tipo-input').value;
+    const url = document.getElementById('recurso-url-input').value.trim();
+    const descripcion = document.getElementById('recurso-descripcion-input').value.trim();
+    
+    if (!nombre) {
+        alert('El nombre es requerido');
+        return;
+    }
+    
+    if (!url) {
+        alert('La URL es requerida');
+        return;
+    }
+    
+    const btnGuardar = document.querySelector('#agregarModal button[onclick="agregarRecurso()"]');
+    const textoOriginal = btnGuardar.innerHTML;
+    btnGuardar.disabled = true;
+    btnGuardar.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Guardando...';
+    
+    try {
+        const response = await fetch(`/api/tenant/${tenantId}/recursos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nombre, tipo, url, descripcion })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            cerrarModalAgregar();
+            cargarRecursos();
+            mostrarAlerta('Recurso agregado correctamente', 'success');
+        } else {
+            mostrarAlerta('Error: ' + (data.error || 'No se pudo agregar'), 'danger');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        mostrarAlerta('Error al agregar recurso', 'danger');
+    } finally {
+        btnGuardar.disabled = false;
+        btnGuardar.innerHTML = textoOriginal;
     }
 }
 
@@ -251,41 +470,19 @@ function mostrarMensaje(tipo, texto) {
     }, 3000);
 }
 
+function mostrarAlerta(mensaje, tipo) {
+    if (typeof showAlert === 'function') {
+        showAlert(mensaje, tipo);
+    } else {
+        alert(mensaje);
+    }
+}
+
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-}
-
-function agregarRecurso() {
-    const nombre = prompt('Nombre del recurso:');
-    if (!nombre) return;
-    
-    const tipo = prompt('Tipo (imagen, video, pdf, documento, enlace):');
-    if (!tipo) return;
-    
-    const url = prompt('URL del recurso:');
-    if (!url) return;
-    
-    fetch(`/api/tenant/${tenantId}/recursos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, tipo, url })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            cargarRecursos();
-            showAlert('Recurso agregado correctamente', 'success');
-        } else {
-            showAlert('Error: ' + (data.error || 'No se pudo agregar'), 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        showAlert('Error al agregar recurso', 'danger');
-    });
 }
 
 function eliminarRecurso(recursoId) {
@@ -298,16 +495,40 @@ function eliminarRecurso(recursoId) {
     .then(data => {
         if (data.success) {
             cargarRecursos();
-            showAlert('Recurso eliminado correctamente', 'success');
+            mostrarAlerta('Recurso eliminado correctamente', 'success');
         } else {
-            showAlert('Error: ' + (data.error || 'No se pudo eliminar'), 'danger');
+            mostrarAlerta('Error: ' + (data.error || 'No se pudo eliminar'), 'danger');
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        showAlert('Error al eliminar recurso', 'danger');
+        mostrarAlerta('Error al eliminar recurso', 'danger');
     });
 }
+
+// Previsualización de URL al escribir
+document.getElementById('recurso-url-input')?.addEventListener('input', function() {
+    const url = this.value;
+    const tipo = document.getElementById('recurso-tipo-input').value;
+    const previewContainer = document.getElementById('preview-container');
+    const previewContent = document.getElementById('preview-content');
+    
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+        previewContainer.style.display = 'block';
+        if (tipo === 'imagen') {
+            previewContent.innerHTML = `<img src="${escapeHtml(url)}" class="preview-img" onerror="this.style.display='none'"><br><small>Vista previa</small>`;
+        } else if (tipo === 'video') {
+            previewContent.innerHTML = `<video class="preview-video" controls><source src="${escapeHtml(url)}"></video><br><small>Vista previa</small>`;
+        } else if (tipo === 'pdf') {
+            previewContent.innerHTML = `<div style="text-align: center;"><i class="fas fa-file-pdf" style="font-size: 50px; color: #dc3545;"></i><br><small>PDF Documento</small></div>`;
+        } else {
+            previewContent.innerHTML = `<div style="text-align: center;"><i class="fas fa-file-alt" style="font-size: 50px; color: #17a2b8;"></i><br><small>${tipo}</small></div>`;
+        }
+    } else {
+        previewContainer.style.display = 'none';
+        previewContent.innerHTML = '';
+    }
+});
 
 // Cargar recursos al iniciar
 cargarRecursos();

@@ -220,10 +220,11 @@ class MessageHandler:
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
         return True
     
+    # ==================== MÉTODOS PARA ENVIAR DIFERENTES TIPOS DE MEDIOS ====================
+    
     def _enviar_imagen(self, tenant: dict, numero: str, url_imagen: str, caption: str = None):
         """Envía una imagen por WhatsApp"""
         try:
-            # Si la URL es relativa, construir URL completa
             if not url_imagen.startswith('http'):
                 base_url = os.environ.get('BASE_URL', 'https://whatsapp-mvp-docker.onrender.com')
                 url_completa = f"{base_url}{url_imagen}"
@@ -236,8 +237,56 @@ class MessageHandler:
             logger.error(f'Error en _enviar_imagen: {e}')
             return False
     
+    def _enviar_documento(self, tenant: dict, numero: str, url_documento: str, filename: str, caption: str = None):
+        """Envía un documento (PDF, etc.) por WhatsApp"""
+        try:
+            if not url_documento.startswith('http'):
+                base_url = os.environ.get('BASE_URL', 'https://whatsapp-mvp-docker.onrender.com')
+                url_completa = f"{base_url}{url_documento}"
+            else:
+                url_completa = url_documento
+            
+            logger.info(f"Enviando documento a {numero}: {filename}")
+            return whatsapp_client.send_document(tenant, numero, url_completa, filename, caption)
+        except Exception as e:
+            logger.error(f'Error en _enviar_documento: {e}')
+            return False
+    
+    def _enviar_video(self, tenant: dict, numero: str, url_video: str, caption: str = None):
+        """Envía un video por WhatsApp"""
+        try:
+            if not url_video.startswith('http'):
+                base_url = os.environ.get('BASE_URL', 'https://whatsapp-mvp-docker.onrender.com')
+                url_completa = f"{base_url}{url_video}"
+            else:
+                url_completa = url_video
+            
+            logger.info(f"Enviando video a {numero}: {url_completa}")
+            return whatsapp_client.send_video(tenant, numero, url_completa, caption)
+        except Exception as e:
+            logger.error(f'Error en _enviar_video: {e}')
+            return False
+    
+    def _enviar_audio(self, tenant: dict, numero: str, url_audio: str):
+        """Envía un audio por WhatsApp"""
+        try:
+            if not url_audio.startswith('http'):
+                base_url = os.environ.get('BASE_URL', 'https://whatsapp-mvp-docker.onrender.com')
+                url_completa = f"{base_url}{url_audio}"
+            else:
+                url_completa = url_audio
+            
+            logger.info(f"Enviando audio a {numero}: {url_completa}")
+            return whatsapp_client.send_audio(tenant, numero, url_completa)
+        except Exception as e:
+            logger.error(f'Error en _enviar_audio: {e}')
+            return False
+    
     def _enviar_recurso_visual(self, tenant: dict, numero: str, recurso_nombre: str) -> str:
-        """Envía un recurso visual (genérico) basado en el nombre"""
+        """
+        Envía un recurso visual (imagen, PDF, video, etc.) basado en el nombre.
+        La IA puede llamar a esta función cuando el cliente pida ver un recurso.
+        """
         try:
             # Obtener todos los recursos del tenant
             recursos = schema_manager.get_recursos_visuales(tenant['id'])
@@ -250,43 +299,114 @@ class MessageHandler:
             recurso_encontrado = None
             recurso_nombre_lower = recurso_nombre.lower()
             
+            # Palabras clave comunes que pueden usarse para buscar
+            keywords = {
+                'menu': ['menu', 'menú', 'carta', 'productos', 'comida'],
+                'promocion': ['promocion', 'promoción', 'oferta', 'descuento'],
+                'catalogo': ['catalogo', 'catálogo', 'productos'],
+                'ubicacion': ['ubicacion', 'ubicación', 'direccion', 'dirección', 'mapa'],
+                'horario': ['horario', 'horarios', 'atencion', 'atención']
+            }
+            
             for r in recursos:
                 nombre_recurso = r.get('nombre', '').lower()
-                # Buscar coincidencia exacta o que el nombre esté contenido
-                if (recurso_nombre_lower == nombre_recurso or 
-                    recurso_nombre_lower in nombre_recurso or 
-                    nombre_recurso in recurso_nombre_lower):
+                
+                # Coincidencia exacta
+                if recurso_nombre_lower == nombre_recurso:
+                    recurso_encontrado = r
+                    break
+                
+                # Coincidencia por palabra clave
+                for key, words in keywords.items():
+                    if recurso_nombre_lower in words and key in nombre_recurso:
+                        recurso_encontrado = r
+                        break
+                
+                # Coincidencia parcial
+                if recurso_encontrado is None and (recurso_nombre_lower in nombre_recurso or nombre_recurso in recurso_nombre_lower):
                     recurso_encontrado = r
                     break
             
             if not recurso_encontrado:
+                # Si no encuentra, buscar el primero que contenga la palabra
+                for r in recursos:
+                    if any(word in r.get('nombre', '').lower() for word in recurso_nombre_lower.split()):
+                        recurso_encontrado = r
+                        break
+            
+            if not recurso_encontrado:
                 logger.warning(f"Recurso no encontrado: {recurso_nombre}")
+                # Listar recursos disponibles para ayudar al cliente
+                disponibles = [r.get('nombre') for r in recursos[:5]]
+                if disponibles:
+                    self._enviar_mensaje_recurso_no_encontrado(tenant, numero, recurso_nombre, disponibles)
                 return None
             
-            logger.info(f"Enviando recurso: {recurso_encontrado['nombre']} (tipo: {recurso_encontrado.get('tipo')})")
+            tipo = recurso_encontrado.get('tipo', '')
+            url = recurso_encontrado.get('url', '')
+            nombre = recurso_encontrado.get('nombre', '')
+            descripcion = recurso_encontrado.get('descripcion', '')
             
-            # Enviar según el tipo
-            if recurso_encontrado.get('tipo') == 'imagen' and recurso_encontrado.get('url'):
-                caption = f"📷 *{recurso_encontrado['nombre']}*"
-                if recurso_encontrado.get('descripcion'):
-                    caption += f"\n\n{recurso_encontrado['descripcion']}"
-                
-                self._enviar_imagen(tenant, numero, recurso_encontrado['url'], caption)
-                return f"✅ Te envié {recurso_encontrado['nombre']}"
+            logger.info(f"Enviando recurso: {nombre} (tipo: {tipo})")
             
-            elif recurso_encontrado.get('tipo') == 'multiple' and recurso_encontrado.get('archivos'):
+            # Construir caption según el tipo
+            emojis = {
+                'imagen': '📷', 'image': '📷',
+                'pdf': '📄', 'documento': '📄', 'document': '📄',
+                'video': '🎥', 'video': '🎥'
+            }
+            emoji = emojis.get(tipo, '📎')
+            caption = f"{emoji} *{nombre}*"
+            if descripcion:
+                caption += f"\n\n{descripcion}"
+            
+            # Enviar según el tipo de recurso
+            if tipo in ['imagen', 'image'] and url:
+                self._enviar_imagen(tenant, numero, url, caption)
+                return f"✅ Te envié {nombre}"
+            
+            elif tipo in ['pdf', 'documento', 'document'] and url:
+                filename = url.split('/')[-1]
+                if not filename.endswith('.pdf'):
+                    filename = f"{nombre}.pdf"
+                self._enviar_documento(tenant, numero, url, filename, caption)
+                return f"✅ Te envié {nombre}"
+            
+            elif tipo in ['video'] and url:
+                self._enviar_video(tenant, numero, url, caption)
+                return f"✅ Te envié {nombre}"
+            
+            elif tipo == 'audio' and url:
+                self._enviar_audio(tenant, numero, url)
+                return f"✅ Te envié {nombre}"
+            
+            elif tipo == 'multiple' and recurso_encontrado.get('archivos'):
                 for archivo in recurso_encontrado['archivos']:
-                    self._enviar_imagen(tenant, numero, archivo, recurso_encontrado.get('descripcion'))
-                return f"✅ Te envié {recurso_encontrado['nombre']}"
+                    if archivo.endswith('.pdf'):
+                        self._enviar_documento(tenant, numero, archivo, archivo.split('/')[-1], descripcion)
+                    elif archivo.endswith(('.mp4', '.mov')):
+                        self._enviar_video(tenant, numero, archivo, descripcion)
+                    else:
+                        self._enviar_imagen(tenant, numero, archivo, descripcion)
+                return f"✅ Te envié {nombre}"
             
             else:
-                logger.warning(f"Tipo de recurso no soportado: {recurso_encontrado.get('tipo')}")
+                logger.warning(f"Tipo de recurso no soportado: {tipo}")
                 return None
                 
         except Exception as e:
             logger.error(f'Error enviando recurso visual: {e}')
             return None
-            
+    
+    def _enviar_mensaje_recurso_no_encontrado(self, tenant: dict, numero: str, recurso_buscado: str, disponibles: list):
+        """Envía un mensaje cuando no se encuentra el recurso solicitado"""
+        mensaje = f"❌ No encontré '{recurso_buscado}'. "
+        if disponibles:
+            mensaje += f"Los recursos disponibles son: {', '.join(disponibles)}"
+        else:
+            mensaje += "No hay recursos disponibles en este momento."
+        whatsapp_client.send_message(tenant, numero, mensaje)
+    
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
     def _procesar_con_ia(self, tenant: dict, menu: list, numero: str, texto: str, contexto: dict) -> str:
@@ -322,9 +442,31 @@ class MessageHandler:
         
         # Obtener recursos visuales disponibles
         recursos = schema_manager.get_recursos_visuales(tenant['id'])
+        
+        # Separar recursos por tipo para mejor presentación
+        imagenes = [r for r in recursos if r.get('tipo') in ['imagen', 'image']]
+        documentos = [r for r in recursos if r.get('tipo') in ['pdf', 'documento', 'document']]
+        videos = [r for r in recursos if r.get('tipo') == 'video']
+        
         recursos_texto = "\n📁 RECURSOS VISUALES DISPONIBLES:\n"
-        for r in recursos:
-            recursos_texto += f"- {r['nombre']}: {r.get('descripcion', 'Sin descripción')}\n"
+        
+        if imagenes:
+            recursos_texto += "\n📷 IMÁGENES:\n"
+            for r in imagenes[:5]:
+                recursos_texto += f"- {r['nombre']}: {r.get('descripcion', 'Sin descripción')}\n"
+        
+        if documentos:
+            recursos_texto += "\n📄 DOCUMENTOS (PDFs):\n"
+            for r in documentos[:5]:
+                recursos_texto += f"- {r['nombre']}: {r.get('descripcion', 'Sin descripción')}\n"
+        
+        if videos:
+            recursos_texto += "\n🎥 VIDEOS:\n"
+            for r in videos[:5]:
+                recursos_texto += f"- {r['nombre']}: {r.get('descripcion', 'Sin descripción')}\n"
+        
+        if not recursos:
+            recursos_texto += "\nNo hay recursos visuales disponibles.\n"
         
         # Construir prompt
         menu_texto = "\n".join([f"- {p['nombre']}: ${p['precio']:,}" for p in menu[:100]])
@@ -380,13 +522,13 @@ class MessageHandler:
                 "type": "function",
                 "function": {
                     "name": "enviar_recurso_visual",
-                    "description": "Envía un recurso visual (catálogo, menú, ejemplos) al cliente.",
+                    "description": "Envía un recurso visual (catálogo, menú, ejemplos, PDF) al cliente. Usa esto cuando el cliente pida: menu, catalogo, promociones, imagenes, video, PDF, documento, o cualquier recurso por nombre.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "recurso_nombre": {
                                 "type": "string",
-                                "description": "Nombre del recurso a enviar"
+                                "description": "Nombre del recurso a enviar (ej: 'menu', 'catalogo', 'promociones', 'ubicacion', 'horario')"
                             }
                         },
                         "required": ["recurso_nombre"]
@@ -430,12 +572,19 @@ MENÚ DE PRODUCTOS:
 
 {historial_texto}
 
-REGLAS:
-1. Cuando el cliente pida un producto, usa 'agregar_producto_carrito' o 'agregar_producto_personalizado'
-2. Cuando el cliente quiera ver catálogo/menú/ejemplos, usa 'enviar_recurso_visual'
-3. Cuando el cliente confirme, usa 'confirmar_pedido'
-4. Cuando el cliente quiera ver su pedido, usa 'ver_carrito'
-5. Responde en español, de forma natural y amable
+REGLAS IMPORTANTES:
+1. Cuando el cliente pida un producto del menú, usa 'agregar_producto_carrito' o 'agregar_producto_personalizado'
+2. Cuando el cliente quiera ver el MENÚ, CATÁLOGO, PROMOCIONES, IMÁGENES, PDF, VIDEOS o cualquier RECURSO VISUAL, usa 'enviar_recurso_visual' con el nombre del recurso
+3. Usa 'enviar_recurso_visual' también para responder a preguntas como: "muéstrame el menú", "quiero ver las promociones", "envíame el catálogo", "dónde están ubicados", "cuál es el horario"
+4. Cuando el cliente confirme el pedido, usa 'confirmar_pedido'
+5. Cuando el cliente quiera ver su pedido, usa 'ver_carrito'
+6. Responde en español, de forma natural y amable
+
+EJEMPLOS DE RESPUESTA CON RECURSOS:
+- Cliente: "Muéstrame el menú" → Usa enviar_recurso_visual con recurso_nombre="menu"
+- Cliente: "Quiero ver las promociones" → Usa enviar_recurso_visual con recurso_nombre="promocion"
+- Cliente: "Envíame el catálogo de productos" → Usa enviar_recurso_visual con recurso_nombre="catalogo"
+- Cliente: "Dónde están ubicados" → Usa enviar_recurso_visual con recurso_nombre="ubicacion"
 
 RESPONDE en español.
 """
