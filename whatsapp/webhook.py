@@ -246,20 +246,21 @@ def guardar_conversacion_con_archivo(tenant, from_number, mensaje_cliente, respu
         
         with db_manager.get_connection(tenant['id']) as conn:
             with conn.cursor() as cur:
+                # Versión simplificada sin campos nuevos
                 cur.execute(f"""
                     INSERT INTO "{schema_name}".conversaciones 
-                    (cliente_numero, mensaje, respuesta, tipo, created_at, media_id, media_type)
-                    VALUES (%s, %s, %s, %s, NOW(), %s, %s)
-                """, (from_number, mensaje_cliente, respuesta or 'Procesado', 'ia', media_id, tipo))
+                    (cliente_numero, mensaje, respuesta, tipo, created_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                """, (from_number, mensaje_cliente, respuesta or 'Procesado', 'ia'))
             conn.commit()
-        logger.info(f"Conversación guardada con archivo tipo: {tipo}")
+        logger.info(f"Conversación guardada")
     except Exception as e:
-        logger.error(f"Error guardando conversación con archivo: {e}")
-
+        logger.error(f"Error guardando conversación: {e}")
+        
 
 def procesar_imagen_recibida(tenant, from_number, media_id, caption, mime_type):
     """
-    Procesa la imagen recibida del cliente incluyendo análisis con IA
+    Procesa la imagen recibida del cliente con análisis genérico
     """
     try:
         logger.info(f"🖼️ Procesando imagen de {from_number}")
@@ -279,16 +280,20 @@ def procesar_imagen_recibida(tenant, from_number, media_id, caption, mime_type):
                 f.write(media_data['content'])
             logger.info(f"✅ Imagen guardada en: {archivo_info['path']}")
         
-        # ========== ANALIZAR LA IMAGEN CON IA ==========
+        # ========== ANALIZAR LA IMAGEN CON IA (MÉTODO CORRECTO) ==========
         analisis_texto = None
+        business_type = tenant.get('tipo_negocio', 'general')
         
         if archivo_info:
-            # Analizar diseño para torta
-            analisis = vision_client.analyze_design_for_cake(archivo_info['path'])
-            
-            if analisis:
-                analisis_texto = analisis
-                logger.info(f"🔍 Análisis de imagen completado")
+            try:
+                # Usar el método genérico analyze_image en lugar de analyze_design_for_cake
+                analisis = vision_client.analyze_image(archivo_info['path'])
+                
+                if analisis:
+                    analisis_texto = analisis
+                    logger.info(f"🔍 Análisis de imagen completado para negocio: {business_type}")
+            except Exception as e:
+                logger.error(f"Error en análisis de imagen: {e}")
         
         # Construir respuesta
         respuesta = "📸 *¡Imagen recibida!*\n\n"
@@ -299,16 +304,17 @@ def procesar_imagen_recibida(tenant, from_number, media_id, caption, mime_type):
         # Incluir análisis si está disponible
         if analisis_texto:
             respuesta += f"*🔍 Lo que veo en tu imagen:*\n{analisis_texto}\n\n"
-            respuesta += "¿Es correcto lo que identificamos? ¿Te gustaría ajustar algo?"
+            respuesta += "¿Es correcta esta interpretación? ¿Te gustaría agregar algún detalle?"
         else:
-            respuesta += "He guardado tu imagen de referencia para tenerla en cuenta en tu pedido.\n\n"
-            respuesta += "¿Podrías describirme qué tipo de torta te gustaría? (sabor, tamaño, ocasión)"
+            respuesta += "He guardado tu imagen de referencia.\n\n"
+            respuesta += "¿Podrías contarme más detalles sobre lo que buscas?"
         
         return respuesta
         
     except Exception as e:
         logger.error(f"Error en procesar_imagen_recibida: {e}")
         return "Recibí tu imagen, pero hubo un error al procesarla. ¿Puedes intentar de nuevo?"
+    
     
 
 def procesar_documento_recibido(tenant, from_number, media_id, filename, caption, mime_type):
