@@ -99,54 +99,46 @@ class WhatsAppClient:
             return False
     
     def send_document(self, tenant, to_number, document_url, filename, caption=""):
-        """
-        Envía un documento (PDF, Word, Excel, etc.) por WhatsApp
+    try:
+        phone_id = tenant['phone_id']
+        token = tenant['token']
         
-        Args:
-            tenant: Diccionario con información del tenant (phone_id, token)
-            to_number: Número de teléfono del destinatario
-            document_url: URL pública del documento
-            filename: Nombre del archivo (ej: "menu.pdf")
-            caption: Texto opcional que acompaña el documento
-        """
-        try:
-            phone_id = tenant['phone_id']
-            token = tenant['token']
-            
-            url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
-            
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
+        url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        formatted_number = self._format_phone_number(to_number)
+        
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": formatted_number,
+            "type": "document",
+            "document": {
+                "link": document_url,
+                "filename": filename,
+                "caption": caption[:200] if caption else ""
             }
-            
-            formatted_number = self._format_phone_number(to_number)
-            
-            payload = {
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": formatted_number,
-                "type": "document",
-                "document": {
-                    "link": document_url,
-                    "filename": filename,
-                    "caption": caption[:200] if caption else ""
-                }
-            }
-            
-            logger.info(f"Enviando documento a {to_number}: {filename}")
-            response = requests.post(url, headers=headers, json=payload)
-            
-            if response.status_code in [200, 201]:
-                logger.info(f"✅ Documento enviado exitosamente a {to_number}")
-                return True
-            else:
-                logger.error(f"❌ Error enviando documento: {response.status_code} - {response.text}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Error en send_document: {e}")
+        }
+        
+        logger.info(f"📄 Enviando documento a {to_number}: {filename}")
+        logger.info(f"📄 URL del documento: {document_url}")
+        response = requests.post(url, headers=headers, json=payload)
+        
+        # WhatsApp API puede devolver 200 o 201
+        if response.status_code in [200, 201]:
+            logger.info(f"✅ Documento enviado exitosamente")
+            return True
+        else:
+            logger.error(f"❌ Error enviando documento: {response.status_code} - {response.text}")
             return False
+            
+    except Exception as e:
+        logger.error(f"❌ Error en send_document: {e}")
+        return False
     
     def send_video(self, tenant, to_number, video_url, caption=""):
         """

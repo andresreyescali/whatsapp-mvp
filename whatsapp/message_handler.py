@@ -280,14 +280,19 @@ class MessageHandler:
     def _enviar_recurso_visual(self, tenant: dict, numero: str, recurso_nombre: str) -> str:
         """
         Envía un recurso visual. Busca el recurso por NOMBRE (coincidencia exacta o parcial).
-        NO tiene lógica hardcodeada. La IA debe pasar el nombre correcto del recurso.
         """
         try:
+            logger.info(f"🔍 Buscando recurso: '{recurso_nombre}' para tenant {tenant['id']}")
+            
+            # Obtener todos los recursos del tenant
             recursos = schema_manager.get_recursos_visuales(tenant['id'])
             
             if not recursos:
                 logger.warning(f"No hay recursos visuales para tenant {tenant['id']}")
                 return None
+            
+            # Log para depuración
+            logger.info(f"📁 Recursos disponibles: {[r.get('nombre') for r in recursos]}")
             
             # Buscar el recurso por nombre (coincidencia exacta o parcial)
             recurso_encontrado = None
@@ -298,18 +303,20 @@ class MessageHandler:
                 # Coincidencia exacta
                 if recurso_buscar == nombre_recurso:
                     recurso_encontrado = r
+                    logger.info(f"✅ Recurso encontrado por coincidencia exacta: {r.get('nombre')}")
                     break
-                # Coincidencia parcial (si el nombre buscado está dentro del nombre del recurso)
+                # Coincidencia parcial
                 elif recurso_buscar in nombre_recurso:
                     recurso_encontrado = r
+                    logger.info(f"✅ Recurso encontrado por coincidencia parcial: {r.get('nombre')} (buscado: {recurso_buscar})")
                     break
-                # O si el nombre del recurso está dentro de lo buscado
                 elif nombre_recurso in recurso_buscar:
                     recurso_encontrado = r
+                    logger.info(f"✅ Recurso encontrado por coincidencia inversa: {r.get('nombre')} (buscado: {recurso_buscar})")
                     break
             
             if not recurso_encontrado:
-                logger.warning(f"Recurso no encontrado: {recurso_nombre}")
+                logger.warning(f"❌ Recurso NO encontrado: {recurso_nombre}")
                 disponibles = [r.get('nombre') for r in recursos[:5]]
                 if disponibles:
                     mensaje = f"No encontré '{recurso_nombre}'. Los recursos disponibles son: {', '.join(disponibles)}"
@@ -321,7 +328,7 @@ class MessageHandler:
             nombre = recurso_encontrado.get('nombre', '')
             descripcion = recurso_encontrado.get('descripcion', '')
             
-            logger.info(f"Enviando recurso: {nombre} (tipo: {tipo})")
+            logger.info(f"📤 Enviando recurso: {nombre} (tipo: {tipo}, url: {url[:100]}...)")
             
             # Construir caption
             emojis = {'imagen': '📷', 'image': '📷', 'pdf': '📄', 'documento': '📄', 'video': '🎥'}
@@ -332,30 +339,44 @@ class MessageHandler:
             
             # Enviar según el tipo
             if tipo in ['imagen', 'image'] and url:
-                self._enviar_imagen(tenant, numero, url, caption)
-                return f"✅ Te envié {nombre}"
+                logger.info(f"🖼️ Enviando imagen a {numero}")
+                resultado = self._enviar_imagen(tenant, numero, url, caption)
+                if resultado:
+                    logger.info(f"✅ Imagen enviada exitosamente")
+                    return f"✅ Te envié {nombre}"
+                else:
+                    logger.error(f"❌ Falló el envío de la imagen")
+                    return None
             
             elif tipo in ['pdf', 'documento', 'document'] and url:
                 filename = url.split('/')[-1]
                 if not filename.endswith('.pdf'):
                     filename = f"{nombre}.pdf"
-                self._enviar_documento(tenant, numero, url, filename, caption)
-                return f"✅ Te envié {nombre}"
+                logger.info(f"📄 Enviando documento a {numero}: {filename}")
+                resultado = self._enviar_documento(tenant, numero, url, filename, caption)
+                if resultado:
+                    logger.info(f"✅ Documento enviado exitosamente")
+                    return f"✅ Te envié {nombre}"
+                else:
+                    logger.error(f"❌ Falló el envío del documento")
+                    return None
             
             elif tipo in ['video'] and url:
-                self._enviar_video(tenant, numero, url, caption)
-                return f"✅ Te envié {nombre}"
-            
-            elif tipo == 'audio' and url:
-                self._enviar_audio(tenant, numero, url)
-                return f"✅ Te envié {nombre}"
+                logger.info(f"🎥 Enviando video a {numero}")
+                resultado = self._enviar_video(tenant, numero, url, caption)
+                if resultado:
+                    return f"✅ Te envié {nombre}"
+                else:
+                    return None
             
             else:
-                logger.warning(f"Tipo de recurso no soportado: {tipo}")
+                logger.warning(f"⚠️ Tipo de recurso no soportado: {tipo}")
                 return None
-                
+                    
         except Exception as e:
-            logger.error(f'Error enviando recurso visual: {e}')
+            logger.error(f'❌ Error en _enviar_recurso_visual: {e}')
+            import traceback
+            traceback.print_exc()
             return None
     
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
