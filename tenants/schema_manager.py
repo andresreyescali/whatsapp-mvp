@@ -1214,38 +1214,40 @@ class SchemaManager:
     
     # ==================== NUEVOS MÉTODOS PARA RECURSOS VISUALES ====================
     
-    def get_recursos_visuales(self, tenant_id: str, nombre: str = None) -> list:
-        """Obtiene los recursos visuales del tenant (imágenes, PDFs)"""
+    def get_recursos_visuales(self, tenant_id: str) -> list:
+        """Obtiene todos los recursos visuales del tenant"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
-                    if nombre:
-                        cur.execute(f"""
-                            SELECT id, nombre, descripcion, tipo, archivos, url, orden, activo, created_at
-                            FROM "{schema_name}".recursos_visuales
-                            WHERE nombre = %s AND activo = true
-                            ORDER BY orden
-                        """, (nombre,))
-                    else:
-                        cur.execute(f"""
-                            SELECT id, nombre, descripcion, tipo, archivos, url, orden, activo, created_at
-                            FROM "{schema_name}".recursos_visuales
-                            WHERE activo = true
-                            ORDER BY orden
-                        """)
+                    cur.execute(f"""
+                        SELECT id, nombre, descripcion, tipo, url, archivos, orden, activo, created_at
+                        FROM "{schema_name}".recursos_visuales
+                        WHERE activo = true
+                        ORDER BY orden, nombre
+                    """)
                     rows = cur.fetchall()
-                    return [{
-                        'id': row[0],
-                        'nombre': row[1],
-                        'descripcion': row[2] or '',
-                        'tipo': row[3],
-                        'archivos': row[4] if row[4] else [],
-                        'url': row[5],
-                        'orden': row[6],
-                        'activo': row[7],
-                        'created_at': row[8]
-                    } for row in rows]
+                    recursos = []
+                    for row in rows:
+                        archivos = row[5]
+                        if isinstance(archivos, str):
+                            try:
+                                archivos = json.loads(archivos)
+                            except:
+                                archivos = []
+                        
+                        recursos.append({
+                            'id': row[0],
+                            'nombre': row[1],
+                            'descripcion': row[2],
+                            'tipo': row[3],
+                            'url': row[4],
+                            'archivos': archivos,
+                            'orden': row[6],
+                            'activo': row[7],
+                            'created_at': row[8]
+                        })
+                    return recursos
         except Exception as e:
             logger.error(f'Error obteniendo recursos visuales: {e}')
             return []

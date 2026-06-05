@@ -221,35 +221,72 @@ class MessageHandler:
         return True
     
     def _enviar_imagen(self, tenant: dict, numero: str, url_imagen: str, caption: str = None):
+        """Envía una imagen por WhatsApp"""
         try:
-            base_url = os.environ.get('BASE_URL', 'https://whatsapp-mvp-docker.onrender.com')
-            url_completa = url_imagen if url_imagen.startswith('http') else f"{base_url}{url_imagen}"
+            # Si la URL es relativa, construir URL completa
+            if not url_imagen.startswith('http'):
+                base_url = os.environ.get('BASE_URL', 'https://whatsapp-mvp-docker.onrender.com')
+                url_completa = f"{base_url}{url_imagen}"
+            else:
+                url_completa = url_imagen
+            
+            logger.info(f"Enviando imagen a {numero}: {url_completa}")
             return whatsapp_client.send_image(tenant, numero, url_completa, caption)
         except Exception as e:
-            logger.error(f'Error enviando imagen: {e}')
+            logger.error(f'Error en _enviar_imagen: {e}')
             return False
-
+    
     def _enviar_recurso_visual(self, tenant: dict, numero: str, recurso_nombre: str) -> str:
         """Envía un recurso visual (genérico) basado en el nombre"""
         try:
-            recursos = schema_manager.get_recursos_visuales(tenant['id'], recurso_nombre)
+            # Obtener todos los recursos del tenant
+            recursos = schema_manager.get_recursos_visuales(tenant['id'])
+            
             if not recursos:
-                return None  # La IA debe manejar la respuesta
+                logger.warning(f"No hay recursos visuales para tenant {tenant['id']}")
+                return None
             
-            recurso = recursos[0]
+            # Buscar el recurso por nombre (coincidencia parcial o exacta)
+            recurso_encontrado = None
+            recurso_nombre_lower = recurso_nombre.lower()
             
-            if recurso['tipo'] == 'multiple' and recurso.get('archivos'):
-                for archivo in recurso['archivos']:
-                    self._enviar_imagen(tenant, numero, archivo, recurso.get('descripcion'))
-                return "✅ Recurso enviado"
-            elif recurso['tipo'] == 'imagen' and recurso.get('url'):
-                self._enviar_imagen(tenant, numero, recurso['url'], recurso.get('descripcion'))
-                return "✅ Recurso enviado"
-            return None
+            for r in recursos:
+                nombre_recurso = r.get('nombre', '').lower()
+                # Buscar coincidencia exacta o que el nombre esté contenido
+                if (recurso_nombre_lower == nombre_recurso or 
+                    recurso_nombre_lower in nombre_recurso or 
+                    nombre_recurso in recurso_nombre_lower):
+                    recurso_encontrado = r
+                    break
+            
+            if not recurso_encontrado:
+                logger.warning(f"Recurso no encontrado: {recurso_nombre}")
+                return None
+            
+            logger.info(f"Enviando recurso: {recurso_encontrado['nombre']} (tipo: {recurso_encontrado.get('tipo')})")
+            
+            # Enviar según el tipo
+            if recurso_encontrado.get('tipo') == 'imagen' and recurso_encontrado.get('url'):
+                caption = f"📷 *{recurso_encontrado['nombre']}*"
+                if recurso_encontrado.get('descripcion'):
+                    caption += f"\n\n{recurso_encontrado['descripcion']}"
+                
+                self._enviar_imagen(tenant, numero, recurso_encontrado['url'], caption)
+                return f"✅ Te envié {recurso_encontrado['nombre']}"
+            
+            elif recurso_encontrado.get('tipo') == 'multiple' and recurso_encontrado.get('archivos'):
+                for archivo in recurso_encontrado['archivos']:
+                    self._enviar_imagen(tenant, numero, archivo, recurso_encontrado.get('descripcion'))
+                return f"✅ Te envié {recurso_encontrado['nombre']}"
+            
+            else:
+                logger.warning(f"Tipo de recurso no soportado: {recurso_encontrado.get('tipo')}")
+                return None
+                
         except Exception as e:
-            logger.error(f'Error enviando recurso: {e}')
+            logger.error(f'Error enviando recurso visual: {e}')
             return None
-    
+            
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
     def _procesar_con_ia(self, tenant: dict, menu: list, numero: str, texto: str, contexto: dict) -> str:

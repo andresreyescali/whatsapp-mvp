@@ -1959,7 +1959,7 @@ def relacionar_adicional(tenant_id):
 @login_required
 @tenant_owner_required
 def get_contexto_tenant(tenant_id):
-    """Obtiene el contexto actual del tenant"""
+    """Obtiene el contexto actual del tenant incluyendo recursos visuales"""
     try:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
@@ -1971,6 +1971,27 @@ def get_contexto_tenant(tenant_id):
                 ''', (tenant_id,))
                 row = cur.fetchone()
                 
+                # Obtener recursos visuales
+                recursos = schema_manager.get_recursos_visuales(tenant_id)
+                
+                # Separar recursos por tipo
+                imagenes = [r for r in recursos if r['tipo'] == 'imagen']
+                otros_recursos = [r for r in recursos if r['tipo'] != 'imagen']
+                
+                # Formatear recursos para el prompt
+                recursos_texto = ""
+                if imagenes:
+                    recursos_texto += "\n\n📷 *IMÁGENES DISPONIBLES PARA COMPARTIR:*\n"
+                    for img in imagenes:
+                        recursos_texto += f"- {img['nombre']}: {img['url']}\n"
+                        if img.get('descripcion'):
+                            recursos_texto += f"  Descripción: {img['descripcion']}\n"
+                
+                if otros_recursos:
+                    recursos_texto += "\n\n📎 *OTROS RECURSOS:*\n"
+                    for r in otros_recursos:
+                        recursos_texto += f"- {r['nombre']} ({r['tipo']}): {r['url']}\n"
+                
                 if row:
                     menu = row[5] if row[5] else []
                     if isinstance(menu, str):
@@ -1980,29 +2001,32 @@ def get_contexto_tenant(tenant_id):
                             menu = []
                     
                     return jsonify({
-                        'instrucciones': row[0] or '',
+                        'instrucciones': (row[0] or '') + recursos_texto,
                         'horario': row[1] or '',
                         'ubicacion': row[2] or '',
                         'politicas': row[3] or '',
                         'prompt_personalizado': row[4] or '',
                         'productos': menu[:50] if menu else [],
                         'total_productos': len(menu) if menu else 0,
+                        'recursos': recursos,
+                        'imagenes': imagenes,
                         'updated_at': row[6] if row[6] else None
                     })
                 else:
                     return jsonify({
-                        'instrucciones': '',
+                        'instrucciones': recursos_texto,
                         'horario': '',
                         'ubicacion': '',
                         'politicas': '',
                         'prompt_personalizado': '',
                         'productos': [],
-                        'total_productos': 0
+                        'total_productos': 0,
+                        'recursos': recursos,
+                        'imagenes': imagenes
                     })
     except Exception as e:
         logger.error(f'Error obteniendo contexto: {e}')
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/api/tenant/<tenant_id>/contexto', methods=['PUT'])
 @login_required
