@@ -525,6 +525,13 @@ MENÚ DE PRODUCTOS:
 
 {historial_texto}
 
+INFORMACIÓN SOBRE IMÁGENES DEL CLIENTE:
+- Los clientes pueden enviarte imágenes de referencia (diseños de tortas, colores, decoraciones)
+- Cuando un cliente envíe una imagen, ya se habrá guardado y analizado
+- Si el cliente envió una imagen, el sistema ya la analizó y te dará una descripción en la conversación
+- Usa esa información para hacer recomendaciones de sabores, tamaños y precios
+- Responde de manera entusiasta y profesional sobre el diseño que el cliente quiere
+
 REGLAS IMPORTANTES:
 1. Para agregar productos al carrito, usa 'agregar_producto_carrito' o 'agregar_producto_personalizado'
 2. Para enviar recursos visuales (imágenes, PDFs, videos), usa 'enviar_recurso_visual' con el NOMBRE EXACTO del recurso de la lista

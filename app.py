@@ -2383,6 +2383,35 @@ def formatear_mensaje_recurso(recurso):
     
     return mensaje
 
+# ======= PERMITE VER IMAGENES RECIBIDAS EN PANEL =========
+    
+    @app.route('/api/tenant/<tenant_id>/imagenes-cliente/<cliente_numero>', methods=['GET'])
+    @login_required
+    @tenant_owner_required
+    def get_imagenes_cliente(tenant_id, cliente_numero):
+        """Obtiene las imágenes que un cliente ha enviado"""
+        try:
+            upload_dir = f"uploads/tenants/{tenant_id}/{cliente_numero}"
+            
+            if not os.path.exists(upload_dir):
+                return jsonify([])
+            
+            imagenes = []
+            for filename in os.listdir(upload_dir):
+                if filename.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                    filepath = os.path.join(upload_dir, filename)
+                    stat = os.stat(filepath)
+                    imagenes.append({
+                        'filename': filename,
+                        'url': f"/uploads/tenants/{tenant_id}/{cliente_numero}/{filename}",
+                        'size': stat.st_size,
+                        'created_at': datetime.fromtimestamp(stat.st_ctime).isoformat()
+                    })
+            
+            return jsonify(imagenes)
+        except Exception as e:
+            return jsonify([])
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
