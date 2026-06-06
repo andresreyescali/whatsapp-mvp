@@ -2606,6 +2606,49 @@ def serve_customer_image(tenant_id, cliente_numero, filename):
     directory = f"uploads/tenants/{tenant_id}/{cliente_numero}"
     return send_from_directory(directory, filename)
 
+# ==================== CLIENTES ====================
+
+@app.route('/api/tenant/<tenant_id>/clientes', methods=['GET'])
+@login_required
+@tenant_owner_required
+def api_get_clientes(tenant_id):
+    """Obtiene todos los clientes del tenant"""
+    try:
+        clientes = tenant_repo.get_todos_clientes(tenant_id)
+        return jsonify(clientes)
+    except Exception as e:
+        logger.error(f'Error obteniendo clientes: {e}')
+        return jsonify([])
+
+@app.route('/api/tenant/<tenant_id>/clientes/<telefono>', methods=['GET'])
+@login_required
+@tenant_owner_required
+def api_get_cliente(tenant_id, telefono):
+    """Obtiene un cliente específico"""
+    try:
+        cliente = tenant_repo.get_cliente_by_telefono(tenant_id, telefono)
+        return jsonify(cliente or {})
+    except Exception as e:
+        logger.error(f'Error obteniendo cliente: {e}')
+        return jsonify({})
+
+@app.route('/api/tenant/<tenant_id>/clientes', methods=['PUT'])
+@login_required
+@tenant_owner_required
+def api_update_cliente(tenant_id):
+    """Actualiza los datos de un cliente"""
+    try:
+        data = request.json
+        telefono = data.get('telefono')
+        if not telefono:
+            return jsonify({'error': 'Teléfono requerido'}), 400
+        
+        cliente = tenant_repo.create_or_update_cliente(tenant_id, telefono, data)
+        return jsonify({'success': True, 'cliente': cliente})
+    except Exception as e:
+        logger.error(f'Error actualizando cliente: {e}')
+        return jsonify({'error': str(e)}), 500
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])

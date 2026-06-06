@@ -177,6 +177,168 @@ class MessageHandler:
     def _limpiar_carrito(self, tenant_id: str, cliente_numero: str):
         self._guardar_carrito(tenant_id, cliente_numero, [], 0)
     
+    # ==================== NUEVOS MÉTODOS PARA GESTIÓN DE CLIENTES ====================
+    
+    def _extraer_datos_cliente(self, mensaje: str) -> dict:
+        """
+        Extrae datos del cliente del mensaje usando expresiones regulares
+        Detecta: nombre, dirección, email, cédula
+        """
+        datos = {}
+        mensaje_lower = mensaje.lower()
+        
+        # Detectar nombre (patrón: "me llamo X", "mi nombre es X", "soy X")
+        patrones_nombre = [
+            r'me llamo\s+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)',
+            r'mi nombre es\s+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)',
+            r'soy\s+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)',
+            r'nombre[:\s]+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)'
+        ]
+        
+        for patron in patrones_nombre:
+            match = re.search(patron, mensaje_lower, re.IGNORECASE)
+            if match:
+                nombre = match.group(1).strip().title()
+                if len(nombre) > 2 and not any(p in nombre.lower() for p in ['quiero', 'necesito', 'quisiera', 'me gustaría']):
+                    datos['nombre'] = nombre
+                    break
+        
+        # Detectar email
+        patron_email = r'[\w\.-]+@[\w\.-]+\.\w+'
+        match = re.search(patron_email, mensaje)
+        if match:
+            datos['email'] = match.group(0)
+        
+        # Detectar dirección (patrón: "vivo en", "dirección", "mi dirección es")
+        patrones_direccion = [
+            r'vivo en\s+([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\#,\.\-]+)',
+            r'dirección[:\s]+([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\#,\.\-]+)',
+            r'mi dirección es\s+([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\#,\.\-]+)'
+        ]
+        
+        for patron in patrones_direccion:
+            match = re.search(patron, mensaje_lower, re.IGNORECASE)
+            if match:
+                direccion = match.group(1).strip()
+                if len(direccion) > 5:
+                    datos['direccion'] = direccion
+                    break
+        
+        # Detectar cédula (8-10 dígitos)
+        patron_cc = r'\b(\d{8,10})\b'
+        match = re.search(patron_cc, mensaje)
+        if match:
+            cc = match.group(1)
+            if len(cc) >= 8:
+                datos['cc'] = cc
+        
+        return datos
+    
+    def _cargar_cliente(self, tenant_id: str, telefono: str) -> dict:
+        """Carga los datos del cliente desde la base de datos"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT id, numero_telefono, nombre, cc, email, direccion, 
+                               direccion_despacho, created_at, updated_at, ultimo_pedido
+                        FROM "{schema_name}".clientes
+                        WHERE numero_telefono = %s
+                    """, (telefono,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            'id': str(row[0]),
+                            'telefono': row[1],
+                            'nombre': row[2],
+                            'cc': row[3],
+                            'email': row[4],
+                            'direccion': row[5],
+                            'direccion_despacho': row[6],
+                            'created_at': row[7],
+                            'updated_at': row[8],
+                            'ultimo_pedido': row[9]
+                        }
+                    return {}
+        except Exception as e:
+            logger.error(f'Error cargando cliente: {e}')
+            return {}
+    
+    def _guardar_datos_cliente(self, tenant_id: str, telefono: str, mensaje: str):
+        """Extrae y guarda los datos del cliente si los encuentra"""
+        datos = self._extraer_datos_cliente(mensaje)
+        
+        if datos:
+            logger.info(f"📝 Datos detectados para {telefono}: {datos}")
+            
+            try:
+                schema_name = self._get_schema_name(tenant_id)
+                with db_manager.get_connection(tenant_id) as conn:
+                    with conn.cursor() as cur:
+                        # Verificar si existe
+                        cur.execute(f"""
+                            SELECT id FROM "{schema_name}".clientes 
+                            WHERE numero_telefono = %s
+                        """, (telefono,))
+                        existing = cur.fetchone()
+                        
+                        if existing:
+                            # Actualizar
+                            updates = []
+                            params = []
+                            for campo, valor in datos.items():
+                                if valor:
+                                    updates.append(f"{campo} = %s")
+                                    params.append(valor)
+                            if updates:
+                                updates.append("updated_at = NOW()")
+                                params.append(telefono)
+                                cur.execute(f"""
+                                    UPDATE "{schema_name}".clientes
+                                    SET {', '.join(updates)}
+                                    WHERE numero_telefono = %s
+                                """, params)
+                                logger.info(f"✅ Cliente actualizado: {telefono}")
+                        else:
+                            # Crear nuevo
+                            cur.execute(f"""
+                                INSERT INTO "{schema_name}".clientes 
+                                (numero_telefono, nombre, cc, email, direccion, created_at, updated_at)
+                                VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                            """, (telefono, datos.get('nombre'), datos.get('cc'), datos.get('email'), datos.get('direccion')))
+                            logger.info(f"✅ Nuevo cliente creado: {telefono}")
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Error guardando cliente: {e}")
+            
+            return datos
+        
+        return None
+    
+    def _obtener_contexto_cliente(self, tenant_id: str, telefono: str) -> str:
+        """Obtiene un texto con los datos del cliente para incluir en el prompt de la IA"""
+        cliente = self._cargar_cliente(tenant_id, telefono)
+        
+        if not cliente or not any([cliente.get('nombre'), cliente.get('email'), cliente.get('direccion')]):
+            return ""
+        
+        contexto = "\n📋 *DATOS DEL CLIENTE (YA REGISTRADOS):*\n"
+        
+        if cliente.get('nombre'):
+            contexto += f"- Nombre: {cliente['nombre']}\n"
+        if cliente.get('email'):
+            contexto += f"- Email: {cliente['email']}\n"
+        if cliente.get('direccion'):
+            contexto += f"- Dirección: {cliente['direccion']}\n"
+        if cliente.get('cc'):
+            contexto += f"- Cédula: {cliente['cc']}\n"
+        
+        contexto += "\n⚠️ NO preguntes estos datos nuevamente ya que el cliente ya los proporcionó.\n"
+        contexto += "Si el cliente quiere actualizar algún dato, actualízalo y confirma el cambio.\n"
+        
+        return contexto
+    
     # ==================== FUNCIONES QUE LA IA LLAMA ====================
     
     def _agregar_producto_al_carrito(self, tenant_id: str, cliente_numero: str, nombre: str, precio: int, cantidad: int = 1):
@@ -387,6 +549,12 @@ class MessageHandler:
         if not ai_client.client:
             return self._respuesta_fallback(tenant, menu)
         
+        # ========== NUEVO: Guardar datos del cliente si los detecta ==========
+        self._guardar_datos_cliente(tenant['id'], numero, texto)
+        
+        # ========== NUEVO: Obtener contexto del cliente ==========
+        contexto_cliente = self._obtener_contexto_cliente(tenant['id'], numero)
+        
         # Verificar confirmación
         if self._es_confirmacion(texto):
             carrito = self._cargar_carrito(tenant['id'], numero)
@@ -508,6 +676,8 @@ class MessageHandler:
         
         system_prompt = f"""
 Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}.
+
+{contexto_cliente}
 
 INFORMACIÓN DEL NEGOCIO:
 - Horario: {contexto.get('horario', 'No especificado')}

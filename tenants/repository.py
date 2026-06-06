@@ -534,7 +534,146 @@ class TenantRepository:
         config = self.get_configuracion(tenant_id)
         return config.get('personalizacion', {}).get('habilitada', True)
 
+# ==================== MÉTODOS PARA GESTIÓN DE CLIENTES ====================
 
+    def get_cliente_by_telefono(self, tenant_id: str, telefono: str) -> dict:
+        """Obtiene un cliente por su número de teléfono"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT id, numero_telefono, nombre, cc, email, direccion, 
+                            direccion_despacho, created_at, updated_at, ultimo_pedido
+                        FROM "{schema_name}".clientes
+                        WHERE numero_telefono = %s
+                    """, (telefono,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            'id': str(row[0]),
+                            'telefono': row[1],
+                            'nombre': row[2],
+                            'cc': row[3],
+                            'email': row[4],
+                            'direccion': row[5],
+                            'direccion_despacho': row[6],
+                            'created_at': row[7],
+                            'updated_at': row[8],
+                            'ultimo_pedido': row[9]
+                        }
+                    return None
+        except Exception as e:
+            logger.error(f"Error obteniendo cliente por teléfono: {e}")
+            return None
+
+    def create_or_update_cliente(self, tenant_id: str, telefono: str, datos: dict) -> dict:
+        """
+        Crea o actualiza un cliente
+        datos puede contener: nombre, cc, email, direccion, direccion_despacho
+        """
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            
+            # Verificar si el cliente ya existe
+            existing = self.get_cliente_by_telefono(tenant_id, telefono)
+            
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    if existing:
+                        # Actualizar cliente existente (solo campos no vacíos)
+                        updates = []
+                        params = []
+                        
+                        for campo in ['nombre', 'cc', 'email', 'direccion', 'direccion_despacho']:
+                            valor = datos.get(campo)
+                            if valor and valor.strip():
+                                updates.append(f"{campo} = %s")
+                                params.append(valor.strip())
+                        
+                        if updates:
+                            updates.append("updated_at = NOW()")
+                            params.append(existing['id'])
+                            cur.execute(f"""
+                                UPDATE "{schema_name}".clientes
+                                SET {', '.join(updates)}
+                                WHERE id = %s
+                            """, params)
+                            logger.info(f"Cliente actualizado: {telefono}")
+                    else:
+                        # Crear nuevo cliente
+                        cur.execute(f"""
+                            INSERT INTO "{schema_name}".clientes 
+                            (numero_telefono, nombre, cc, email, direccion, direccion_despacho, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                            RETURNING id
+                        """, (
+                            telefono,
+                            datos.get('nombre'),
+                            datos.get('cc'),
+                            datos.get('email'),
+                            datos.get('direccion'),
+                            datos.get('direccion_despacho')
+                        ))
+                        logger.info(f"Nuevo cliente creado: {telefono}")
+                
+                conn.commit()
+            
+            # Retornar el cliente actualizado
+            return self.get_cliente_by_telefono(tenant_id, telefono)
+            
+        except Exception as e:
+            logger.error(f"Error creando/actualizando cliente: {e}")
+            return None
+
+    def actualizar_ultimo_pedido(self, tenant_id: str, telefono: str):
+        """Actualiza la fecha del último pedido del cliente"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        UPDATE "{schema_name}".clientes
+                        SET ultimo_pedido = NOW(), updated_at = NOW()
+                        WHERE numero_telefono = %s
+                    """, (telefono,))
+                conn.commit()
+            logger.info(f"Último pedido actualizado para {telefono}")
+            return True
+        except Exception as e:
+            logger.error(f"Error actualizando último pedido: {e}")
+            return False
+
+    def get_todos_clientes(self, tenant_id: str, limit: int = 100) -> list:
+        """Obtiene todos los clientes del tenant"""
+        try:
+            schema_name = self._get_schema_name(tenant_id)
+            with db_manager.get_connection(tenant_id) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT id, numero_telefono, nombre, cc, email, direccion, 
+                            direccion_despacho, created_at, updated_at, ultimo_pedido
+                        FROM "{schema_name}".clientes
+                        ORDER BY ultimo_pedido DESC NULLS LAST, created_at DESC
+                        LIMIT %s
+                    """, (limit,))
+                    rows = cur.fetchall()
+                    return [{
+                        'id': str(row[0]),
+                        'telefono': row[1],
+                        'nombre': row[2],
+                        'cc': row[3],
+                        'email': row[4],
+                        'direccion': row[5],
+                        'direccion_despacho': row[6],
+                        'created_at': row[7],
+                        'updated_at': row[8],
+                        'ultimo_pedido': row[9]
+                    } for row in rows]
+        except Exception as e:
+            logger.error(f"Error obteniendo clientes: {e}")
+            return []
+    
 # ==================== INSTANCIA GLOBAL ====================
 
 tenant_repo = TenantRepository()
