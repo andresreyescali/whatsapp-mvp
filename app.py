@@ -2412,6 +2412,21 @@ def formatear_mensaje_recurso(recurso):
         except Exception as e:
             return jsonify([])
 
+# ========= PERMITE VER LAS IMAGENES EN EL PANEL ==========
+
+@app.route('/uploads/tenants/<tenant_id>/<cliente_numero>/<filename>')
+def serve_customer_image(tenant_id, cliente_numero, filename):
+    """Sirve las imágenes subidas por clientes"""
+    from flask import send_from_directory
+    import os
+    
+    # Verificar autenticación (opcional, para proteger las imágenes)
+    if 'usuario_id' not in session:
+        return "No autorizado", 403
+    
+    directory = f"uploads/tenants/{tenant_id}/{cliente_numero}"
+    return send_from_directory(directory, filename)
+
 # ==================== DEBUG ENDPOINTS ====================
 
 @app.route('/debug/test', methods=['GET'])
