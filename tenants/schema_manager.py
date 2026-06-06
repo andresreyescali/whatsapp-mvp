@@ -214,7 +214,28 @@ class SchemaManager:
                         updated_at TIMESTAMP DEFAULT NOW()
                     )
                     ''')
-                
+
+                 # Tabla de categorías personalizables
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS "{schema_name}".categorias (
+                        id SERIAL PRIMARY KEY,
+                        nombre VARCHAR(100) NOT NULL,
+                        descripcion TEXT,
+                        icono VARCHAR(10) DEFAULT '📦',
+                        orden INTEGER DEFAULT 0,
+                        activo BOOLEAN DEFAULT true,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+
+                 # Insertar categoría por defecto
+                cur.execute(f"""
+                    INSERT INTO "{schema_name}".categorias (nombre, icono, orden)
+                    SELECT 'General', '📦', 0
+                    WHERE NOT EXISTS (SELECT 1 FROM "{schema_name}".categorias)
+                """)
+                        
                 # Índices
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON "{schema_name}".pedidos(cliente_id)')
                 cur.execute(f'CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON "{schema_name}".pedidos(estado)')

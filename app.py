@@ -1795,7 +1795,169 @@ def desactivar_configuracion_personalizacion_tenant(tenant_id):
         logger.error(f'Error desactivando configuración: {e}')
         return jsonify({'error': str(e)}), 500
 
-# ======== Cambio SubProductos y personalizaciones ========
+# ======== Categorias de productos por tenant ========
+# ==================== CATEGORÍAS PERSONALIZABLES ====================
+
+@app.route('/api/tenant/<tenant_id>/categorias', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_categorias(tenant_id):
+    """Obtiene todas las categorías del tenant"""
+    try:
+        schema_name = _get_schema_name(tenant_id)
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT id, nombre, descripcion, icono, orden, activo
+                    FROM "{schema_name}".categorias
+                    ORDER BY orden, nombre
+                """)
+                rows = cur.fetchall()
+                categorias = [{
+                    'id': row[0],
+                    'nombre': row[1],
+                    'descripcion': row[2],
+                    'icono': row[3],
+                    'orden': row[4],
+                    'activo': row[5]
+                } for row in rows]
+                return jsonify(categorias)
+    except Exception as e:
+        logger.error(f'Error obteniendo categorías: {e}')
+        return jsonify([])
+
+
+@app.route('/api/tenant/<tenant_id>/categorias', methods=['POST'])
+@login_required
+@tenant_owner_required
+def create_categoria(tenant_id):
+    """Crea una nueva categoría"""
+    try:
+        data = request.json
+        nombre = data.get('nombre')
+        if not nombre:
+            return jsonify({'error': 'El nombre es requerido'}), 400
+        
+        schema_name = _get_schema_name(tenant_id)
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    INSERT INTO "{schema_name}".categorias (nombre, descripcion, icono, orden)
+                    VALUES (%s, %s, %s, COALESCE((SELECT MAX(orden) + 1 FROM "{schema_name}".categorias), 0))
+                    RETURNING id
+                """, (nombre, data.get('descripcion', ''), data.get('icono', '📦')))
+                new_id = cur.fetchone()[0]
+            conn.commit()
+        
+        return jsonify({'success': True, 'id': new_id, 'message': 'Categoría creada'})
+    except Exception as e:
+        logger.error(f'Error creando categoría: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/categorias/<int:categoria_id>', methods=['PUT'])
+@login_required
+@tenant_owner_required
+def update_categoria(tenant_id, categoria_id):
+    """Actualiza una categoría"""
+    try:
+        data = request.json
+        schema_name = _get_schema_name(tenant_id)
+        
+        updates = []
+        params = []
+        
+        if data.get('nombre'):
+            updates.append("nombre = %s")
+            params.append(data['nombre'])
+        if 'descripcion' in data:
+            updates.append("descripcion = %s")
+            params.append(data['descripcion'])
+        if data.get('icono'):
+            updates.append("icono = %s")
+            params.append(data['icono'])
+        if 'orden' in data:
+            updates.append("orden = %s")
+            params.append(data['orden'])
+        if 'activo' in data:
+            updates.append("activo = %s")
+            params.append(data['activo'])
+        
+        if not updates:
+            return jsonify({'error': 'No hay datos para actualizar'}), 400
+        
+        updates.append("updated_at = NOW()")
+        params.append(categoria_id)
+        
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    UPDATE "{schema_name}".categorias 
+                    SET {', '.join(updates)}
+                    WHERE id = %s
+                """, params)
+            conn.commit()
+        
+        return jsonify({'success': True, 'message': 'Categoría actualizada'})
+    except Exception as e:
+        logger.error(f'Error actualizando categoría: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/categorias/<int:categoria_id>', methods=['DELETE'])
+@login_required
+@tenant_owner_required
+def delete_categoria(tenant_id, categoria_id):
+    """Elimina una categoría (solo si no tiene productos asociados)"""
+    try:
+        schema_name = _get_schema_name(tenant_id)
+        
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                # Verificar si hay productos con esta categoría
+                cur.execute(f"""
+                    SELECT COUNT(*) FROM "{schema_name}".productos 
+                    WHERE categoria = (SELECT nombre FROM "{schema_name}".categorias WHERE id = %s)
+                """, (categoria_id,))
+                count = cur.fetchone()[0]
+                
+                if count > 0:
+                    return jsonify({'error': f'No se puede eliminar la categoría porque tiene {count} productos asociados'}), 400
+                
+                cur.execute(f'DELETE FROM "{schema_name}".categorias WHERE id = %s', (categoria_id,))
+            conn.commit()
+        
+        return jsonify({'success': True, 'message': 'Categoría eliminada'})
+    except Exception as e:
+        logger.error(f'Error eliminando categoría: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/categorias/reordenar', methods=['POST'])
+@login_required
+@tenant_owner_required
+def reordenar_categorias(tenant_id):
+    """Reordena las categorías"""
+    try:
+        data = request.json
+        ordenes = data.get('ordenes', [])  # Lista de {id: nuevo_orden}
+        
+        schema_name = _get_schema_name(tenant_id)
+        
+        with db_manager.get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                for item in ordenes:
+                    cur.execute(f"""
+                        UPDATE "{schema_name}".categorias 
+                        SET orden = %s, updated_at = NOW()
+                        WHERE id = %s
+                    """, (item['orden'], item['id']))
+            conn.commit()
+        
+        return jsonify({'success': True, 'message': 'Categorías reordenadas'})
+    except Exception as e:
+        logger.error(f'Error reordenando categorías: {e}')
+        return jsonify({'error': str(e)}), 500
 
 # ==================== PRODUCTOS CON ADICIONALES Y PERSONALIZACIONES ====================
 
