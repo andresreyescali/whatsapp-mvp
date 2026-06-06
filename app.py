@@ -9,6 +9,7 @@ from flask import Flask, jsonify, request, render_template, session, redirect
 from core.config import config
 from core.database import db_manager
 from core.logger import setup_logging, logger
+from datetime import datetime
 from whatsapp.webhook import register_webhook_routes
 from whatsapp.client import whatsapp_client
 from tenants.onboarding import register_new_tenant
@@ -1953,6 +1954,22 @@ def relacionar_adicional(tenant_id):
         logger.error(f'Error relacionando adicional: {e}')
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/personalizacion', methods=['GET'])
+@login_required
+@tenant_owner_required_from_args
+def admin_personalizacion():
+    """Página de administración de personalizaciones"""
+    tenant_id = request.args.get('tenant_id')
+    if not tenant_id:
+        return redirect('/dashboard')
+    
+    tenant = tenant_repo.find_by_id(tenant_id)
+    if not tenant:
+        return redirect('/dashboard')
+    
+    # Tu template está en web/templates/personalizacion.html
+    return render_template('personalizacion.html', tenant=tenant)
+
 # ==================== GESTIÓN DE CONTEXTO (ENTRENAMIENTO) ====================
 
 @app.route('/api/tenant/<tenant_id>/contexto', methods=['GET'])
@@ -2385,33 +2402,33 @@ def formatear_mensaje_recurso(recurso):
 
 # ======= PERMITE VER IMAGENES RECIBIDAS EN PANEL =========
     
-    @app.route('/api/tenant/<tenant_id>/imagenes-cliente/<cliente_numero>', methods=['GET'])
-    @login_required
-    @tenant_owner_required
-    def get_imagenes_cliente(tenant_id, cliente_numero):
-        """Obtiene las imágenes que un cliente ha enviado"""
-        try:
-            upload_dir = f"uploads/tenants/{tenant_id}/{cliente_numero}"
-            
-            if not os.path.exists(upload_dir):
-                return jsonify([])
-            
-            imagenes = []
-            for filename in os.listdir(upload_dir):
-                if filename.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
-                    filepath = os.path.join(upload_dir, filename)
-                    stat = os.stat(filepath)
-                    imagenes.append({
-                        'filename': filename,
-                        'url': f"/uploads/tenants/{tenant_id}/{cliente_numero}/{filename}",
-                        'size': stat.st_size,
-                        'created_at': datetime.fromtimestamp(stat.st_ctime).isoformat()
-                    })
-            
-            return jsonify(imagenes)
-        except Exception as e:
+@app.route('/api/tenant/<tenant_id>/imagenes-cliente/<cliente_numero>', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_imagenes_cliente(tenant_id, cliente_numero):
+    """Obtiene las imágenes que un cliente ha enviado"""
+    try:
+        upload_dir = f"uploads/tenants/{tenant_id}/{cliente_numero}"
+        
+        if not os.path.exists(upload_dir):
             return jsonify([])
-
+        
+        imagenes = []
+        for filename in os.listdir(upload_dir):
+            if filename.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                filepath = os.path.join(upload_dir, filename)
+                stat = os.stat(filepath)
+                imagenes.append({
+                    'filename': filename,
+                    'url': f"/uploads/tenants/{tenant_id}/{cliente_numero}/{filename}",
+                    'size': stat.st_size,
+                    'created_at': datetime.fromtimestamp(stat.st_ctime).isoformat()
+                })
+        
+        return jsonify(imagenes)
+    except Exception as e:
+        return jsonify([])
+    
 # ========= PERMITE VER LAS IMAGENES EN EL PANEL ==========
 
 @app.route('/uploads/tenants/<tenant_id>/<cliente_numero>/<filename>')
