@@ -51,8 +51,7 @@ class MessageHandler:
         
         schema_manager.ensure_schema(tenant['id'])
         
-        # ========== VERIFICAR Y RESETEAR PEDIDO EXPIRADO (OPCIONAL) ==========
-        # Si pasaron más de 30 minutos desde la confirmación, resetear automáticamente
+        # ========== VERIFICAR Y RESETEAR PEDIDO EXPIRADO ==========
         if self._pedido_confirmado.get(numero):
             tiempo_confirmado = self._pedido_confirmado_time.get(numero)
             if tiempo_confirmado:
@@ -65,14 +64,11 @@ class MessageHandler:
         contexto = self._obtener_contexto_tenant(tenant['id'])
         menu = self._obtener_menu(tenant['id'])
         
-        # ========== NUEVO: Siempre pasar por la IA, sin bloquear ==========
-        # El estado del pedido se pasa a la IA para que decida cómo responder
         conv_activa = self._conversacion_activa.get(numero)
         
         if conv_activa and conv_activa.get('estado') == 'confirmando_pedido':
             respuesta = self._procesar_confirmacion(texto, tenant, numero, conv_activa)
         else:
-            # Siempre llamar a la IA, incluso si hay pedido confirmado
             respuesta = self._procesar_con_ia(tenant, menu, numero, texto, contexto)
         
         if respuesta:
@@ -723,6 +719,14 @@ class MessageHandler:
                     "description": "Confirma el pedido o inicia un nuevo pedido si ya hay uno confirmado.",
                     "parameters": {"type": "object", "properties": {}, "required": []}
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "cancelar_pedido",
+                    "description": "Cancela el pedido actual y limpia completamente el carrito.",
+                    "parameters": {"type": "object", "properties": {}, "required": []}
+                }
             }
         ]
         
@@ -759,6 +763,10 @@ MENÚ DE PRODUCTOS:
 - Si el cliente quiere HACER UN NUEVO PEDIDO, usa la función 'confirmar_pedido' (esto iniciará un nuevo pedido)
 - NO asumas que quiere nuevo pedido solo porque pregunta cosas del menú
 
+**SI EL CLIENTE QUIERE CANCELAR EL PEDIDO:**
+- Usa la función 'cancelar_pedido'
+- Responde: "✅ Pedido cancelado. Tu carrito está vacío. ¿Quieres empezar un nuevo pedido?"
+
 **SI EL CLIENTE QUIERE UN NUEVO PEDIDO:**
 - Usa la función 'confirmar_pedido'
 - Responde: "¡Perfecto! Empecemos un nuevo pedido. ¿Qué te gustaría ordenar?"
@@ -780,8 +788,9 @@ REGLAS IMPORTANTES:
 1. Para agregar productos al carrito: 'agregar_producto_carrito' o 'agregar_producto_personalizado'
 2. Para enviar recursos visuales: 'enviar_recurso_visual'
 3. Para confirmar pedido o iniciar nuevo: 'confirmar_pedido'
-4. Para mostrar el carrito: 'ver_carrito'
-5. Responde SIEMPRE en español, de forma natural y amable
+4. Para cancelar pedido: 'cancelar_pedido'
+5. Para mostrar el carrito: 'ver_carrito'
+6. Responde SIEMPRE en español, de forma natural y amable
 
 RESPONDE en español.
 """
@@ -870,6 +879,13 @@ RESPONDE en español.
                             return self._mostrar_resumen_pedido(carrito_final['items'], carrito_final['total'])
                         else:
                             return "No hay productos en tu carrito para confirmar."
+                    
+                    elif function_name == "cancelar_pedido":
+                        self._limpiar_carrito(tenant['id'], numero)
+                        self._pedido_confirmado[numero] = False
+                        self._conversacion_activa.pop(numero, None)
+                        logger.info(f"🗑️ Pedido cancelado para {numero}")
+                        return "✅ Pedido cancelado. Tu carrito está vacío. ¿Quieres empezar un nuevo pedido?"
             
             return message.content or self._respuesta_fallback(tenant, menu)
             
