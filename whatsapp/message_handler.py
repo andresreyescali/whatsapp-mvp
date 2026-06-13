@@ -362,43 +362,75 @@ class MessageHandler:
     # ==================== FUNCIONES QUE LA IA LLAMA ====================
     
     def _agregar_producto_al_carrito(self, tenant_id: str, cliente_numero: str, nombre: str, precio: int, cantidad: int = 1):
+        """
+        Agrega un producto estándar al carrito.
+        SOLO incrementa cantidad si el nombre es EXACTAMENTE igual y NO es personalizado.
+        """
+        logger.info(f"🛒 Agregando producto estándar: {cantidad}x {nombre} (${precio})")
+        
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
+        
+        if not carrito:
+            carrito = {'items': [], 'total': 0}
         
         encontrado = False
         for item in carrito['items']:
-            if item.get('nombre') == nombre and not item.get('personalizado'):
+            # Comparación EXACTA del nombre y que NO sea personalizado
+            if item.get('nombre') == nombre and not item.get('personalizado', False):
                 item['cantidad'] += cantidad
                 carrito['total'] += precio * cantidad
                 encontrado = True
+                logger.info(f"✅ Producto existente actualizado: {nombre} ahora {item['cantidad']} unidades")
                 break
         
         if not encontrado:
+            # Agregar como nuevo item separado
             carrito['items'].append({
                 'nombre': nombre,
                 'precio': precio,
                 'cantidad': cantidad,
-                'personalizado': False
+                'personalizado': False,
+                'added_at': datetime.now().isoformat()
             })
             carrito['total'] += precio * cantidad
+            logger.info(f"✅ Nuevo producto agregado: {nombre}")
         
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
+        
+        logger.info(f"📦 Carrito ahora: {len(carrito['items'])} items, total: ${carrito['total']}")
         return True
-    
+
+
     def _agregar_producto_personalizado_al_carrito(self, tenant_id: str, cliente_numero: str, 
                                                     nombre: str, precio: int, 
                                                     detalles: dict = None, cantidad: int = 1):
+        """
+        Agrega un producto personalizado al carrito.
+        Los productos personalizados SIEMPRE se agregan como items separados.
+        """
+        logger.info(f"🛒 Agregando producto personalizado: {cantidad}x {nombre} (${precio})")
+        logger.info(f"📝 Detalles: {detalles}")
+        
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
         
+        if not carrito:
+            carrito = {'items': [], 'total': 0}
+        
+        # Los productos personalizados SIEMPRE se agregan como nuevos items
+        # No se combinan aunque tengan el mismo nombre
         carrito['items'].append({
             'nombre': nombre,
             'precio': precio,
             'cantidad': cantidad,
             'personalizado': True,
-            'detalles': detalles or {}
+            'detalles': detalles or {},
+            'added_at': datetime.now().isoformat()
         })
         carrito['total'] += precio * cantidad
         
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
+        
+        logger.info(f"✅ Producto personalizado agregado. Total items: {len(carrito['items'])}, total: ${carrito['total']}")
         return True
     
     # ==================== MÉTODOS PARA ENVIAR DIFERENTES TIPOS DE MEDIOS ====================
@@ -855,15 +887,28 @@ RESPONDE en español.
             return "No hay productos en tu pedido."
         
         items_texto = ""
-        for p in productos:
-            items_texto += f"• {p.get('cantidad', 1)}x {p.get('nombre')}: ${p.get('precio', 0) * p.get('cantidad', 1):,.0f}\n"
+        for i, p in enumerate(productos, 1):
+            nombre = p.get('nombre', 'Producto')
+            cantidad = p.get('cantidad', 1)
+            precio_unitario = p.get('precio', 0)
+            subtotal = precio_unitario * cantidad
+            
+            # Agregar emoji según el tipo de producto
+            emoji = "🎂" if "torta" in nombre.lower() else "🍪" if "galleta" in nombre.lower() else "📦"
+            
+            items_texto += f"{emoji} *{cantidad}x {nombre}*: ${subtotal:,.0f}\n"
+            
+            # Mostrar detalles si es un producto personalizado
+            if p.get('personalizado') and p.get('detalles'):
+                for key, value in p['detalles'].items():
+                    items_texto += f"   └─ {key}: {value}\n"
         
         return f"""📋 *Resumen de tu pedido:*
 
-{items_texto}
-💰 *Total:* ${total:,.0f}
+    {items_texto}
+    💰 *Total:* ${total:,.0f}
 
-¿Confirmas este pedido? (responde "sí" o "confirmo")"""
+    ¿Confirmas este pedido? (responde "sí" o "confirmo")"""
     
     def _procesar_confirmacion(self, texto: str, tenant: dict, numero: str, conv: dict) -> str:
         if self._es_confirmacion(texto):
