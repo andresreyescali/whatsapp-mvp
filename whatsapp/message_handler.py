@@ -731,7 +731,7 @@ class MessageHandler:
         ]
         
         system_prompt = f"""
-Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}.
+Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}. Tu ÚNICA forma de agregar productos al carrito es usando las funciones que se te proporcionan.
 
 {contexto_cliente}
 
@@ -742,57 +742,41 @@ INFORMACIÓN DEL NEGOCIO:
 
 {contexto.get('instrucciones', '')}
 
-MENÚ DE PRODUCTOS:
+MENÚ DE PRODUCTOS (precios exactos):
 {menu_texto}
 
-{recursos_texto}
+📌 **REGLAS OBLIGATORIAS - NO LAS INCUMPLAS:**
 
-{carrito_texto}
+1. **NUNCA inventes precios.** Usa EXACTAMENTE los precios del menú de arriba.
+2. **NUNCA hagas cálculos de totales en tu respuesta.** Deja que el sistema los calcule.
+3. **SIEMPRE usa las funciones** para agregar productos al carrito:
+   - Para productos simples: 'agregar_producto_carrito'
+   - Para productos con detalles (cubierta, letrero, decoraciones): 'agregar_producto_personalizado'
+4. **CADA producto o adicional debe ser un item separado** en el carrito.
+5. **NO confirmes un pedido** sin antes tener los productos en el carrito.
 
-{historial_texto}
+📌 **EJEMPLO CORRECTO cuando el cliente pide torta + cubierta + letrero:**
 
-📌 ESTADO ACTUAL DEL CLIENTE:
-- Pedido confirmado: {estado_pedido}{tiempo_confirmado}
+Cliente: "torta de amapola con cubierta de fondant y letrero"
 
-📌 INSTRUCCIONES IMPORTANTES:
+Debes hacer TRES llamadas a funciones:
+1. agregar_producto_personalizado(nombre_base="TORTA DE AMAPOLA (Media)", precio=68700, detalles={{}})
+2. agregar_producto_personalizado(nombre_base="Cubierta de Fondant (Media)", precio=18000, detalles={{}})
+3. agregar_producto_personalizado(nombre_base="Letrero (Media)", precio=8000, detalles={{}})
 
-**SI EL CLIENTE TIENE UN PEDIDO CONFIRMADO ({estado_pedido}):**
-- El cliente ya realizó un pedido que está en proceso
-- Si el cliente pregunta sobre su pedido, responde normalmente
-- Si el cliente pregunta por el MENÚ, PRODUCTOS, PRECIOS o PASABOCAS, responde normalmente y comparte la información
-- Si el cliente quiere HACER UN NUEVO PEDIDO, usa la función 'confirmar_pedido' (esto iniciará un nuevo pedido)
-- NO asumas que quiere nuevo pedido solo porque pregunta cosas del menú
+DESPUÉS de agregar los productos, responde: "✅ He agregado todos los productos a tu carrito. ¿Algo más?"
 
-**SI EL CLIENTE QUIERE CANCELAR EL PEDIDO:**
-- Usa la función 'cancelar_pedido'
-- Responde: "✅ Pedido cancelado. Tu carrito está vacío. ¿Quieres empezar un nuevo pedido?"
+📌 **EJEMPLO INCORRECTO (LO QUE NO DEBES HACER):**
+- ❌ Describir los precios en texto sin usar las funciones
+- ❌ Hacer cálculos manuales del total
+- ❌ Agregar solo un producto cuando el cliente pidió varios
 
-**SI EL CLIENTE QUIERE UN NUEVO PEDIDO:**
-- Usa la función 'confirmar_pedido'
-- Responde: "¡Perfecto! Empecemos un nuevo pedido. ¿Qué te gustaría ordenar?"
+📌 **INSTRUCCIONES PARA CADA FUNCIÓN:**
 
-⚠️ *INSTRUCCIÓN IMPORTANTE SOBRE PRECIOS:*
-- Los precios de los productos son los que aparecen en el menú de arriba
-- NO inventes precios ni uses información de otras fuentes
-- Si un producto no está en la lista, indica que no lo tienes disponible
-- NO uses precios de conversaciones anteriores si no están en el menú actual
+- 'agregar_producto_carrito': Úsala para productos simples (nombre_producto, precio, cantidad)
+- 'agregar_producto_personalizado': Úsala para cualquier producto con detalles o adicionales (nombre_base, precio, detalles, cantidad)
 
-📸 INSTRUCCIONES PARA IMÁGENES DEL CLIENTE:
-Cuando recibas una imagen, usa la descripción del sistema para:
-1. Interpretar lo que el cliente quiere
-2. Relacionarlo con productos del catálogo
-3. Hacer preguntas específicas (sabor, tamaño, ocasión)
-4. Ofrecer alternativas si no tenemos exactamente igual
-
-REGLAS IMPORTANTES:
-1. Para agregar productos al carrito: 'agregar_producto_carrito' o 'agregar_producto_personalizado'
-2. Para enviar recursos visuales: 'enviar_recurso_visual'
-3. Para confirmar pedido o iniciar nuevo: 'confirmar_pedido'
-4. Para cancelar pedido: 'cancelar_pedido'
-5. Para mostrar el carrito: 'ver_carrito'
-6. Responde SIEMPRE en español, de forma natural y amable
-
-RESPONDE en español.
+RESPONDE en español. SIEMPRE usa las funciones antes de responder.
 """
         
         try:
@@ -870,6 +854,8 @@ RESPONDE en español.
                             return "✅ Perfecto, empecemos un nuevo pedido. ¿Qué te gustaría ordenar?"
                         
                         carrito_final = self._cargar_carrito(tenant['id'], numero)
+                        logger.info(f"📦 Confirmando pedido - Carrito tiene {len(carrito_final.get('items', []))} items, total: ${carrito_final.get('total', 0)}")
+                        
                         if carrito_final and carrito_final.get('items'):
                             self._conversacion_activa[numero] = {
                                 'estado': 'confirmando_pedido',
@@ -878,8 +864,8 @@ RESPONDE en español.
                             }
                             return self._mostrar_resumen_pedido(carrito_final['items'], carrito_final['total'])
                         else:
-                            return "No hay productos en tu carrito para confirmar."
-                    
+                            return "No hay productos en tu carrito para confirmar. Agrega algunos productos primero."
+                                            
                     elif function_name == "cancelar_pedido":
                         self._limpiar_carrito(tenant['id'], numero)
                         self._pedido_confirmado[numero] = False
