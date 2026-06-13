@@ -19,7 +19,8 @@ class MessageHandler:
         """Inicializa el manejador de mensajes"""
         self._datos_cliente = {}
         self._conversacion_activa = {}
-        self._pedido_confirmado = {}
+        self._pedido_confirmado = {}  # {numero: True/False}
+        self._pedido_confirmado_time = {}  # {numero: timestamp}
     
     def _get_schema_name(self, tenant_id: str) -> str:
         tenant = tenant_repo.find_by_id(tenant_id)
@@ -37,19 +38,28 @@ class MessageHandler:
         
         schema_manager.ensure_schema(tenant['id'])
         
+        # ========== VERIFICAR Y RESETEAR PEDIDO EXPIRADO (OPCIONAL) ==========
+        # Si pasaron más de 30 minutos desde la confirmación, resetear automáticamente
+        if self._pedido_confirmado.get(numero):
+            tiempo_confirmado = self._pedido_confirmado_time.get(numero)
+            if tiempo_confirmado:
+                minutos_pasados = (datetime.now() - tiempo_confirmado).total_seconds() / 60
+                if minutos_pasados > 30:  # Resetear después de 30 minutos
+                    self._pedido_confirmado[numero] = False
+                    self._pedido_confirmado_time[numero] = None
+                    logger.info(f"🔄 Pedido confirmado expirado para {numero} después de {minutos_pasados:.1f} minutos")
+        
         contexto = self._obtener_contexto_tenant(tenant['id'])
         menu = self._obtener_menu(tenant['id'])
         
-        if self._pedido_confirmado.get(numero):
-            respuesta = "Tu pedido ya está confirmado y en proceso. ¿Necesitas ayuda con algo más?"
-            whatsapp_client.send_message(tenant, numero, respuesta)
-            return
-        
+        # ========== NUEVO: Siempre pasar por la IA, sin bloquear ==========
+        # El estado del pedido se pasa a la IA para que decida cómo responder
         conv_activa = self._conversacion_activa.get(numero)
         
         if conv_activa and conv_activa.get('estado') == 'confirmando_pedido':
             respuesta = self._procesar_confirmacion(texto, tenant, numero, conv_activa)
         else:
+            # Siempre llamar a la IA, incluso si hay pedido confirmado
             respuesta = self._procesar_con_ia(tenant, menu, numero, texto, contexto)
         
         if respuesta:
@@ -187,7 +197,7 @@ class MessageHandler:
         datos = {}
         mensaje_lower = mensaje.lower()
         
-        # Detectar nombre (patrón: "me llamo X", "mi nombre es X", "soy X")
+        # Detectar nombre
         patrones_nombre = [
             r'me llamo\s+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)',
             r'mi nombre es\s+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)',
@@ -209,7 +219,7 @@ class MessageHandler:
         if match:
             datos['email'] = match.group(0)
         
-        # Detectar dirección (patrón: "vivo en", "dirección", "mi dirección es")
+        # Detectar dirección
         patrones_direccion = [
             r'vivo en\s+([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\#,\.\-]+)',
             r'dirección[:\s]+([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\#,\.\-]+)',
@@ -276,7 +286,6 @@ class MessageHandler:
                 schema_name = self._get_schema_name(tenant_id)
                 with db_manager.get_connection(tenant_id) as conn:
                     with conn.cursor() as cur:
-                        # Verificar si existe
                         cur.execute(f"""
                             SELECT id FROM "{schema_name}".clientes 
                             WHERE numero_telefono = %s
@@ -284,7 +293,6 @@ class MessageHandler:
                         existing = cur.fetchone()
                         
                         if existing:
-                            # Actualizar
                             updates = []
                             params = []
                             for campo, valor in datos.items():
@@ -301,7 +309,6 @@ class MessageHandler:
                                 """, params)
                                 logger.info(f"✅ Cliente actualizado: {telefono}")
                         else:
-                            # Crear nuevo
                             cur.execute(f"""
                                 INSERT INTO "{schema_name}".clientes 
                                 (numero_telefono, nombre, cc, email, direccion, created_at, updated_at)
@@ -446,35 +453,30 @@ class MessageHandler:
         try:
             logger.info(f"🔍 Buscando recurso: '{recurso_nombre}' para tenant {tenant['id']}")
             
-            # Obtener todos los recursos del tenant
             recursos = schema_manager.get_recursos_visuales(tenant['id'])
             
             if not recursos:
                 logger.warning(f"No hay recursos visuales para tenant {tenant['id']}")
                 return None
             
-            # Log para depuración
             logger.info(f"📁 Recursos disponibles: {[r.get('nombre') for r in recursos]}")
             
-            # Buscar el recurso por nombre (coincidencia exacta o parcial)
             recurso_encontrado = None
             recurso_buscar = recurso_nombre.lower()
             
             for r in recursos:
                 nombre_recurso = r.get('nombre', '').lower()
-                # Coincidencia exacta
                 if recurso_buscar == nombre_recurso:
                     recurso_encontrado = r
                     logger.info(f"✅ Recurso encontrado por coincidencia exacta: {r.get('nombre')}")
                     break
-                # Coincidencia parcial
                 elif recurso_buscar in nombre_recurso:
                     recurso_encontrado = r
-                    logger.info(f"✅ Recurso encontrado por coincidencia parcial: {r.get('nombre')} (buscado: {recurso_buscar})")
+                    logger.info(f"✅ Recurso encontrado por coincidencia parcial: {r.get('nombre')}")
                     break
                 elif nombre_recurso in recurso_buscar:
                     recurso_encontrado = r
-                    logger.info(f"✅ Recurso encontrado por coincidencia inversa: {r.get('nombre')} (buscado: {recurso_buscar})")
+                    logger.info(f"✅ Recurso encontrado por coincidencia inversa: {r.get('nombre')}")
                     break
             
             if not recurso_encontrado:
@@ -492,14 +494,12 @@ class MessageHandler:
             
             logger.info(f"📤 Enviando recurso: {nombre} (tipo: {tipo}, url: {url[:100]}...)")
             
-            # Construir caption
             emojis = {'imagen': '📷', 'image': '📷', 'pdf': '📄', 'documento': '📄', 'video': '🎥'}
             emoji = emojis.get(tipo, '📎')
             caption = f"{emoji} *{nombre}*"
             if descripcion:
                 caption += f"\n\n{descripcion}"
             
-            # Enviar según el tipo
             if tipo in ['imagen', 'image'] and url:
                 logger.info(f"🖼️ Enviando imagen a {numero}")
                 resultado = self._enviar_imagen(tenant, numero, url, caption)
@@ -549,10 +549,10 @@ class MessageHandler:
         if not ai_client.client:
             return self._respuesta_fallback(tenant, menu)
         
-        # ========== NUEVO: Guardar datos del cliente si los detecta ==========
+        # Guardar datos del cliente si los detecta
         self._guardar_datos_cliente(tenant['id'], numero, texto)
         
-        # ========== NUEVO: Obtener contexto del cliente ==========
+        # Obtener contexto del cliente
         contexto_cliente = self._obtener_contexto_cliente(tenant['id'], numero)
         
         # Verificar confirmación
@@ -605,6 +605,13 @@ class MessageHandler:
                 carrito_texto += f"- {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
             carrito_texto += f"💰 Total: ${carrito.get('total', 0):,.0f}\n"
         
+        # Estado del pedido confirmado
+        estado_pedido = "SÍ" if self._pedido_confirmado.get(numero) else "NO"
+        tiempo_confirmado = ""
+        if self._pedido_confirmado.get(numero) and self._pedido_confirmado_time.get(numero):
+            minutos = (datetime.now() - self._pedido_confirmado_time[numero]).total_seconds() / 60
+            tiempo_confirmado = f" (confirmado hace {minutos:.0f} minutos)"
+        
         tools = [
             {
                 "type": "function",
@@ -643,13 +650,13 @@ class MessageHandler:
                 "type": "function",
                 "function": {
                     "name": "enviar_recurso_visual",
-                    "description": "Envía un recurso visual (imagen, PDF, video) al cliente. Debes usar el NOMBRE EXACTO del recurso que aparece en la lista de RECURSOS VISUALES DISPONIBLES.",
+                    "description": "Envía un recurso visual (imagen, PDF, video) al cliente. Debes usar el NOMBRE EXACTO del recurso.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "recurso_nombre": {
                                 "type": "string",
-                                "description": "El nombre exacto del recurso a enviar (ej: 'GlazeMenuImg', 'Menu_Glaze_2026')"
+                                "description": "El nombre exacto del recurso a enviar"
                             }
                         },
                         "required": ["recurso_nombre"]
@@ -668,7 +675,7 @@ class MessageHandler:
                 "type": "function",
                 "function": {
                     "name": "confirmar_pedido",
-                    "description": "Confirma el pedido.",
+                    "description": "Confirma el pedido o inicia un nuevo pedido si ya hay uno confirmado.",
                     "parameters": {"type": "object", "properties": {}, "required": []}
                 }
             }
@@ -695,36 +702,35 @@ MENÚ DE PRODUCTOS:
 
 {historial_texto}
 
-📸 INSTRUCCIONES PARA CUANDO EL CLIENTE ENVÍA UNA IMAGEN:
+📌 ESTADO ACTUAL DEL CLIENTE:
+- Pedido confirmado: {estado_pedido}{tiempo_confirmado}
 
-El cliente puede enviarte imágenes como referencia de lo que quiere.
+📌 INSTRUCCIONES IMPORTANTES:
 
-Cuando recibas una imagen (el sistema ya la analizó y te dará una descripción en la conversación), debes:
+**SI EL CLIENTE TIENE UN PEDIDO CONFIRMADO ({estado_pedido}):**
+- El cliente ya realizó un pedido que está en proceso
+- Si el cliente pregunta sobre su pedido, responde normalmente
+- Si el cliente pregunta por el MENÚ, PRODUCTOS, PRECIOS o PASABOCAS, responde normalmente y comparte la información
+- Si el cliente quiere HACER UN NUEVO PEDIDO, usa la función 'confirmar_pedido' (esto iniciará un nuevo pedido)
+- NO asumas que quiere nuevo pedido solo porque pregunta cosas del menú
 
-1. **INTERPRETAR LA DESCRIPCIÓN**: Usa la descripción que el sistema te proporciona
-2. **RELACIONAR CON PRODUCTOS**: Conecta lo que ves en la imagen con los productos de nuestro catálogo
-3. **HACER PREGUNTAS ESPECÍFICAS**: 
-   - ¿Qué sabor le gustaría?
-   - ¿De qué tamaño lo necesita?
-   - ¿Para qué ocasión es?
-   - ¿Quiere exactamente igual o alguna variación?
-4. **OFRECER ALTERNATIVAS**: Si no tenemos exactamente lo que muestra la imagen, sugiere productos similares
-5. **SER ENTUSIASTA**: Muestra interés por su referencia
+**SI EL CLIENTE QUIERE UN NUEVO PEDIDO:**
+- Usa la función 'confirmar_pedido'
+- Responde: "¡Perfecto! Empecemos un nuevo pedido. ¿Qué te gustaría ordenar?"
 
-EJEMPLO DE RESPUESTA:
-"¡Qué bonita referencia! Veo que te gusta un diseño con [colores/decoración]. En nuestro catálogo tenemos algo similar como [producto]. ¿Te gustaría cotizar ese mismo diseño? ¿De qué sabor prefieres?"
+📸 INSTRUCCIONES PARA IMÁGENES DEL CLIENTE:
+Cuando recibas una imagen, usa la descripción del sistema para:
+1. Interpretar lo que el cliente quiere
+2. Relacionarlo con productos del catálogo
+3. Hacer preguntas específicas (sabor, tamaño, ocasión)
+4. Ofrecer alternativas si no tenemos exactamente igual
 
 REGLAS IMPORTANTES:
-1. Para agregar productos al carrito, usa 'agregar_producto_carrito' o 'agregar_producto_personalizado'
-2. Para enviar recursos visuales (imágenes, PDFs, videos), usa 'enviar_recurso_visual' con el NOMBRE EXACTO del recurso de la lista
-3. Para confirmar el pedido, usa 'confirmar_pedido'
-4. Para mostrar el carrito, usa 'ver_carrito'
+1. Para agregar productos al carrito: 'agregar_producto_carrito' o 'agregar_producto_personalizado'
+2. Para enviar recursos visuales: 'enviar_recurso_visual'
+3. Para confirmar pedido o iniciar nuevo: 'confirmar_pedido'
+4. Para mostrar el carrito: 'ver_carrito'
 5. Responde SIEMPRE en español, de forma natural y amable
-
-INSTRUCCIONES ESPECÍFICAS:
-- Cuando un cliente pregunte por el MENÚ o PRODUCTOS, busca en la lista de recursos visuales el que corresponda (ej: 'GlazeMenuImg') y envíalo usando 'enviar_recurso_visual'
-- Cuando un cliente pregunte por PASABOCAS o CATÁLOGO, busca el recurso específico (ej: 'Menu_Glaze_2026') y envíalo
-- TÚ decides qué recurso enviar según la descripción de cada recurso en la lista
 
 RESPONDE en español.
 """
@@ -787,7 +793,7 @@ RESPONDE en español.
                         if resultado:
                             return resultado
                         else:
-                            return f"Lo siento, no tengo '{recurso_nombre}' disponible. Los recursos disponibles son los que aparecen en la lista."
+                            return f"Lo siento, no encontré el recurso '{recurso_nombre}'."
                     
                     elif function_name == "ver_carrito":
                         carrito_act = self._cargar_carrito(tenant['id'], numero)
@@ -796,6 +802,13 @@ RESPONDE en español.
                         return self._mostrar_resumen_pedido(carrito_act['items'], carrito_act['total'])
                     
                     elif function_name == "confirmar_pedido":
+                        # Si ya hay pedido confirmado, resetear para nuevo pedido
+                        if self._pedido_confirmado.get(numero):
+                            self._pedido_confirmado[numero] = False
+                            self._pedido_confirmado_time[numero] = None
+                            self._limpiar_carrito(tenant['id'], numero)
+                            return "✅ Perfecto, empecemos un nuevo pedido. ¿Qué te gustaría ordenar?"
+                        
                         carrito_final = self._cargar_carrito(tenant['id'], numero)
                         if carrito_final and carrito_final.get('items'):
                             self._conversacion_activa[numero] = {
@@ -859,6 +872,7 @@ RESPONDE en español.
                     conn.commit()
                 
                 self._pedido_confirmado[numero] = True
+                self._pedido_confirmado_time[numero] = datetime.now()
                 self._limpiar_carrito(tenant['id'], numero)
                 self._conversacion_activa.pop(numero, None)
                 
@@ -874,7 +888,10 @@ RESPONDE en español.
 {items_texto}
 💰 *Total:* ${total:,.0f}
 
-📌 *Gracias por tu compra. Te notificaremos cuando tu pedido esté listo.*"""
+📌 *Gracias por tu compra. Te notificaremos cuando tu pedido esté listo.*
+
+💡 *Para hacer un nuevo pedido, solo escribe:* "nuevo pedido" o "quiero comprar otra cosa"
+"""
                 
             except Exception as e:
                 logger.error(f'Error creando pedido: {e}')
