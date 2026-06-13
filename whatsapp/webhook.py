@@ -1,6 +1,7 @@
 import requests
 import os
-import uuid
+import uuid 
+import re
 from flask import request
 from core.logger import logger
 from tenants.repository import tenant_repo
@@ -67,6 +68,7 @@ def register_webhook_routes(app):
             # Procesar según el tipo de mensaje
             if message_type == 'text':
                 text = message['text']['body']
+                text = limpiar_mensaje(text)  # Limpia comillas
                 logger.info(f"📝 Texto: {text[:100]}")
                 message_handler.process(phone_id, from_number, text)
             
@@ -166,6 +168,19 @@ def register_webhook_routes(app):
 
 
 # ==================== FUNCIONES PARA PROCESAR ARCHIVOS RECIBIDOS ====================
+
+def limpiar_mensaje(texto: str) -> str:
+        """Limpia comillas y caracteres especiales del mensaje"""
+        if not texto:
+            return texto
+        
+        # Eliminar comillas dobles y simples al inicio y final
+        texto = re.sub(r'^[\'"]+|[\'"]+$', '', texto)
+        
+        # Eliminar comillas dobles y simples escapadas
+        texto = texto.replace('\\"', '"').replace("\\'", "'")
+        
+        return texto.strip()
 
 def descargar_media(tenant, media_id):
     """
@@ -409,3 +424,6 @@ def procesar_audio_recibido(tenant, from_number, media_id, mime_type):
     except Exception as e:
         logger.error(f"Error en procesar_audio_recibido: {e}")
         return "Recibí tu nota de voz, pero hubo un error al procesarla."
+    
+
+    

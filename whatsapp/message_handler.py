@@ -27,8 +27,21 @@ class MessageHandler:
         if tenant and tenant.get('schema_name'):
             return tenant['schema_name']
         return f"tenant_{tenant_id.replace('-', '_')}"
+
+# ================== Limpia comillas =============================    
+    def _limpiar_mensaje(self, texto: str) -> str:
+        """Limpia comillas y caracteres especiales del mensaje"""
+        if not texto:
+            return texto
+        
+        # Eliminar comillas dobles y simples al inicio y final
+        texto = re.sub(r'^[\'"]+|[\'"]+$', '', texto)
+        
+        return texto.strip()
+
     
     def process(self, phone_id: str, numero: str, texto: str):
+        texto = self._limpiar_mensaje(texto)
         logger.info(f"🟢 [PROCESS] Cliente: {numero}, Mensaje: {texto[:100]}")
         
         tenant = tenant_repo.find_by_phone_id(phone_id)
