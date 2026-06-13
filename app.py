@@ -67,6 +67,58 @@ for i in range(max_retries):
             raise
 
 register_webhook_routes(app)
+# =================== Actualiza Contexto ===================
+
+def actualizar_contexto_productos(tenant_id: str):
+    """Actualiza el contexto del tenant con los productos actuales de la BD"""
+    try:
+        from ai.training import trainer
+        
+        # Obtener productos de la BD
+        productos = schema_manager.get_menu(tenant_id)
+        
+        # Actualizar tenant_context
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Verificar si existe el registro
+                cur.execute("SELECT id FROM public.tenant_context WHERE tenant_id = %s", (tenant_id,))
+                exists = cur.fetchone()
+                
+                if exists:
+                    cur.execute("""
+                        UPDATE public.tenant_context 
+                        SET menu_estructurado = %s, updated_at = NOW()
+                        WHERE tenant_id = %s
+                    """, (json.dumps(productos), tenant_id))
+                else:
+                    cur.execute("""
+                        INSERT INTO public.tenant_context (tenant_id, menu_estructurado, created_at, updated_at)
+                        VALUES (%s, %s, NOW(), NOW())
+                    """, (tenant_id, json.dumps(productos)))
+            conn.commit()
+        
+        # Regenerar prompt personalizado
+        contexto = {
+            'productos': productos,
+            'horario': '',
+            'ubicacion': '',
+            'politicas': '',
+            'instrucciones_adicionales': ''
+        }
+        prompt_personalizado = trainer.generar_prompt_personalizado(contexto)
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE public.tenant_context 
+                    SET prompt_personalizado = %s
+                    WHERE tenant_id = %s
+                """, (prompt_personalizado, tenant_id))
+            conn.commit()
+        
+        logger.info(f"✅ Contexto actualizado para tenant {tenant_id} con {len(productos)} productos")
+    except Exception as e:
+        logger.error(f"Error actualizando contexto: {e}")
 
 # ==================== FUNCIÓN AUXILIAR ====================
 
@@ -677,6 +729,8 @@ def add_product(tenant_id):
         
         product_id = schema_manager.add_product(**producto)
         
+        actualizar_contexto_productos(tenant_id) 
+
         return jsonify({
             'success': True,
             'message': 'Producto agregado exitosamente',
@@ -719,6 +773,7 @@ def update_product(tenant_id, product_id):
         
         if success:
             return jsonify({'success': True, 'message': 'Producto actualizado'})
+            actualizar_contexto_productos(tenant_id) 
         else:
             return jsonify({'error': 'No se pudo actualizar el producto'}), 400
     except Exception as e:
@@ -738,6 +793,7 @@ def delete_product(tenant_id, product_id):
         
         if success:
             return jsonify({'success': True, 'message': 'Producto eliminado'})
+            actualizar_contexto_productos(tenant_id) 
         else:
             return jsonify({'error': 'No se pudo eliminar el producto'}), 400
     except Exception as e:
@@ -768,6 +824,7 @@ def toggle_product(tenant_id, product_id):
         
         if success:
             estado = 'disponible' if disponible else 'no disponible'
+            actualizar_contexto_productos(tenant_id) 
             return jsonify({'success': True, 'message': f'Producto {estado}'})
         else:
             return jsonify({'error': 'No se pudo cambiar el estado'}), 400
