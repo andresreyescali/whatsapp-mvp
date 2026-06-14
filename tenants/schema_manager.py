@@ -392,6 +392,16 @@ class SchemaManager:
             cur.execute(f'ALTER TABLE "{schema_name}".productos ADD COLUMN es_base BOOLEAN DEFAULT true')
             cur.execute(f'CREATE INDEX IF NOT EXISTS idx_productos_es_base ON "{schema_name}".productos(es_base)')
         
+        # Agregar columna system_prompt a tenant_context
+        cur.execute(f"""
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'tenant_context' AND column_name = 'system_prompt'
+        """)
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE public.tenant_context ADD COLUMN system_prompt TEXT")
+            logger.info("✅ Columna system_prompt agregada a tenant_context")
+            
+
         cur.execute(f"""
             SELECT column_name FROM information_schema.columns 
             WHERE table_schema = %s AND table_name = 'productos' AND column_name = 'updated_at'

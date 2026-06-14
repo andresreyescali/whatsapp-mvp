@@ -1040,6 +1040,8 @@ def train_ia(tenant_id):
                       horario_final, ubicacion_final, politicas_finales, prompt_personalizado))
             conn.commit()
         
+
+        
         # ========== GUARDAR PRODUCTOS EN EL ESQUEMA DEL TENANT ==========
         schema_name = _get_schema_name(tenant_id)
         productos_agregados = 0
@@ -1163,6 +1165,94 @@ def get_conversaciones_cliente(tenant_id, cliente_numero):
         logger.error(f'Error cargando historial: {e}')
         return jsonify([])
     
+# ==================== CONFIGURACIÓN DE PROMPT DEL SISTEMA ====================
+
+@app.route('/api/tenant/<tenant_id>/system-prompt', methods=['GET'])
+@login_required
+@tenant_owner_required
+def get_system_prompt(tenant_id):
+    """Obtiene el system prompt personalizado del tenant"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT system_prompt FROM public.tenant_context WHERE tenant_id = %s
+                """, (tenant_id,))
+                row = cur.fetchone()
+                return jsonify({
+                    'system_prompt': row[0] if row and row[0] else None
+                })
+    except Exception as e:
+        logger.error(f'Error obteniendo system prompt: {e}')
+        return jsonify({'system_prompt': None})
+
+
+@app.route('/api/tenant/<tenant_id>/system-prompt', methods=['POST', 'PUT'])
+@login_required
+@tenant_owner_required
+def update_system_prompt(tenant_id):
+    """Actualiza el system prompt personalizado del tenant"""
+    try:
+        data = request.json
+        system_prompt = data.get('system_prompt', '')
+        
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Verificar si existe el registro
+                cur.execute("SELECT id FROM public.tenant_context WHERE tenant_id = %s", (tenant_id,))
+                exists = cur.fetchone()
+                
+                if exists:
+                    cur.execute("""
+                        UPDATE public.tenant_context 
+                        SET system_prompt = %s, updated_at = NOW()
+                        WHERE tenant_id = %s
+                    """, (system_prompt, tenant_id))
+                else:
+                    cur.execute("""
+                        INSERT INTO public.tenant_context (tenant_id, system_prompt, created_at, updated_at)
+                        VALUES (%s, %s, NOW(), NOW())
+                    """, (tenant_id, system_prompt))
+            conn.commit()
+        
+        logger.info(f"✅ System prompt actualizado para tenant {tenant_id}")
+        return jsonify({'success': True, 'message': 'Prompt del sistema actualizado'})
+    except Exception as e:
+        logger.error(f'Error actualizando system prompt: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tenant/<tenant_id>/system-prompt/reset', methods=['POST'])
+@login_required
+@tenant_owner_required
+def reset_system_prompt(tenant_id):
+    """Resetea el system prompt al valor por defecto"""
+    try:
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE public.tenant_context 
+                    SET system_prompt = NULL, updated_at = NOW()
+                    WHERE tenant_id = %s
+                """, (tenant_id,))
+            conn.commit()
+        
+        logger.info(f"✅ System prompt reseteado para tenant {tenant_id}")
+        return jsonify({'success': True, 'message': 'Prompt reseteado al valor por defecto'})
+    except Exception as e:
+        logger.error(f'Error resetando system prompt: {e}')
+        return jsonify({'error': str(e)}), 500
+    
+
+@app.route('/ayuda-prompt')
+@login_required
+def ayuda_prompt():
+    tenant_id = request.args.get('tenant_id')
+    if not tenant_id:
+        return redirect('/dashboard')
+    return render_template('ayuda_prompt.html', tenant_id=tenant_id)
+
+
 # ==================== PANEL DEL CLIENTE ====================
 
 @app.route('/panel/<tenant_id>')

@@ -28,18 +28,14 @@ class MessageHandler:
             return tenant['schema_name']
         return f"tenant_{tenant_id.replace('-', '_')}"
 
-# ================== Limpia comillas =============================    
+    # ================== Limpia comillas =============================    
     def _limpiar_mensaje(self, texto: str) -> str:
         """Limpia comillas y caracteres especiales del mensaje"""
         if not texto:
             return texto
-        
-        # Eliminar comillas dobles y simples al inicio y final
         texto = re.sub(r'^[\'"]+|[\'"]+$', '', texto)
-        
         return texto.strip()
 
-    
     def process(self, phone_id: str, numero: str, texto: str):
         texto = self._limpiar_mensaje(texto)
         logger.info(f"🟢 [PROCESS] Cliente: {numero}, Mensaje: {texto[:100]}")
@@ -56,10 +52,10 @@ class MessageHandler:
             tiempo_confirmado = self._pedido_confirmado_time.get(numero)
             if tiempo_confirmado:
                 minutos_pasados = (datetime.now() - tiempo_confirmado).total_seconds() / 60
-                if minutos_pasados > 30:  # Resetear después de 30 minutos
+                if minutos_pasados > 30:
                     self._pedido_confirmado[numero] = False
                     self._pedido_confirmado_time[numero] = None
-                    logger.info(f"🔄 Pedido confirmado expirado para {numero} después de {minutos_pasados:.1f} minutos")
+                    logger.info(f"🔄 Pedido confirmado expirado para {numero}")
         
         contexto = self._obtener_contexto_tenant(tenant['id'])
         menu = self._obtener_menu(tenant['id'])
@@ -196,24 +192,19 @@ class MessageHandler:
     def _limpiar_carrito(self, tenant_id: str, cliente_numero: str):
         self._guardar_carrito(tenant_id, cliente_numero, [], 0)
     
-    # ==================== NUEVOS MÉTODOS PARA GESTIÓN DE CLIENTES ====================
+    # ==================== GESTIÓN DE CLIENTES ====================
     
     def _extraer_datos_cliente(self, mensaje: str) -> dict:
-        """
-        Extrae datos del cliente del mensaje usando expresiones regulares
-        Detecta: nombre, dirección, email, cédula
-        """
+        """Extrae datos del cliente del mensaje usando expresiones regulares"""
         datos = {}
         mensaje_lower = mensaje.lower()
         
-        # Detectar nombre
         patrones_nombre = [
             r'me llamo\s+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)',
             r'mi nombre es\s+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)',
             r'soy\s+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)',
             r'nombre[:\s]+([A-Za-zÁÉÍÓÚáéíóúÑñ\s]+)'
         ]
-        
         for patron in patrones_nombre:
             match = re.search(patron, mensaje_lower, re.IGNORECASE)
             if match:
@@ -222,19 +213,16 @@ class MessageHandler:
                     datos['nombre'] = nombre
                     break
         
-        # Detectar email
         patron_email = r'[\w\.-]+@[\w\.-]+\.\w+'
         match = re.search(patron_email, mensaje)
         if match:
             datos['email'] = match.group(0)
         
-        # Detectar dirección
         patrones_direccion = [
             r'vivo en\s+([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\#,\.\-]+)',
             r'dirección[:\s]+([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\#,\.\-]+)',
             r'mi dirección es\s+([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\#,\.\-]+)'
         ]
-        
         for patron in patrones_direccion:
             match = re.search(patron, mensaje_lower, re.IGNORECASE)
             if match:
@@ -243,7 +231,6 @@ class MessageHandler:
                     datos['direccion'] = direccion
                     break
         
-        # Detectar cédula (8-10 dígitos)
         patron_cc = r'\b(\d{8,10})\b'
         match = re.search(patron_cc, mensaje)
         if match:
@@ -254,7 +241,6 @@ class MessageHandler:
         return datos
     
     def _cargar_cliente(self, tenant_id: str, telefono: str) -> dict:
-        """Carga los datos del cliente desde la base de datos"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
@@ -285,12 +271,9 @@ class MessageHandler:
             return {}
     
     def _guardar_datos_cliente(self, tenant_id: str, telefono: str, mensaje: str):
-        """Extrae y guarda los datos del cliente si los encuentra"""
         datos = self._extraer_datos_cliente(mensaje)
-        
         if datos:
             logger.info(f"📝 Datos detectados para {telefono}: {datos}")
-            
             try:
                 schema_name = self._get_schema_name(tenant_id)
                 with db_manager.get_connection(tenant_id) as conn:
@@ -300,7 +283,6 @@ class MessageHandler:
                             WHERE numero_telefono = %s
                         """, (telefono,))
                         existing = cur.fetchone()
-                        
                         if existing:
                             updates = []
                             params = []
@@ -327,20 +309,14 @@ class MessageHandler:
                     conn.commit()
             except Exception as e:
                 logger.error(f"Error guardando cliente: {e}")
-            
             return datos
-        
         return None
     
     def _obtener_contexto_cliente(self, tenant_id: str, telefono: str) -> str:
-        """Obtiene un texto con los datos del cliente para incluir en el prompt de la IA"""
         cliente = self._cargar_cliente(tenant_id, telefono)
-        
         if not cliente or not any([cliente.get('nombre'), cliente.get('email'), cliente.get('direccion')]):
             return ""
-        
         contexto = "\n📋 *DATOS DEL CLIENTE (YA REGISTRADOS):*\n"
-        
         if cliente.get('nombre'):
             contexto += f"- Nombre: {cliente['nombre']}\n"
         if cliente.get('email'):
@@ -349,38 +325,26 @@ class MessageHandler:
             contexto += f"- Dirección: {cliente['direccion']}\n"
         if cliente.get('cc'):
             contexto += f"- Cédula: {cliente['cc']}\n"
-        
         contexto += "\n⚠️ NO preguntes estos datos nuevamente ya que el cliente ya los proporcionó.\n"
         contexto += "Si el cliente quiere actualizar algún dato, actualízalo y confirma el cambio.\n"
-        
         return contexto
     
     # ==================== FUNCIONES QUE LA IA LLAMA ====================
     
     def _agregar_producto_al_carrito(self, tenant_id: str, cliente_numero: str, nombre: str, precio: int, cantidad: int = 1):
-        """
-        Agrega un producto estándar al carrito.
-        SOLO incrementa cantidad si el nombre es EXACTAMENTE igual y NO es personalizado.
-        """
         logger.info(f"🛒 Agregando producto estándar: {cantidad}x {nombre} (${precio})")
-        
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
-        
         if not carrito:
             carrito = {'items': [], 'total': 0}
-        
         encontrado = False
         for item in carrito['items']:
-            # Comparación EXACTA del nombre y que NO sea personalizado
             if item.get('nombre') == nombre and not item.get('personalizado', False):
                 item['cantidad'] += cantidad
                 carrito['total'] += precio * cantidad
                 encontrado = True
                 logger.info(f"✅ Producto existente actualizado: {nombre} ahora {item['cantidad']} unidades")
                 break
-        
         if not encontrado:
-            # Agregar como nuevo item separado
             carrito['items'].append({
                 'nombre': nombre,
                 'precio': precio,
@@ -390,30 +354,18 @@ class MessageHandler:
             })
             carrito['total'] += precio * cantidad
             logger.info(f"✅ Nuevo producto agregado: {nombre}")
-        
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
-        
         logger.info(f"📦 Carrito ahora: {len(carrito['items'])} items, total: ${carrito['total']}")
         return True
-
 
     def _agregar_producto_personalizado_al_carrito(self, tenant_id: str, cliente_numero: str, 
                                                     nombre: str, precio: int, 
                                                     detalles: dict = None, cantidad: int = 1):
-        """
-        Agrega un producto personalizado al carrito.
-        Los productos personalizados SIEMPRE se agregan como items separados.
-        """
         logger.info(f"🛒 Agregando producto personalizado: {cantidad}x {nombre} (${precio})")
         logger.info(f"📝 Detalles: {detalles}")
-        
         carrito = self._cargar_carrito(tenant_id, cliente_numero)
-        
         if not carrito:
             carrito = {'items': [], 'total': 0}
-        
-        # Los productos personalizados SIEMPRE se agregan como nuevos items
-        # No se combinan aunque tengan el mismo nombre
         carrito['items'].append({
             'nombre': nombre,
             'precio': precio,
@@ -423,13 +375,11 @@ class MessageHandler:
             'added_at': datetime.now().isoformat()
         })
         carrito['total'] += precio * cantidad
-        
         self._guardar_carrito(tenant_id, cliente_numero, carrito['items'], carrito['total'])
-        
         logger.info(f"✅ Producto personalizado agregado. Total items: {len(carrito['items'])}, total: ${carrito['total']}")
         return True
     
-    # ==================== MÉTODOS PARA ENVIAR DIFERENTES TIPOS DE MEDIOS ====================
+    # ==================== MÉTODOS PARA ENVIAR MEDIOS ====================
     
     def _enviar_imagen(self, tenant: dict, numero: str, url_imagen: str, caption: str = None):
         try:
@@ -438,7 +388,6 @@ class MessageHandler:
                 url_completa = f"{base_url}{url_imagen}"
             else:
                 url_completa = url_imagen
-            
             logger.info(f"Enviando imagen a {numero}: {url_completa}")
             return whatsapp_client.send_image(tenant, numero, url_completa, caption)
         except Exception as e:
@@ -452,7 +401,6 @@ class MessageHandler:
                 url_completa = f"{base_url}{url_documento}"
             else:
                 url_completa = url_documento
-            
             logger.info(f"Enviando documento a {numero}: {filename}")
             return whatsapp_client.send_document(tenant, numero, url_completa, filename, caption)
         except Exception as e:
@@ -466,7 +414,6 @@ class MessageHandler:
                 url_completa = f"{base_url}{url_video}"
             else:
                 url_completa = url_video
-            
             logger.info(f"Enviando video a {numero}: {url_completa}")
             return whatsapp_client.send_video(tenant, numero, url_completa, caption)
         except Exception as e:
@@ -480,7 +427,6 @@ class MessageHandler:
                 url_completa = f"{base_url}{url_audio}"
             else:
                 url_completa = url_audio
-            
             logger.info(f"Enviando audio a {numero}: {url_completa}")
             return whatsapp_client.send_audio(tenant, numero, url_completa)
         except Exception as e:
@@ -488,23 +434,15 @@ class MessageHandler:
             return False
     
     def _enviar_recurso_visual(self, tenant: dict, numero: str, recurso_nombre: str) -> str:
-        """
-        Envía un recurso visual. Busca el recurso por NOMBRE (coincidencia exacta o parcial).
-        """
         try:
             logger.info(f"🔍 Buscando recurso: '{recurso_nombre}' para tenant {tenant['id']}")
-            
             recursos = schema_manager.get_recursos_visuales(tenant['id'])
-            
             if not recursos:
                 logger.warning(f"No hay recursos visuales para tenant {tenant['id']}")
                 return None
-            
             logger.info(f"📁 Recursos disponibles: {[r.get('nombre') for r in recursos]}")
-            
             recurso_encontrado = None
             recurso_buscar = recurso_nombre.lower()
-            
             for r in recursos:
                 nombre_recurso = r.get('nombre', '').lower()
                 if recurso_buscar == nombre_recurso:
@@ -519,7 +457,6 @@ class MessageHandler:
                     recurso_encontrado = r
                     logger.info(f"✅ Recurso encontrado por coincidencia inversa: {r.get('nombre')}")
                     break
-            
             if not recurso_encontrado:
                 logger.warning(f"❌ Recurso NO encontrado: {recurso_nombre}")
                 disponibles = [r.get('nombre') for r in recursos[:5]]
@@ -527,20 +464,16 @@ class MessageHandler:
                     mensaje = f"No encontré '{recurso_nombre}'. Los recursos disponibles son: {', '.join(disponibles)}"
                     whatsapp_client.send_message(tenant, numero, mensaje)
                 return None
-            
             tipo = recurso_encontrado.get('tipo', '')
             url = recurso_encontrado.get('url', '')
             nombre = recurso_encontrado.get('nombre', '')
             descripcion = recurso_encontrado.get('descripcion', '')
-            
             logger.info(f"📤 Enviando recurso: {nombre} (tipo: {tipo}, url: {url[:100]}...)")
-            
             emojis = {'imagen': '📷', 'image': '📷', 'pdf': '📄', 'documento': '📄', 'video': '🎥'}
             emoji = emojis.get(tipo, '📎')
             caption = f"{emoji} *{nombre}*"
             if descripcion:
                 caption += f"\n\n{descripcion}"
-            
             if tipo in ['imagen', 'image'] and url:
                 logger.info(f"🖼️ Enviando imagen a {numero}")
                 resultado = self._enviar_imagen(tenant, numero, url, caption)
@@ -550,7 +483,6 @@ class MessageHandler:
                 else:
                     logger.error(f"❌ Falló el envío de la imagen")
                     return None
-            
             elif tipo in ['pdf', 'documento', 'document'] and url:
                 filename = url.split('/')[-1]
                 if not filename.endswith('.pdf'):
@@ -563,7 +495,6 @@ class MessageHandler:
                 else:
                     logger.error(f"❌ Falló el envío del documento")
                     return None
-            
             elif tipo in ['video'] and url:
                 logger.info(f"🎥 Enviando video a {numero}")
                 resultado = self._enviar_video(tenant, numero, url, caption)
@@ -571,17 +502,111 @@ class MessageHandler:
                     return f"✅ Te envié {nombre}"
                 else:
                     return None
-            
             else:
                 logger.warning(f"⚠️ Tipo de recurso no soportado: {tipo}")
                 return None
-                    
         except Exception as e:
             logger.error(f'❌ Error en _enviar_recurso_visual: {e}')
             import traceback
             traceback.print_exc()
             return None
     
+    # ==================== PROMPT PERSONALIZABLE ====================
+    
+    def _obtener_system_prompt(self, tenant_id: str) -> str:
+        """Obtiene el system prompt personalizado del tenant desde la base de datos"""
+        try:
+            with db_manager.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT system_prompt FROM public.tenant_context WHERE tenant_id = %s
+                    """, (tenant_id,))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        logger.info(f"📝 Usando system prompt personalizado para tenant {tenant_id}")
+                        return row[0]
+        except Exception as e:
+            logger.error(f"Error obteniendo system prompt personalizado: {e}")
+        return None
+
+    def _obtener_prompt_por_defecto(self, tenant: dict, menu_texto: str, recursos_texto: str,
+                                     carrito_texto: str, historial_texto: str,
+                                     contexto: dict, contexto_cliente: str,
+                                     estado_pedido: str, tiempo_confirmado: str) -> str:
+        """Genera el prompt por defecto (fallback) con instrucciones genéricas"""
+        return f"""
+Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}. Tu ÚNICA forma de agregar productos al carrito es usando las funciones que se te proporcionan.
+
+{contexto_cliente}
+
+INFORMACIÓN DEL NEGOCIO:
+- Horario: {contexto.get('horario', 'No especificado')}
+- Ubicación: {contexto.get('ubicacion', 'No especificada')}
+- Políticas: {contexto.get('politicas', 'No especificadas')}
+
+{contexto.get('instrucciones', '')}
+
+MENÚ DE PRODUCTOS:
+{menu_texto}
+
+{recursos_texto}
+
+{carrito_texto}
+
+{historial_texto}
+
+📌 ESTADO ACTUAL DEL CLIENTE:
+- Pedido confirmado: {estado_pedido}{tiempo_confirmado}
+
+📌 INSTRUCCIONES IMPORTANTES:
+
+**SI EL CLIENTE TIENE UN PEDIDO CONFIRMADO ({estado_pedido}):**
+- El cliente ya realizó un pedido que está en proceso
+- Si el cliente pregunta sobre su pedido, responde normalmente
+- Si el cliente quiere HACER UN NUEVO PEDIDO, usa la función 'confirmar_pedido'
+
+**SI EL CLIENTE QUIERE UN NUEVO PEDIDO:**
+- Usa la función 'confirmar_pedido'
+- Responde: "¡Perfecto! Empecemos un nuevo pedido. ¿Qué te gustaría ordenar?"
+
+⚠️ *INSTRUCCIÓN IMPORTANTE SOBRE PRECIOS:*
+- Los precios de los productos son los que aparecen en el menú de arriba
+- NO inventes precios ni uses información de otras fuentes
+
+REGLAS IMPORTANTES:
+1. Para agregar productos al carrito: 'agregar_producto_carrito' o 'agregar_producto_personalizado'
+2. Para enviar recursos visuales: 'enviar_recurso_visual'
+3. Para confirmar pedido o iniciar nuevo: 'confirmar_pedido'
+4. Para cancelar pedido: 'cancelar_pedido'
+5. Para mostrar el carrito: 'ver_carrito'
+6. Responde SIEMPRE en español, de forma natural y amable
+
+RESPONDE en español.
+"""
+
+    def _reemplazar_variables_prompt(self, prompt: str, tenant: dict, menu_texto: str,
+                                      recursos_texto: str, carrito_texto: str,
+                                      historial_texto: str, contexto: dict,
+                                      contexto_cliente: str, estado_pedido: str,
+                                      tiempo_confirmado: str) -> str:
+        """Reemplaza las variables del prompt personalizado con los valores reales"""
+        variables = {
+            '{nombre_negocio}': tenant.get('nombre', 'el negocio'),
+            '{menu}': menu_texto,
+            '{recursos}': recursos_texto,
+            '{carrito}': carrito_texto,
+            '{historial}': historial_texto,
+            '{horario}': contexto.get('horario', 'No especificado'),
+            '{ubicacion}': contexto.get('ubicacion', 'No especificada'),
+            '{politicas}': contexto.get('politicas', 'No especificadas'),
+            '{contexto_cliente}': contexto_cliente,
+            '{estado_pedido}': estado_pedido,
+            '{tiempo_confirmado}': tiempo_confirmado,
+        }
+        for var, valor in variables.items():
+            prompt = prompt.replace(var, valor)
+        return prompt
+
     # ==================== PROCESAMIENTO PRINCIPAL CON IA ====================
     
     def _procesar_con_ia(self, tenant: dict, menu: list, numero: str, texto: str, contexto: dict) -> str:
@@ -653,6 +678,7 @@ class MessageHandler:
             minutos = (datetime.now() - self._pedido_confirmado_time[numero]).total_seconds() / 60
             tiempo_confirmado = f" (confirmado hace {minutos:.0f} minutos)"
         
+        # Tools (sin cambios)
         tools = [
             {
                 "type": "function",
@@ -730,54 +756,24 @@ class MessageHandler:
             }
         ]
         
-        system_prompt = f"""
-Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}. Tu ÚNICA forma de agregar productos al carrito es usando las funciones que se te proporcionan.
-
-{contexto_cliente}
-
-INFORMACIÓN DEL NEGOCIO:
-- Horario: {contexto.get('horario', 'No especificado')}
-- Ubicación: {contexto.get('ubicacion', 'No especificada')}
-- Políticas: {contexto.get('politicas', 'No especificadas')}
-
-{contexto.get('instrucciones', '')}
-
-MENÚ DE PRODUCTOS (precios exactos):
-{menu_texto}
-
-📌 **REGLAS OBLIGATORIAS - NO LAS INCUMPLAS:**
-
-1. **NUNCA inventes precios.** Usa EXACTAMENTE los precios del menú de arriba.
-2. **NUNCA hagas cálculos de totales en tu respuesta.** Deja que el sistema los calcule.
-3. **SIEMPRE usa las funciones** para agregar productos al carrito:
-   - Para productos simples: 'agregar_producto_carrito'
-   - Para productos con detalles (cubierta, letrero, decoraciones): 'agregar_producto_personalizado'
-4. **CADA producto o adicional debe ser un item separado** en el carrito.
-5. **NO confirmes un pedido** sin antes tener los productos en el carrito.
-
-📌 **EJEMPLO CORRECTO cuando el cliente pide torta + cubierta + letrero:**
-
-Cliente: "torta de amapola con cubierta de fondant y letrero"
-
-Debes hacer TRES llamadas a funciones:
-1. agregar_producto_personalizado(nombre_base="TORTA DE AMAPOLA (Media)", precio=68700, detalles={{}})
-2. agregar_producto_personalizado(nombre_base="Cubierta de Fondant (Media)", precio=18000, detalles={{}})
-3. agregar_producto_personalizado(nombre_base="Letrero (Media)", precio=8000, detalles={{}})
-
-DESPUÉS de agregar los productos, responde: "✅ He agregado todos los productos a tu carrito. ¿Algo más?"
-
-📌 **EJEMPLO INCORRECTO (LO QUE NO DEBES HACER):**
-- ❌ Describir los precios en texto sin usar las funciones
-- ❌ Hacer cálculos manuales del total
-- ❌ Agregar solo un producto cuando el cliente pidió varios
-
-📌 **INSTRUCCIONES PARA CADA FUNCIÓN:**
-
-- 'agregar_producto_carrito': Úsala para productos simples (nombre_producto, precio, cantidad)
-- 'agregar_producto_personalizado': Úsala para cualquier producto con detalles o adicionales (nombre_base, precio, detalles, cantidad)
-
-RESPONDE en español. SIEMPRE usa las funciones antes de responder.
-"""
+        # ========== NUEVO: Obtener prompt personalizado o usar el por defecto ==========
+        system_prompt_custom = self._obtener_system_prompt(tenant['id'])
+        
+        if system_prompt_custom:
+            # Reemplazar variables en el prompt personalizado
+            system_prompt = self._reemplazar_variables_prompt(
+                system_prompt_custom, tenant, menu_texto, recursos_texto,
+                carrito_texto, historial_texto, contexto, contexto_cliente,
+                estado_pedido, tiempo_confirmado
+            )
+            logger.info(f"✅ Usando system prompt personalizado para tenant {tenant['id']}")
+        else:
+            # Usar prompt por defecto
+            system_prompt = self._obtener_prompt_por_defecto(
+                tenant, menu_texto, recursos_texto, carrito_texto, historial_texto,
+                contexto, contexto_cliente, estado_pedido, tiempo_confirmado
+            )
+            logger.info(f"📝 Usando system prompt por defecto para tenant {tenant['id']}")
         
         try:
             response = ai_client.client.chat.completions.create(
@@ -865,7 +861,7 @@ RESPONDE en español. SIEMPRE usa las funciones antes de responder.
                             return self._mostrar_resumen_pedido(carrito_final['items'], carrito_final['total'])
                         else:
                             return "No hay productos en tu carrito para confirmar. Agrega algunos productos primero."
-                                            
+                    
                     elif function_name == "cancelar_pedido":
                         self._limpiar_carrito(tenant['id'], numero)
                         self._pedido_confirmado[numero] = False
@@ -887,24 +883,17 @@ RESPONDE en español. SIEMPRE usa las funciones antes de responder.
     def _mostrar_resumen_pedido(self, productos: list, total: int) -> str:
         if not productos:
             return "No hay productos en tu pedido."
-        
         items_texto = ""
         for i, p in enumerate(productos, 1):
             nombre = p.get('nombre', 'Producto')
             cantidad = p.get('cantidad', 1)
             precio_unitario = p.get('precio', 0)
             subtotal = precio_unitario * cantidad
-            
-            # Agregar emoji según el tipo de producto
             emoji = "🎂" if "torta" in nombre.lower() else "🍪" if "galleta" in nombre.lower() else "📦"
-            
             items_texto += f"{emoji} *{cantidad}x {nombre}*: ${subtotal:,.0f}\n"
-            
-            # Mostrar detalles si es un producto personalizado
             if p.get('personalizado') and p.get('detalles'):
                 for key, value in p['detalles'].items():
                     items_texto += f"   └─ {key}: {value}\n"
-        
         return f"""📋 *Resumen de tu pedido:*
 
     {items_texto}

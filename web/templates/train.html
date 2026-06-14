@@ -50,6 +50,7 @@
             <button class="tab-btn active" onclick="mostrarTab('entrenar')">📤 Entrenar</button>
             <button class="tab-btn" onclick="mostrarTab('contexto')">📚 Contexto Actual</button>
             <button class="tab-btn" onclick="mostrarTab('productos')">📦 Productos</button>
+            <button class="tab-btn" onclick="mostrarTab('system_prompt')">🧠 Prompt del Sistema</button>
         </div>
 
         <!-- TAB 1: ENTRENAR -->
@@ -123,6 +124,41 @@
                 </div>
                 <div class="card-body">
                     <div id="productosContainer" class="loading">Cargando productos...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: PROMPT DEL SISTEMA (NUEVO) -->
+        <div id="tabSystemPrompt" class="tab-content" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">🧠 Prompt del Sistema (Personalidad de la IA)</h3>
+                    <div style="display: flex; gap: 8px;">
+                        <a href="/ayuda-prompt?tenant_id={{ tenant_id }}" class="btn btn-sm btn-outline" target="_blank">📖 Guía de prompts</a>
+                        <button class="btn btn-sm btn-outline" onclick="resetSystemPrompt()">🔄 Restablecer a valores por defecto</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">
+                        Personaliza cómo la IA interactúa con tus clientes. Este prompt se inyecta al inicio de cada conversación.
+                        Puedes usar las siguientes variables que se reemplazarán automáticamente:
+                    </p>
+                    <div style="background: #f3f4f6; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-family: monospace; font-size: 0.85rem;">
+                        <code>{nombre_negocio}</code> - Nombre del negocio<br>
+                        <code>{menu}</code> - Lista de productos y precios<br>
+                        <code>{horario}</code> - Horario de atención<br>
+                        <code>{ubicacion}</code> - Dirección<br>
+                        <code>{politicas}</code> - Políticas del negocio<br>
+                        <code>{contexto_cliente}</code> - Datos del cliente (si están guardados)<br>
+                        <code>{estado_pedido}</code> - Si el cliente tiene pedido confirmado
+                    </div>
+                    <textarea id="systemPromptTextarea" rows="20" class="form-control" 
+                        style="font-family: monospace; font-size: 0.9rem;"></textarea>
+                    <div class="mt-3" style="display: flex; gap: 10px;">
+                        <button class="btn btn-primary" onclick="guardarSystemPrompt()">💾 Guardar Prompt</button>
+                        <button class="btn btn-outline" onclick="cargarSystemPrompt()">⟳ Recargar</button>                    
+                    </div>
+                    <div id="systemPromptAlert" style="display:none;" class="mt-2"></div>
                 </div>
             </div>
         </div>
@@ -215,11 +251,18 @@
         document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         
-        document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`).style.display = 'block';
+        let tabId = '';
+        if (tab === 'entrenar') tabId = 'tabEntrenar';
+        else if (tab === 'contexto') tabId = 'tabContexto';
+        else if (tab === 'productos') tabId = 'tabProductos';
+        else if (tab === 'system_prompt') tabId = 'tabSystemPrompt';
+        
+        document.getElementById(tabId).style.display = 'block';
         event.target.classList.add('active');
         
         if (tab === 'contexto') cargarContexto();
         if (tab === 'productos') cargarProductos();
+        if (tab === 'system_prompt') cargarSystemPrompt();
     }
 
     // ==================== CARGAR CONTEXTO ====================
@@ -394,6 +437,91 @@
 
     function exportarProductos() {
         window.open(`/api/tenant/${tenantId}/menu/exportar`, '_blank');
+    }
+
+    // ==================== PROMPT DEL SISTEMA (NUEVO) ====================
+    async function cargarSystemPrompt() {
+        const textarea = document.getElementById('systemPromptTextarea');
+        const alertDiv = document.getElementById('systemPromptAlert');
+        
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/system-prompt`, {
+                credentials: 'include'
+            });
+            const data = await response.json();
+            textarea.value = data.system_prompt || '';
+            alertDiv.style.display = 'none';
+        } catch (error) {
+            console.error('Error cargando prompt:', error);
+            alertDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-error mt-2';
+            alertDiv.innerHTML = '❌ Error al cargar el prompt del sistema';
+        }
+    }
+
+    async function guardarSystemPrompt() {
+        const textarea = document.getElementById('systemPromptTextarea');
+        const systemPrompt = textarea.value;
+        const alertDiv = document.getElementById('systemPromptAlert');
+        
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/system-prompt`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ system_prompt: systemPrompt }),
+                credentials: 'include'
+            });
+            
+            const data = await response.json();
+            
+            alertDiv.style.display = 'block';
+            if (data.success) {
+                alertDiv.className = 'alert alert-success mt-2';
+                alertDiv.innerHTML = '✅ Prompt guardado correctamente';
+                // Opcional: recargar contexto para que el negocio vea el cambio en otras pestañas
+                cargarContexto();
+            } else {
+                alertDiv.className = 'alert alert-error mt-2';
+                alertDiv.innerHTML = '❌ Error: ' + (data.error || 'No se pudo guardar');
+            }
+            setTimeout(() => { alertDiv.style.display = 'none'; }, 3000);
+        } catch (error) {
+            alertDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-error mt-2';
+            alertDiv.innerHTML = '❌ Error de conexión';
+            setTimeout(() => { alertDiv.style.display = 'none'; }, 3000);
+        }
+    }
+
+    async function resetSystemPrompt() {
+        if (!confirm('¿Restablecer el prompt del sistema al valor por defecto? Se perderá la personalización actual.')) return;
+        
+        const alertDiv = document.getElementById('systemPromptAlert');
+        try {
+            const response = await fetch(`/api/tenant/${tenantId}/system-prompt/reset`, {
+                method: 'POST',
+                credentials: 'include'
+            });
+            
+            const data = await response.json();
+            
+            alertDiv.style.display = 'block';
+            if (data.success) {
+                alertDiv.className = 'alert alert-success mt-2';
+                alertDiv.innerHTML = '✅ Prompt restablecido al valor por defecto';
+                await cargarSystemPrompt(); // Recargar el textarea vacío
+                cargarContexto(); // Actualizar otras vistas
+            } else {
+                alertDiv.className = 'alert alert-error mt-2';
+                alertDiv.innerHTML = '❌ Error: ' + (data.error || 'No se pudo resetear');
+            }
+            setTimeout(() => { alertDiv.style.display = 'none'; }, 3000);
+        } catch (error) {
+            alertDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-error mt-2';
+            alertDiv.innerHTML = '❌ Error de conexión';
+            setTimeout(() => { alertDiv.style.display = 'none'; }, 3000);
+        }
     }
 
     // ==================== ENTRENAMIENTO ====================

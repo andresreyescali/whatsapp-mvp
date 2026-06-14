@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Ayuda: Cómo crear prompts para tu IA - WhatsApp Bot SaaS{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1200px; margin: 2rem auto; padding: 0 1rem;">
+    <div class="d-flex justify-between align-center mb-4">
+        <h1>🧠 Guía para crear el Prompt del Sistema</h1>
+        <a href="/admin/train?tenant_id={{ tenant_id }}" class="btn btn-primary">← Volver al Entrenamiento</a>
+    </div>
+
+    <div class="alert alert-info mb-4">
+        <i class="fas fa-lightbulb"></i> <strong>¿Qué es el "Prompt del Sistema"?</strong><br>
+        Es el conjunto de instrucciones que definen la personalidad, reglas y comportamiento de tu asistente de IA. 
+        Un buen prompt hace que tu bot sea más útil, profesional y alineado con tu negocio.
+    </div>
+
+    <div class="grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+        
+        <!-- Variables disponibles -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">📌 Variables disponibles</h3>
+            </div>
+            <div class="card-body">
+                <p>Puedes usar estas variables en tu prompt, se reemplazarán automáticamente:</p>
+                <table style="width: 100%; font-size: 0.85rem;">
+                    <tr><td><code>{nombre_negocio}</code></td><td>Nombre de tu negocio</td></tr>
+                    <tr><td><code>{menu}</code></td><td>Lista de productos con precios</td></tr>
+                    <tr><td><code>{horario}</code></td><td>Horario de atención</td></tr>
+                    <tr><td><code>{ubicacion}</code></td><td>Dirección del negocio</td></tr>
+                    <tr><td><code>{politicas}</code></td><td>Políticas (devoluciones, pagos, etc.)</td></tr>
+                    <tr><td><code>{contexto_cliente}</code></td><td>Datos guardados del cliente (nombre, dirección)</td></tr>
+                    <tr><td><code>{estado_pedido}</code></td><td>"SÍ" o "NO" según si tiene pedido confirmado</td></tr>
+                    <tr><td><code>{recursos}</code></td><td>Lista de recursos visuales (imágenes, PDFs)</td></tr>
+                    <tr><td><code>{carrito}</code></td><td>Contenido actual del carrito</td></tr>
+                    <tr><td><code>{historial}</code></td><td>Últimos mensajes de la conversación</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- Funciones que la IA puede llamar -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">⚙️ Funciones disponibles</h3>
+            </div>
+            <div class="card-body">
+                <p>La IA puede ejecutar estas acciones automáticamente:</p>
+                <ul style="margin-left: 1.2rem;">
+                    <li><strong>agregar_producto_carrito</strong> - Añade un producto simple al carrito</li>
+                    <li><strong>agregar_producto_personalizado</strong> - Añade producto con detalles (talla, color, etc.)</li>
+                    <li><strong>enviar_recurso_visual</strong> - Envía una imagen, PDF o video</li>
+                    <li><strong>ver_carrito</strong> - Muestra el resumen del pedido actual</li>
+                    <li><strong>confirmar_pedido</strong> - Confirma el pedido o inicia uno nuevo</li>
+                    <li><strong>cancelar_pedido</strong> - Cancela el pedido actual</li>
+                </ul>
+                <p class="text-muted small mt-2">La IA decide cuándo usar cada función según tu prompt.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ejemplos por tipo de negocio -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3 class="card-title">💡 Ejemplos por tipo de negocio</h3>
+        </div>
+        <div class="card-body">
+            <div class="tabs" style="display: flex; gap: 8px; border-bottom: 1px solid #e5e7eb; margin-bottom: 1rem;">
+                <button class="tab-btn active" onclick="mostrarEjemplo('pasteleria')">🍰 Pastelería</button>
+                <button class="tab-btn" onclick="mostrarEjemplo('restaurante')">🍔 Restaurante</button>
+                <button class="tab-btn" onclick="mostrarEjemplo('inmobiliaria')">🏠 Inmobiliaria</button>
+                <button class="tab-btn" onclick="mostrarEjemplo('ventas')">🛍️ Ventas generales</button>
+            </div>
+            <div id="ejemploPasteleria" class="ejemplo-content">
+                <pre style="background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.85rem;">
+Eres un asistente de ventas para "{nombre_negocio}", una pastelería artesanal.
+
+INSTRUCCIONES:
+- Saluda con entusiasmo y ofrece ayuda con tortas, postres y pasabocas.
+- Cuando pidan el menú, usa enviar_recurso_visual con el nombre exacto "menu_principal".
+- Para pasabocas, envía el recurso "catalogo_pasabocas".
+- Siempre pregunta: "¿De qué tamaño lo quieres? (Porción, Cuarto, Media, Libra)"
+- Pregunta por la ocasión (cumpleaños, boda, etc.) para recomendar decoraciones.
+- Usa {contexto_cliente} para dirigirte por su nombre y no repetir datos.
+- Si el cliente no sabe qué elegir, recomienda los productos destacados: {menu}
+
+EJEMPLOS:
+Cliente: "Quiero una torta para 10 personas"
+Respuesta: "Claro, para 10 personas te recomiendo una torta de Media libra. ¿De qué sabor la prefieres? Nuestros sabores son: vainilla, chocolate, red velvet y amapola."
+
+Cliente: "Muéstrame el menú"
+Respuesta: "¡Con gusto! Aquí te envío nuestro menú completo."
+[Llama a enviar_recurso_visual con "menu_principal"]
+
+RESPONDE siempre en español, con cariño y profesionalismo.
+                </pre>
+            </div>
+            <div id="ejemploRestaurante" class="ejemplo-content" style="display: none;">
+                <pre style="background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.85rem;">
+Eres un asistente para "{nombre_negocio}", un restaurante de comida rápida.
+
+INSTRUCCIONES:
+- Sé amable y eficiente.
+- Cuando pidan el menú, envía el recurso "menu_imagen".
+- Usa agregar_producto_carrito para añadir hamburguesas, pizzas, etc.
+- Para personalizaciones (salsas, extra queso), usa agregar_producto_personalizado.
+- Pregunta si quieren bebida o papas adicionales.
+- Al final, muestra el carrito con ver_carrito y pregunta si confirman.
+
+REGLAS:
+- No aceptes pedidos fuera del horario {horario}.
+- Si la dirección de entrega no está registrada, pídela.
+- Usa {contexto_cliente} para saludar por su nombre.
+
+EJEMPLO:
+Cliente: "Quiero una hamburguesa simple"
+Respuesta: "Perfecto, agrego una hamburguesa simple a tu pedido. ¿Quieres agregarle queso extra o tocineta?"
+                </pre>
+            </div>
+            <div id="ejemploInmobiliaria" class="ejemplo-content" style="display: none;">
+                <pre style="background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.85rem;">
+Eres un asesor inmobiliario para "{nombre_negocio}".
+
+INSTRUCCIONES:
+- Sé profesional, cordial y resolutivo.
+- No vendas productos, solo ofrece información de propiedades.
+- Cuando pidan catálogo de propiedades, envía el recurso "catalogo_pdf".
+- Pregunta: "¿Buscas casa, apartamento, local o terreno?"
+- Pide el rango de precios, número de habitaciones y ubicación preferida.
+- Usa {contexto_cliente} para personalizar la atención.
+
+EJEMPLO:
+Cliente: "Quiero ver casas"
+Respuesta: "Claro, ¿en qué ciudad o barrio buscas? ¿Cuál es tu presupuesto aproximado?"
+                </pre>
+            </div>
+            <div id="ejemploVentas" class="ejemplo-content" style="display: none;">
+                <pre style="background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.85rem;">
+Eres un vendedor para "{nombre_negocio}", una tienda online.
+
+INSTRUCCIONES:
+- Sé amable, proactivo y ofrece descuentos si corresponde.
+- Usa agregar_producto_carrito para productos estándar.
+- Para tallas o colores, usa agregar_producto_personalizado.
+- Si el cliente duda, comparte opiniones de otros clientes (simuladas).
+- Al confirmar el pedido, pregunta por el método de pago y dirección de envío.
+- Usa {contexto_cliente} para agilizar el proceso.
+
+EJEMPLO:
+Cliente: "Quiero una camiseta roja talla M"
+Respuesta: "¡Excelente elección! Agrego una camiseta roja talla M a tu carrito. ¿Algo más que deseas agregar?"
+                </pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Consejos para escribir prompts efectivos -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3 class="card-title">✍️ Consejos para escribir prompts efectivos</h3>
+        </div>
+        <div class="card-body">
+            <ul style="margin-left: 1.5rem;">
+                <li><strong>Sé específico</strong>: "Pregunta siempre por el tamaño" es mejor que "Pregunta detalles".</li>
+                <li><strong>Define la personalidad</strong>: ¿Quieres un asistente formal, divertido, entusiasta o técnico?</li>
+                <li><strong>Usa ejemplos</strong>: Muestra cómo debe responder en casos comunes.</li>
+                <li><strong>Establece límites</strong>: "No inventes precios, usa los del menú {menu}".</li>
+                <li><strong>Instruye sobre funciones</strong>: Indica cuándo debe usar enviar_recurso_visual o agregar_producto_carrito.</li>
+                <li><strong>Mantén el orden</strong>: Primero saludo, luego captura necesidades, luego oferta.</li>
+                <li><strong>Prueba y ajusta</strong>: Los prompts se pueden mejorar con retroalimentación de clientes reales.</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Errores comunes -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3 class="card-title">⚠️ Errores comunes al escribir prompts (y cómo evitarlos)</h3>
+        </div>
+        <div class="card-body">
+            <table style="width: 100%;">
+                <tr style="background: #fef2f2;">
+                    <td style="padding: 8px;"><strong>❌ "Eres un asistente. Ayuda al cliente."</strong></td>
+                    <td style="padding: 8px;">Demasiado vago. La IA no sabrá qué productos ofrecer ni cómo actuar.</td>
+                </tr>
+                <tr style="background: #f0fdf4;">
+                    <td style="padding: 8px;"><strong>✅ "Eres un vendedor de zapatos. Pregunta talla, color y modelo. Usa el menú {menu} para precios."</strong></td>
+                    <td style="padding: 8px;">Claro y directo, con instrucciones accionables.</td>
+                </tr>
+                <tr style="background: #fef2f2;">
+                    <td style="padding: 8px;"><strong>❌ "No hagas nada malo."</strong></td>
+                    <td style="padding: 8px;">Negativo y poco útil.</td>
+                </tr>
+                <tr style="background: #f0fdf4;">
+                    <td style="padding: 8px;"><strong>✅ "Sé amable, no inventes precios y siempre pregunta por la dirección de entrega."</strong></td>
+                    <td style="padding: 8px;">Positivo y concreto.</td>
+                </tr>
+                <tr style="background: #fef2f2;">
+                    <td style="padding: 8px;"><strong>❌ "Responde como quieras."</strong></td>
+                    <td style="padding: 8px;">Sin dirección, la IA puede divagar.</td>
+                </tr>
+                <tr style="background: #f0fdf4;">
+                    <td style="padding: 8px;"><strong>✅ "Responde en español, usando emojis amigables, máximo 3 oraciones por respuesta."</strong></td>
+                    <td style="padding: 8px;">Estilo y formato controlados.</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- Botón para ir a editar -->
+    <div class="text-center mt-4">
+        <a href="/admin/train?tenant_id={{ tenant_id }}&tab=system_prompt" class="btn btn-primary btn-lg">
+            ✏️ Ir a editar mi prompt del sistema
+        </a>
+    </div>
+</div>
+
+<style>
+    .tab-btn {
+        background: none;
+        border: none;
+        padding: 8px 16px;
+        cursor: pointer;
+        border-radius: 20px;
+        transition: all 0.2s;
+    }
+    .tab-btn.active {
+        background: #25D366;
+        color: white;
+    }
+    pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+    code {
+        background: #e5e7eb;
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 0.85em;
+    }
+    table td {
+        padding: 6px;
+        border-bottom: 1px solid #e5e7eb;
+    }
+</style>
+
+<script>
+    function mostrarEjemplo(tipo) {
+        document.querySelectorAll('.ejemplo-content').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`ejemplo${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`).style.display = 'block';
+        event.target.classList.add('active');
+    }
+
+    // Si la URL tiene parámetro tab=system_prompt, redirigir
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('tab') === 'system_prompt') {
+        window.location.href = `/admin/train?tenant_id={{ tenant_id }}&tab=system_prompt`;
+    }
+</script>
+{% endblock %}
