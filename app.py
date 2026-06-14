@@ -1198,8 +1198,8 @@ def update_system_prompt(tenant_id):
         
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                # Verificar si existe el registro
-                cur.execute("SELECT id FROM public.tenant_context WHERE tenant_id = %s", (tenant_id,))
+                # Verificar si existe el registro (usando tenant_id directamente)
+                cur.execute("SELECT 1 FROM public.tenant_context WHERE tenant_id = %s", (tenant_id,))
                 exists = cur.fetchone()
                 
                 if exists:
@@ -1230,19 +1230,26 @@ def reset_system_prompt(tenant_id):
     try:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE public.tenant_context 
-                    SET system_prompt = NULL, updated_at = NOW()
-                    WHERE tenant_id = %s
-                """, (tenant_id,))
+                # Verificar si existe el registro
+                cur.execute("SELECT 1 FROM public.tenant_context WHERE tenant_id = %s", (tenant_id,))
+                exists = cur.fetchone()
+                
+                if exists:
+                    cur.execute("""
+                        UPDATE public.tenant_context 
+                        SET system_prompt = NULL, updated_at = NOW()
+                        WHERE tenant_id = %s
+                    """, (tenant_id,))
+                else:
+                    # Si no existe, no hay nada que resetear
+                    return jsonify({'success': True, 'message': 'No hay prompt personalizado para resetear'})
             conn.commit()
         
         logger.info(f"✅ System prompt reseteado para tenant {tenant_id}")
         return jsonify({'success': True, 'message': 'Prompt reseteado al valor por defecto'})
     except Exception as e:
         logger.error(f'Error resetando system prompt: {e}')
-        return jsonify({'error': str(e)}), 500
-    
+        return jsonify({'error': str(e)}), 500    
 
 @app.route('/ayuda-prompt')
 @login_required
