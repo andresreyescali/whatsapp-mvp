@@ -621,27 +621,6 @@ RESPONDE en español.
         # Obtener contexto del cliente
         contexto_cliente = self._obtener_contexto_cliente(tenant['id'], numero)
         
-        # Verificar confirmación
-        if self._es_confirmacion(texto):
-            carrito = self._cargar_carrito(tenant['id'], numero)
-            if carrito and carrito.get('items'):
-                self._conversacion_activa[numero] = {
-                    'estado': 'confirmando_pedido',
-                    'productos': carrito['items'],
-                    'total': carrito['total']
-                }
-                return self._mostrar_resumen_pedido(carrito['items'], carrito['total'])
-            else:
-                return "No hay productos en tu carrito. ¿Qué te gustaría ordenar?"
-        
-        # Verificar si quiere ver el carrito
-        if any(p in texto.lower() for p in ['ver carrito', 'mi pedido', 'qué pedí']):
-            carrito = self._cargar_carrito(tenant['id'], numero)
-            if carrito.get('items'):
-                return self._mostrar_resumen_pedido(carrito['items'], carrito['total'])
-            else:
-                return "🛒 Tu carrito está vacío. ¿Qué te gustaría ordenar?"
-        
         # Obtener datos para el prompt
         historial = self._get_historial_conversacion(tenant['id'], numero, 15)
         carrito = self._cargar_carrito(tenant['id'], numero)
@@ -678,7 +657,7 @@ RESPONDE en español.
             minutos = (datetime.now() - self._pedido_confirmado_time[numero]).total_seconds() / 60
             tiempo_confirmado = f" (confirmado hace {minutos:.0f} minutos)"
         
-        # Tools (sin cambios)
+        # Tools
         tools = [
             {
                 "type": "function",
@@ -756,7 +735,7 @@ RESPONDE en español.
             }
         ]
         
-        # ========== NUEVO: Obtener prompt personalizado o usar el por defecto ==========
+        # ========== Obtener prompt personalizado o usar el por defecto ==========
         system_prompt_custom = self._obtener_system_prompt(tenant['id'])
         
         if system_prompt_custom:
@@ -876,6 +855,7 @@ RESPONDE en español.
             return self._respuesta_fallback(tenant, menu)
     
     def _es_confirmacion(self, texto: str) -> bool:
+        """Solo se usa para el flujo de confirmación manual (fallback) cuando no hay IA"""
         confirmaciones = ['si', 'sí', 'dale', 'ok', 'correcto', 'confirmo', 'confirmar', 
                           'proceder', 'adelante', 'esta bien', 'está bien']
         return texto.lower().strip() in confirmaciones
