@@ -132,20 +132,23 @@ class MessageHandler:
             logger.error(f'Error guardando conversación: {e}')
     
     def _get_historial_conversacion(self, tenant_id: str, cliente_numero: str, limit: int = 15) -> list:
+        """Obtiene el historial de conversación en orden cronológico"""
         try:
             schema_name = self._get_schema_name(tenant_id)
             with db_manager.get_connection(tenant_id) as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"""
-                        SELECT mensaje, respuesta 
+                        SELECT mensaje, respuesta, created_at
                         FROM "{schema_name}".conversaciones 
                         WHERE cliente_numero = %s 
-                        ORDER BY created_at DESC 
+                        ORDER BY created_at ASC
                         LIMIT %s
                     """, (cliente_numero, limit))
                     rows = cur.fetchall()
-                    return list(reversed(rows))
+                    logger.info(f"📜 Historial recuperado: {len(rows)} mensajes para {cliente_numero}")
+                    return rows
         except Exception as e:
+            logger.error(f'Error obteniendo historial: {e}')
             return []
     
     def _cargar_carrito(self, tenant_id: str, cliente_numero: str) -> dict:
@@ -535,51 +538,50 @@ class MessageHandler:
                                      estado_pedido: str, tiempo_confirmado: str) -> str:
         """Genera el prompt por defecto (fallback) con instrucciones genéricas"""
         return f"""
-Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}. Tu ÚNICA forma de agregar productos al carrito es usando las funciones que se te proporcionan.
+Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}.
+
+⚠️ REGLA OBLIGATORIA: Tienes que USAR LAS FUNCIONES para agregar productos al carrito. NO respondas con texto describiendo precios sin usar las funciones.
 
 {contexto_cliente}
 
-INFORMACIÓN DEL NEGOCIO:
-- Horario: {contexto.get('horario', 'No especificado')}
-- Ubicación: {contexto.get('ubicacion', 'No especificada')}
-- Políticas: {contexto.get('politicas', 'No especificadas')}
+📜 HISTORIAL DE LA CONVERSACIÓN (USA ESTO PARA SABER EL CONTEXTO):
+{historial_texto}
 
-{contexto.get('instrucciones', '')}
+🛒 CARRITO ACTUAL:
+{carrito_texto}
 
-MENÚ DE PRODUCTOS:
+📋 MENÚ DE PRODUCTOS (USA SOLO ESTOS PRECIOS):
 {menu_texto}
 
 {recursos_texto}
 
-{carrito_texto}
+📌 FUNCIONES DISPONIBLES:
 
-{historial_texto}
+1. agregar_producto_carrito(nombre_producto, precio, cantidad)
+   - Ejemplo: "quiero torta red velvet media" → agregar_producto_carrito("Torta Red Velvet (Media)", 68700, 1)
 
-📌 ESTADO ACTUAL DEL CLIENTE:
-- Pedido confirmado: {estado_pedido}{tiempo_confirmado}
+2. agregar_producto_personalizado(nombre_base, precio, detalles, cantidad)
+   - Usa cuando el cliente pida personalizaciones (cubierta, letrero, etc.)
 
-📌 INSTRUCCIONES IMPORTANTES:
+3. ver_carrito() - cuando el cliente diga "ver carrito" o "mi pedido"
 
-**SI EL CLIENTE TIENE UN PEDIDO CONFIRMADO ({estado_pedido}):**
-- El cliente ya realizó un pedido que está en proceso
-- Si el cliente pregunta sobre su pedido, responde normalmente
-- Si el cliente quiere HACER UN NUEVO PEDIDO, usa la función 'confirmar_pedido'
+4. confirmar_pedido() - cuando el cliente APRUEBE el pedido (diga "sí", "confirmo", "dale", "ok")
 
-**SI EL CLIENTE QUIERE UN NUEVO PEDIDO:**
-- Usa la función 'confirmar_pedido'
-- Responde: "¡Perfecto! Empecemos un nuevo pedido. ¿Qué te gustaría ordenar?"
+5. cancelar_pedido() - cuando el cliente QUIERA CANCELAR
 
-⚠️ *INSTRUCCIÓN IMPORTANTE SOBRE PRECIOS:*
-- Los precios de los productos son los que aparecen en el menú de arriba
-- NO inventes precios ni uses información de otras fuentes
+6. enviar_recurso_visual(nombre_recurso) - para enviar imágenes o PDFs
 
-REGLAS IMPORTANTES:
-1. Para agregar productos al carrito: 'agregar_producto_carrito' o 'agregar_producto_personalizado'
-2. Para enviar recursos visuales: 'enviar_recurso_visual'
-3. Para confirmar pedido o iniciar nuevo: 'confirmar_pedido'
-4. Para cancelar pedido: 'cancelar_pedido'
-5. Para mostrar el carrito: 'ver_carrito'
-6. Responde SIEMPRE en español, de forma natural y amable
+📌 INSTRUCCIONES:
+
+- SIEMPRE usa las funciones. NUNCA respondas con texto describiendo precios sin usar funciones.
+- Usa el HISTORIAL para saber qué está pidiendo el cliente. No pierdas el contexto.
+- Cuando el cliente diga "media", "libra", "cuarto" o "porción", es el TAMAÑO del producto.
+- Responde en español, breve y amable.
+
+EJEMPLO:
+Cliente: "quiero torta red velvet media"
+Tú: llamas a agregar_producto_carrito("Torta Red Velvet (Media)", 68700, 1)
+Luego respondes: "✅ Agregué la Torta Red Velvet (Media) a tu carrito. ¿Algo más?"
 
 RESPONDE en español.
 """
@@ -621,10 +623,22 @@ RESPONDE en español.
         # Obtener contexto del cliente
         contexto_cliente = self._obtener_contexto_cliente(tenant['id'], numero)
         
-        # Obtener datos para el prompt
+        # Obtener historial (EN ORDEN CRONOLÓGICO)
         historial = self._get_historial_conversacion(tenant['id'], numero, 15)
         carrito = self._cargar_carrito(tenant['id'], numero)
         recursos = schema_manager.get_recursos_visuales(tenant['id'])
+        
+        # Formatear historial para el prompt
+        historial_texto = ""
+        if historial:
+            historial_texto = "\n"
+            for h in historial:
+                cliente_msg = h[0]
+                asistente_msg = h[1]
+                historial_texto += f"Cliente: {cliente_msg}\nAsistente: {asistente_msg}\n"
+            logger.info(f"📜 Historial formateado con {len(historial)} mensajes")
+        else:
+            historial_texto = "\n(No hay historial previo)\n"
         
         # Formatear recursos para el prompt
         recursos_texto = ""
@@ -635,20 +649,18 @@ RESPONDE en español.
         else:
             recursos_texto = "\n📁 No hay recursos visuales disponibles.\n"
         
+        # Formatear menú
         menu_texto = "\n".join([f"- {p['nombre']}: ${p['precio']:,}" for p in menu[:100]])
         
-        historial_texto = ""
-        if historial:
-            historial_texto = "\n📜 HISTORIAL RECIENTE:\n"
-            for h in historial[-10:]:
-                historial_texto += f"Cliente: {h[0]}\nAsistente: {h[1]}\n"
-        
+        # Formatear carrito
         carrito_texto = ""
         if carrito.get('items'):
             carrito_texto = "\n🛒 CARRITO ACTUAL:\n"
             for item in carrito['items']:
                 carrito_texto += f"- {item.get('cantidad', 1)}x {item.get('nombre')}: ${item.get('precio', 0) * item.get('cantidad', 1):,.0f}\n"
             carrito_texto += f"💰 Total: ${carrito.get('total', 0):,.0f}\n"
+        else:
+            carrito_texto = "\n🛒 Carrito vacío\n"
         
         # Estado del pedido confirmado
         estado_pedido = "SÍ" if self._pedido_confirmado.get(numero) else "NO"
@@ -753,6 +765,9 @@ RESPONDE en español.
                 contexto, contexto_cliente, estado_pedido, tiempo_confirmado
             )
             logger.info(f"📝 Usando system prompt por defecto para tenant {tenant['id']}")
+        
+        # Log para depuración del historial
+        logger.info(f"📜 Historial enviado a IA: {len(historial)} mensajes")
         
         try:
             response = ai_client.client.chat.completions.create(
