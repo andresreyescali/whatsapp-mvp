@@ -385,87 +385,73 @@ class MessageHandler:
     def _listar_productos(self, tenant_id: str, categoria: str = None, detalle: str = "resumen") -> str:
         """
         Lista los productos disponibles en la base de datos del tenant.
-        Puede filtrar por categoría y elegir nivel de detalle.
+        Versión optimizada para no exceder el límite de 4096 caracteres de WhatsApp.
         """
         try:
-            # Obtener productos frescos de la BD
             productos = self._obtener_menu(tenant_id)
             
             if not productos:
                 return "📭 No hay productos disponibles en este momento."
             
-            # Filtrar por categoría si se especifica
-            productos_filtrados = productos
+            # Si hay categoría, mostrar productos de esa categoría
             if categoria:
                 categoria_lower = categoria.lower()
                 productos_filtrados = []
                 for p in productos:
                     p_categoria = p.get('categoria', '').lower()
-                    # Buscar coincidencia parcial o exacta
                     if (categoria_lower in p_categoria or 
                         p_categoria in categoria_lower or
                         categoria_lower in p.get('nombre', '').lower()):
                         productos_filtrados.append(p)
                 
                 if not productos_filtrados:
-                    # Buscar por nombre de producto si no encuentra por categoría
                     for p in productos:
                         if categoria_lower in p.get('nombre', '').lower():
                             productos_filtrados.append(p)
                     
                     if not productos_filtrados:
-                        # Mostrar categorías disponibles
                         categorias_disponibles = sorted(set(p.get('categoria', 'general') for p in productos))
                         return f"No encontré productos para '{categoria}'. Las categorías disponibles son: {', '.join(categorias_disponibles)}"
+                
+                # Mostrar productos de la categoría (limitado a 15)
+                respuesta = f"📋 *Productos en {categoria}:*\n\n"
+                for p in productos_filtrados[:15]:
+                    respuesta += f"• {p['nombre']}: ${p['precio']:,}\n"
+                
+                if len(productos_filtrados) > 15:
+                    respuesta += f"\n... y {len(productos_filtrados) - 15} productos más. ¿Quieres ver la categoría completa?"
+                
+                return respuesta
             
-            # Agrupar por categoría
+            # SIN CATEGORÍA: Mostrar SOLO las categorías (no los productos)
             categorias = {}
-            for p in productos_filtrados:
+            for p in productos:
                 cat = p.get('categoria', 'general')
                 if cat not in categorias:
-                    categorias[cat] = []
-                categorias[cat].append(p)
+                    categorias[cat] = 0
+                categorias[cat] += 1
             
-            # Emojis por categoría
             emojis_por_categoria = {
-                'tortas': '🎂',
-                'pasteleria': '🎂',
-                'pasabocas_dulces': '🧁',
-                'pasabocas_salados': '🥐',
-                'bebidas_calientes': '☕',
-                'bebidas_frias': '🧋',
-                'postres': '🍨',
-                'decoraciones': '🎀',
+                'tortas': '🎂', 'pasteleria': '🎂',
+                'pasabocas_dulces': '🧁', 'pasabocas_salados': '🥐',
+                'bebidas_calientes': '☕', 'bebidas_frias': '🧋',
+                'postres': '🍨', 'decoraciones': '🎀',
                 'general': '📦',
             }
             
-            respuesta = "📋 *Productos disponibles:*\n\n"
+            respuesta = "📋 *Productos disponibles por categoría:*\n\n"
             
-            for cat, items in categorias.items():
+            for cat, count in categorias.items():
                 emoji = emojis_por_categoria.get(cat, '📦')
                 nombre_cat = cat.replace('_', ' ').title()
-                respuesta += f"{emoji} *{nombre_cat}*\n"
-                
-                # Limitar a 15 productos por categoría para no saturar
-                for p in items[:15]:
-                    if detalle == "completo" and p.get('descripcion'):
-                        desc = p['descripcion'][:50]
-                        respuesta += f"• *{p['nombre']}*: ${p['precio']:,} - {desc}...\n"
-                    else:
-                        respuesta += f"• {p['nombre']}: ${p['precio']:,}\n"
-                
-                if len(items) > 15:
-                    respuesta += f"  ... y {len(items) - 15} productos más en {nombre_cat}\n"
-                
-                respuesta += "\n"
+                respuesta += f"{emoji} {nombre_cat}: {count} productos\n"
             
-            total_productos = len(productos_filtrados)
-            respuesta += f"📌 *Total:* {total_productos} productos"
-            
-            if categoria:
-                respuesta += f" en {categoria}"
-            
-            respuesta += "\n\n💡 *Para ver más detalles de un producto específico, pregúntame por él.*"
+            respuesta += f"\n📌 *Total:* {len(productos)} productos"
+            respuesta += "\n\n💡 *Para ver una categoría específica, pregunta:*"
+            respuesta += "\n• 'Qué tortas tienen?'"
+            respuesta += "\n• 'Qué pasabocas venden?'"
+            respuesta += "\n• 'Qué bebidas tienen?'"
+            respuesta += "\n\n📸 *O pide el menú completo:* 'Envíame el menú'"
             
             return respuesta
             
@@ -641,8 +627,8 @@ Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}.
 🛒 CARRITO ACTUAL:
 {carrito_texto}
 
-📋 PRODUCTOS DESTACADOS (referencia - usa SOLO para respuestas rápidas):
-{menu_texto[:500]}...
+📋 PRODUCTOS DESTACADOS (referencia rápida - SOLO 5 productos):
+{menu_texto[:300]}...
 
 📌 PARA VER TODOS LOS PRODUCTOS o buscar por categoría, usa la función 'listar_productos'
 
@@ -651,42 +637,69 @@ Eres un asistente de ventas para {tenant.get('nombre', 'el negocio')}.
 📌 FUNCIONES DISPONIBLES:
 
 1. agregar_producto_carrito(nombre_producto, precio, cantidad)
-   - Ejemplo: "quiero torta red velvet media" → agregar_producto_carrito("Torta Red Velvet (Media)", 68700, 1)
+   - Ejemplo: agregar_producto_carrito("Producto X", 1000, 1)
 
 2. agregar_producto_personalizado(nombre_base, precio, detalles, cantidad)
-   - Usa cuando el cliente pida personalizaciones (cubierta, letrero, etc.)
 
 3. listar_productos(categoria, detalle)
-   - Úsala cuando el cliente pregunte: "qué venden", "qué productos tienen", "qué tortas", "qué pasabocas", "qué bebidas"
-   - Si pregunta por una categoría específica: listar_productos(categoria="tortas")
-   - detalle: "resumen" (solo nombres y precios) o "completo" (incluye descripción)
+   - SIN CATEGORÍA: muestra SOLO las categorías disponibles (resumen breve)
+   - CON CATEGORÍA: muestra los productos de esa categoría (máximo 15)
+   - Ejemplos:
+     * "qué venden" → listar_productos() → muestra categorías
+     * "qué tortas tienen" → listar_productos(categoria="tortas")
+     * "qué pasabocas" → listar_productos(categoria="pasabocas_dulces")
 
-4. ver_carrito() - cuando el cliente diga "ver carrito" o "mi pedido"
+4. enviar_recurso_visual(nombre_recurso) - Para enviar imágenes, PDFs o el menú completo
 
-5. confirmar_pedido() - cuando el cliente APRUEBE el pedido (diga "sí", "confirmo", "dale", "ok")
+5. ver_carrito() - Muestra el pedido actual
 
-6. cancelar_pedido() - cuando el cliente QUIERA CANCELAR
+6. confirmar_pedido() - Cuando el cliente APRUEBE el pedido
 
-7. enviar_recurso_visual(nombre_recurso) - para enviar imágenes o PDFs
+7. cancelar_pedido() - Cuando el cliente QUIERA CANCELAR
 
-📌 INSTRUCCIONES:
+📌 PROTOCOLO PARA "QUÉ VENDEN":
 
-- SIEMPRE usa las funciones. NUNCA respondas con texto describiendo precios sin usar funciones.
-- Usa el HISTORIAL para saber qué está pidiendo el cliente. No pierdas el contexto.
-- Cuando el cliente diga "media", "libra", "cuarto" o "porción", es el TAMAÑO del producto.
-- Para productos personalizados (torta + cubierta + base), haz UNA llamada por cada elemento.
-- Responde en español, breve y amable.
+PASO 1: Cliente pregunta "qué venden", "qué productos tienen"
+→ Acción: listar_productos()
+→ Respuesta: Muestra las categorías disponibles con cantidad de productos
 
-EJEMPLO COMPLETO:
-Cliente: "qué tortas tienen"
-Tú: llamas a listar_productos(categoria="tortas")
-Luego respondes: "Tenemos estas tortas disponibles: [lista de tortas]"
+PASO 2: Cliente elige una categoría
+→ Acción: listar_productos(categoria="[categoría]")
+→ Respuesta: Muestra los productos de esa categoría
 
-Cliente: "quiero torta red velvet media"
-Tú: llamas a agregar_producto_carrito("Torta Red Velvet (Media)", 68700, 1)
-Luego respondes: "✅ Agregué la Torta Red Velvet (Media) a tu carrito. ¿Algo más?"
+PASO 3: Cliente pide el menú completo
+→ Acción: enviar_recurso_visual("menu")
+→ Respuesta: "✅ Te envié el menú completo."
 
-RESPONDE en español.
+📌 EJEMPLOS:
+
+Cliente: "Qué venden?"
+Tú: [LLAMAS A FUNCIÓN] listar_productos()
+Tú: "Tenemos estos productos por categoría:
+🎂 Tortas: 15 productos
+🧁 Pasabocas dulces: 20 productos
+...
+
+💡 Para ver una categoría específica, pregunta:
+• 'Qué tortas tienen?'
+
+📸 O pide el menú completo: 'Envíame el menú'"
+
+Cliente: "Qué tortas tienen?"
+Tú: [LLAMAS A FUNCIÓN] listar_productos(categoria="tortas")
+Tú: "📋 Productos en tortas:
+• Torta Negra (Libra): $177,500
+• Torta Red Velvet (Media): $68,700
+...
+
+¿Cuál te gustaría?"
+
+❌ LO QUE NO DEBES HACER:
+- ❌ No uses listar_productos() sin categoría si hay más de 50 productos
+- ❌ No envíes listas largas de productos en un solo mensaje
+- ❌ No inventes precios
+
+Responde en español, breve y amable. SIEMPRE guía al cliente hacia la siguiente acción.
 """
 
     def _reemplazar_variables_prompt(self, prompt: str, tenant: dict, menu_texto: str,
@@ -755,11 +768,11 @@ RESPONDE en español.
         # Formatear menú (SOLO destacados para contexto, no todo)
         menu_texto = ""
         if menu:
-            # Solo los primeros 15 productos como referencia
-            destacados = menu[:15]
+            # Solo los primeros 5 productos como referencia
+            destacados = menu[:5]
             menu_texto = "\n".join([f"- {p['nombre']}: ${p['precio']:,}" for p in destacados])
-            if len(menu) > 15:
-                menu_texto += f"\n... y {len(menu) - 15} productos más. Usa 'listar_productos' para ver todos."
+            if len(menu) > 5:
+                menu_texto += f"\n... y {len(menu) - 5} productos más. Usa 'listar_productos' para ver todos."
         
         # Formatear carrito
         carrito_texto = ""
@@ -817,13 +830,13 @@ RESPONDE en español.
                 "type": "function",
                 "function": {
                     "name": "listar_productos",
-                    "description": "Muestra la lista de productos disponibles con sus precios. Úsala cuando el cliente pregunte: qué venden, qué productos tienen, qué tortas, qué pasabocas, qué bebidas, etc.",
+                    "description": "Muestra la lista de productos disponibles. SIN categoría: muestra solo categorías. CON categoría: muestra productos de esa categoría (máximo 15).",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "categoria": {
                                 "type": "string",
-                                "description": "Categoría a filtrar (ej: 'tortas', 'pasabocas_dulces', 'bebidas_calientes'). Si no se especifica, muestra todas las categorías."
+                                "description": "Categoría a filtrar (ej: 'tortas', 'pasabocas_dulces', 'bebidas_calientes'). Si no se especifica, muestra solo las categorías."
                             },
                             "detalle": {
                                 "type": "string",
@@ -838,13 +851,13 @@ RESPONDE en español.
                 "type": "function",
                 "function": {
                     "name": "enviar_recurso_visual",
-                    "description": "Envía un recurso visual (imagen, PDF, video) al cliente.",
+                    "description": "Envía un recurso visual (imagen, PDF, video) al cliente. Usa 'menu' para el menú completo.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "recurso_nombre": {
                                 "type": "string",
-                                "description": "El nombre exacto del recurso a enviar"
+                                "description": "El nombre exacto del recurso a enviar (ej: 'menu', 'catalogo')"
                             }
                         },
                         "required": ["recurso_nombre"]
